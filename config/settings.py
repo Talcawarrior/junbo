@@ -603,7 +603,7 @@ def fetch_and_apply_fee_rate() -> float:
 
     try:
         # Polymarket CLOB API endpoint for fee rates
-        url = f"{bot_config.polymarket.polymarket_clob_api}/fee"
+        url = f"{bot_config.polymarket_clob_api}/fee"
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             data = response.json()
