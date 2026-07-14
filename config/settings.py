@@ -59,14 +59,6 @@ class PolymarketConfig:
                 "weather": 0.05,    # Weather markets: 5% fee
             }
 
-        # Initialize fee categories if not provided
-        if self.fee_categories is None:
-            self.fee_categories = {
-                "weather": 0.05,    # Weather markets: 5% fee
-                "crypto": 0.07,     # Crypto markets: 7% fee
-                "sports": 0.06,     # Sports markets: 6% fee
-            }
-
 
 @dataclass
 class MeteoConfig:

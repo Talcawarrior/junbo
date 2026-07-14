@@ -260,7 +260,3 @@ class HistoricalCalibration(Base):
         DateTime,
         default=lambda: datetime.now(timezone.utc),
     )
-
-
-# Compatibility Aliases
-Market = WeatherMarket

@@ -464,8 +464,7 @@ class TestPortfolioValues:
 class TestSlippageModels:
     """Slippage modelleri testleri (mock API)."""
 
-    @pytest.mark.asyncio
-    async def test_orderbook_slippage_estimation(self):
+    def test_orderbook_slippage_estimation(self):
         """Orderbook slippage tahmini."""
         # TODO: utils/slippage.py mock testi
         # condition_id varken orderbook depth bazlı slippage hesapla

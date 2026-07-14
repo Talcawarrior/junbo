@@ -9,87 +9,192 @@ Kullanım:
 import subprocess
 import time
 import sys
+import os
+import platform
 import argparse
-import requests
+import signal
 from datetime import datetime
 
+# Cross-platform imports
+try:
+    import requests
+    HAS_REQUESTS = True
+except ImportError:
+    HAS_REQUESTS = False
 
-BOT_DIR = r"C:\Users\fdemir\Documents\New project\junbo"
+BOT_DIR = os.path.dirname(os.path.abspath(__file__))
 BOT_URL = "http://127.0.0.1:8093"
 CHECK_INTERVAL = 30  # saniye
+
+IS_WINDOWS = platform.system() == "Windows"
+
+
+def log(msg: str):
+    """Log yaz."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{timestamp}] {msg}")
 
 
 def is_bot_running() -> bool:
     """Bot çalışıyor mu?"""
+    if not HAS_REQUESTS:
+        # requests yoksa port kontrolü yap
+        try:
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            result = sock.connect_ex(('127.0.0.1', 8093))
+            sock.close()
+            return result == 0
+        except Exception:
+            return False
+
     try:
         response = requests.get(f"{BOT_URL}/api/status", timeout=5)
         return response.status_code == 200
-    except:
+    except Exception:
         return False
+
+
+def get_bot_pid() -> int | None:
+    """Bot PID'ini oku."""
+    pid_file = os.path.join(BOT_DIR, "bot.pid")
+    if os.path.exists(pid_file):
+        try:
+            with open(pid_file, "r") as f:
+                return int(f.read().strip())
+        except (ValueError, IOError):
+            pass
+    return None
+
+
+def save_bot_pid(pid: int):
+    """Bot PID'ini kaydet."""
+    pid_file = os.path.join(BOT_DIR, "bot.pid")
+    with open(pid_file, "w") as f:
+        f.write(str(pid))
+
+
+def clear_bot_pid():
+    """Bot PID dosyasını temizle."""
+    pid_file = os.path.join(BOT_DIR, "bot.pid")
+    if os.path.exists(pid_file):
+        os.remove(pid_file)
 
 
 def start_bot():
     """Bot'u başlat."""
-    subprocess.Popen(
-        ["python", "main.py", "bot"],
-        cwd=BOT_DIR,
-        creationflags=subprocess.CREATE_NO_WINDOW,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    print(f"[{datetime.now()}] Bot started")
+    # Mevcut bot'u kontrol et
+    old_pid = get_bot_pid()
+    if old_pid:
+        try:
+            os.kill(old_pid, 0)  # Process var mı kontrol
+            log(f"Bot zaten çalışıyor (PID: {old_pid})")
+            return
+        except OSError:
+            pass  # Process yok, devam et
+
+    # Bot'u başlat
+    cmd = [sys.executable, "main.py", "bot"]
+    kwargs = {
+        "cwd": BOT_DIR,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+
+    if IS_WINDOWS:
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    else:
+        kwargs["start_new_session"] = True
+
+    proc = subprocess.Popen(cmd, **kwargs)
+    save_bot_pid(proc.pid)
+    log(f"Bot started (PID: {proc.pid})")
 
 
 def stop_bot():
     """Bot'u durdur."""
-    subprocess.run(
-        ["taskkill", "/F", "/IM", "python.exe"],
-        capture_output=True,
-        creationflags=subprocess.CREATE_NO_WINDOW,
-    )
-    print(f"[{datetime.now()}] Bot stopped")
+    pid = get_bot_pid()
+    if pid:
+        try:
+            if IS_WINDOWS:
+                subprocess.run(
+                    ["taskkill", "/F", "/PID", str(pid)],
+                    capture_output=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+            else:
+                os.kill(pid, signal.SIGTERM)
+                time.sleep(2)
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+            log(f"Bot stopped (PID: {pid})")
+        except OSError as e:
+            log(f"Error stopping bot: {e}")
+        clear_bot_pid()
+    else:
+        log("No bot PID found")
 
 
 def check_bot() -> dict:
     """Bot durumunu kontrol et."""
+    result = {"running": False}
+
+    if not HAS_REQUESTS:
+        # Port kontrolü
+        try:
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(3)
+            result["running"] = sock.connect_ex(('127.0.0.1', 8093)) == 0
+            sock.close()
+        except Exception:
+            pass
+        return result
+
     try:
         response = requests.get(f"{BOT_URL}/api/status", timeout=5)
         if response.status_code == 200:
             data = response.json()
-            return {
+            result = {
                 "running": True,
                 "is_running": data.get("is_running", False),
                 "last_scan": data.get("stats", {}).get("last_scan"),
                 "open_bets": data.get("stats", {}).get("total_bets", 0),
                 "pnl": data.get("portfolio", {}).get("total_pnl", 0),
             }
-    except:
+    except Exception:
         pass
-    return {"running": False}
+
+    return result
 
 
 def watchdog_loop():
     """Watchdog ana döngüsü."""
-    print(f"Bot watchdog started. Checking every {CHECK_INTERVAL}s...")
-    print(f"Bot URL: {BOT_URL}")
+    log(f"Bot watchdog started. Checking every {CHECK_INTERVAL}s...")
+    log(f"Bot URL: {BOT_URL}")
 
     while True:
         try:
             status = check_bot()
 
             if not status["running"]:
-                print(f"[{datetime.now()}] Bot DOWN - restarting...")
+                log("Bot DOWN - restarting...")
                 stop_bot()
                 time.sleep(2)
                 start_bot()
                 time.sleep(10)  # Bot'un başlamasını bekle
             elif not status.get("is_running", False):
-                print(f"[{datetime.now()}] Bot UP but not running - API'den start tetiklenmeli")
+                log("Bot UP but not running")
             else:
-                print(f"[{datetime.now()}] Bot OK - Open: {status.get('open_bets', 0)}, PnL: ${status.get('pnl', 0):.2f}")
+                log(f"Bot OK - Open: {status.get('open_bets', 0)}, PnL: ${status.get('pnl', 0):.2f}")
 
+        except KeyboardInterrupt:
+            log("Watchdog interrupted by user")
+            break
         except Exception as e:
-            print(f"[{datetime.now()}] Watchdog error: {e}")
+            log(f"Watchdog error: {e}")
 
         time.sleep(CHECK_INTERVAL)
 
@@ -102,33 +207,24 @@ def main():
 
     args = parser.parse_args()
 
-    if args.check:
+    if args.check or args.status:
         status = check_bot()
         if status["running"]:
-            print(f"Bot is RUNNING")
-            print(f"  Is Running: {status.get('is_running')}")
-            print(f"  Last Scan: {status.get('last_scan')}")
-            print(f"  Open Bets: {status.get('open_bets')}")
-            print(f"  PnL: ${status.get('pnl', 0):.2f}")
+            print(f"Bot: RUNNING")
+            if "is_running" in status:
+                print(f"  Is Running: {status.get('is_running')}")
+                print(f"  Last Scan: {status.get('last_scan')}")
+                print(f"  Open Bets: {status.get('open_bets')}")
+                print(f"  PnL: ${status.get('pnl', 0):.2f}")
         else:
-            print("Bot is DOWN")
+            print("Bot: DOWN")
         sys.exit(0 if status["running"] else 1)
 
-    if args.status:
-        status = check_bot()
-        print(f"Bot Status: {'RUNNING' if status['running'] else 'DOWN'}")
-        if status["running"]:
-            print(f"  Is Running: {status.get('is_running')}")
-            print(f"  Last Scan: {status.get('last_scan')}")
-            print(f"  Open Bets: {status.get('open_bets')}")
-            print(f"  PnL: ${status.get('pnl', 0):.2f}")
-        sys.exit(0)
-
     if args.restart:
-        print("Stopping bot...")
+        log("Stopping bot...")
         stop_bot()
         time.sleep(2)
-        print("Starting bot...")
+        log("Starting bot...")
         start_bot()
         time.sleep(5)
         status = check_bot()
