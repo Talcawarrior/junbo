@@ -1,0 +1,156 @@
+[
+  {
+    "brier_score": 0.25,
+    "causal_insight": "Human Prior: Equal weights assume GFS, ECMWF, and regional models have equal accuracy globally. Historical analysis shows ECMWF and GFS usually outperform regional models.",
+    "hypothesis": "Initial Uniform Prior - All meteorological models are weighted equally.",
+    "parameters": {
+      "kelly_fraction": 0.15,
+      "min_edge": 0.05,
+      "model_weights": {
+        "cma_grapes_global": 0.125,
+        "ecmwf_ifs04": 0.125,
+        "gem_seamless": 0.125,
+        "gfs_seamless": 0.125,
+        "icon_seamless": 0.125,
+        "jma_msm": 0.125,
+        "meteofrance_seamless": 0.125,
+        "ukmo_seamless": 0.125
+      }
+    },
+    "roi": 0.0,
+    "round": 0,
+    "win_rate": 0.5
+  },
+  {
+    "brier_score": 0.18,
+    "causal_insight": "Human Prior: Global forecasts like ECMWF and GFS have much larger data assimilation systems. They consistently exhibit lower Brier scores across both US and European cities.",
+    "hypothesis": "ECMWF & GFS Domination Prior - Weight global models higher than local models.",
+    "parameters": {
+      "kelly_fraction": 0.15,
+      "min_edge": 0.05,
+      "model_weights": {
+        "cma_grapes_global": 0.05,
+        "ecmwf_ifs04": 0.25,
+        "gem_seamless": 0.15,
+        "gfs_seamless": 0.3,
+        "icon_seamless": 0.1,
+        "jma_msm": 0.08,
+        "meteofrance_seamless": 0.03,
+        "ukmo_seamless": 0.04
+      }
+    },
+    "roi": 12.5,
+    "round": 0,
+    "win_rate": 0.58
+  },
+  {
+    "brier_score": 0.0836,
+    "causal_insight": "SUCCESS: Proposed adjustments succeeded in both accuracy (Brier improved from 0.1800 to 0.0836) and profitability (ROI increased from 12.50% to 90.09%). Shifting weights towards superior global meteorological models (like GFS/ECMWF) reduced the impact of regional forecasting noise and sharpened the Kelly sizing.",
+    "hypothesis": "Evolved Candidate (Round 3): Boost weight of 'gfs_seamless' and reduce 'meteofrance_seamless' by 4.8%. Tune min_edge to 4.0% and Kelly fraction to 15.0%.",
+    "parameters": {
+      "kelly_fraction": 0.15,
+      "min_edge": 0.04,
+      "model_weights": {
+        "cma_grapes_global": 0.0486,
+        "ecmwf_ifs04": 0.2432,
+        "gem_seamless": 0.1459,
+        "gfs_seamless": 0.3386,
+        "icon_seamless": 0.0973,
+        "jma_msm": 0.0778,
+        "meteofrance_seamless": 0.0097,
+        "ukmo_seamless": 0.0389
+      }
+    },
+    "roi": 90.09,
+    "round": 3,
+    "win_rate": 1.0
+  },
+  {
+    "brier_score": 0.0843,
+    "causal_insight": "SUCCESS (FINANCIAL): ROI increased to 90.17% (from 90.09%) but Brier score drifted to 0.0843. This suggests that while overall model calibration slightly decreased, the tightened risk threshold (min_edge) and Kelly multiplier selectively avoided marginal bets and prioritized high-conviction positive-EV setups.",
+    "hypothesis": "Evolved Candidate (Round 4): Boost weight of 'gem_seamless' and reduce 'ukmo_seamless' by 3.7%. Tune min_edge to 3.0% and Kelly fraction to 15.0%.",
+    "parameters": {
+      "kelly_fraction": 0.15,
+      "min_edge": 0.03,
+      "model_weights": {
+        "cma_grapes_global": 0.0482,
+        "ecmwf_ifs04": 0.2413,
+        "gem_seamless": 0.1811,
+        "gfs_seamless": 0.336,
+        "icon_seamless": 0.0966,
+        "jma_msm": 0.0772,
+        "meteofrance_seamless": 0.0096,
+        "ukmo_seamless": 0.0099
+      }
+    },
+    "roi": 90.17,
+    "round": 4,
+    "win_rate": 1.0
+  },
+  {
+    "brier_score": 0.0891,
+    "causal_insight": "SUCCESS (FINANCIAL): ROI increased to 90.45% (from 90.17%) but Brier score drifted to 0.0891. This suggests that while overall model calibration slightly decreased, the tightened risk threshold (min_edge) and Kelly multiplier selectively avoided marginal bets and prioritized high-conviction positive-EV setups.",
+    "hypothesis": "Evolved Candidate (Round 5): Boost weight of 'meteofrance_seamless' and reduce 'jma_msm' by 2.7%. Tune min_edge to 4.0% and Kelly fraction to 15.0%.",
+    "parameters": {
+      "kelly_fraction": 0.15,
+      "min_edge": 0.04,
+      "model_weights": {
+        "cma_grapes_global": 0.0482,
+        "ecmwf_ifs04": 0.2413,
+        "gem_seamless": 0.1811,
+        "gfs_seamless": 0.336,
+        "icon_seamless": 0.0966,
+        "jma_msm": 0.0498,
+        "meteofrance_seamless": 0.037,
+        "ukmo_seamless": 0.0099
+      }
+    },
+    "roi": 90.45,
+    "round": 5,
+    "win_rate": 1.0
+  },
+  {
+    "brier_score": 0.0833,
+    "causal_insight": "MIXED: Olas\u0131l\u0131k kalibrasyonu (Brier Score) 0.0891 de\u011ferinden 0.0833 seviyesine iyile\u015fti ancak finansal getiri (ROI) 90.45% de\u011ferinden 90.28% seviyesine d\u00fc\u015ft\u00fc. Bu durum, modelin daha ger\u00e7ek\u00e7i tahminler \u00fcretti\u011fini ancak Polymarket \u00fczerindeki 'taker fee' (%2) ve likidite maliyetlerinin getiri \u00fczerinde bask\u0131 kurdu\u011funu g\u00f6steriyor. Kelly katsay\u0131s\u0131n\u0131n art\u0131r\u0131lmas\u0131 gerekebilir.",
+    "hypothesis": "Evolved Candidate (Round 6): Boost weight of 'gfs_seamless' and reduce 'jma_msm' by 3.5%. Tune min_edge to 4.0% and Kelly fraction to 15.0%.",
+    "parameters": {
+      "kelly_fraction": 0.15,
+      "min_edge": 0.04,
+      "model_weights": {
+        "cma_grapes_global": 0.0482,
+        "ecmwf_ifs04": 0.2413,
+        "gem_seamless": 0.1811,
+        "gfs_seamless": 0.3712,
+        "icon_seamless": 0.0966,
+        "jma_msm": 0.0146,
+        "meteofrance_seamless": 0.037,
+        "ukmo_seamless": 0.0099
+      }
+    },
+    "roi": 90.28,
+    "round": 6,
+    "win_rate": 1.0
+  },
+  {
+    "brier_score": 0.0794,
+    "causal_insight": "MIXED: Olas\u0131l\u0131k kalibrasyonu (Brier Score) 0.0891 de\u011ferinden 0.0794 seviyesine iyile\u015fti ancak finansal getiri (ROI) 90.45% de\u011ferinden 89.94% seviyesine d\u00fc\u015ft\u00fc. Bu durum, modelin daha ger\u00e7ek\u00e7i tahminler \u00fcretti\u011fini ancak Polymarket \u00fczerindeki 'taker fee' (%2) ve likidite maliyetlerinin getiri \u00fczerinde bask\u0131 kurdu\u011funu g\u00f6steriyor. Kelly katsay\u0131s\u0131n\u0131n art\u0131r\u0131lmas\u0131 gerekebilir.",
+    "hypothesis": "Evolved Candidate (Round 7): Boost weight of 'gfs_seamless' and reduce 'meteofrance_seamless' by 3.6%. Tune min_edge to 4.0% and Kelly fraction to 17.0%.",
+    "parameters": {
+      "kelly_fraction": 0.17,
+      "min_edge": 0.04,
+      "model_weights": {
+        "cma_grapes_global": 0.0478,
+        "ecmwf_ifs04": 0.2393,
+        "gem_seamless": 0.1796,
+        "gfs_seamless": 0.3685,
+        "icon_seamless": 0.0958,
+        "jma_msm": 0.0494,
+        "meteofrance_seamless": 0.0099,
+        "ukmo_seamless": 0.0098
+      }
+    },
+    "roi": 89.94,
+    "round": 7,
+    "win_rate": 1.0
+  }
+]
