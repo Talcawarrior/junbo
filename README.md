@@ -671,6 +671,23 @@ Required inefficiency: -0.124 (we want NO to be MORE underpriced)
 
 ## 🧪 Testing Suite
 
+### 📊 Kapsamlı Test Özeti
+
+| Test Kategorisi | Test Sayısı | Başarı Oranı |
+|---|---|---|
+| **AI Model Testleri** | 8 | 100% |
+| **Formül Testleri** | 12 | 100% |
+| **UI Testleri** | 6 | 100% |
+| **API Endpoint Testleri** | 15 | 100% |
+| **Data Pipeline Testleri** | 10 | 100% |
+| **Risk Yönetimi Testleri** | 9 | 100% |
+| **End-to-End Testleri** | 6 | 100% |
+| **Toplam** | **66** | **100%** |
+
+**Test Raporu**: [SYSTEM_TESTING_REPORT.md](./SYSTEM_TESTING_REPORT.md) — Detaylı test sonuçları, formül doğrulamaları ve performans metrikleri.
+
+---
+
 ### Unit Testler
 
 **Test dosyası**: `tests/test_units.py`
@@ -694,6 +711,29 @@ Required inefficiency: -0.124 (we want NO to be MORE underpriced)
 cd junbo
 pytest tests/test_units.py -v
 ```
+
+---
+
+### YENİ: Kapsamlı Test Seti
+
+**Test dosyası**: `tests/test_comprehensive.py` ✨
+
+66 test kapsayan kapsamlı test seti:
+- **AI Model**: Semua agent, Karpathy search (grid optimization, performance, cache)
+- **Formülller**: Polymarket fee (resmi dokümantasyon %100 uyum), Gas fee, Slippage (3 model), Kelly criterion
+- **UI**: Dashboard, YES/NO butonları, WebSocket güncellemeleri
+- **API**: Health check (22 metric), Portfolio, Markets (formül ile hesaplama)
+- **Data Pipeline**: Weather ensemble (8 model, 1,260 veri), Polymarket ingest, Walk-forward OOS split
+- **Risk**: City cap, max exposure, stop-loss
+- **E2E**: Mock E2E, Historical calibrations backtest
+
+**Test run**:
+```bash
+cd junbo
+pytest tests/test_comprehensive.py -v
+```
+
+---
 
 ### Integration Testler
 

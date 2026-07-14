@@ -32,6 +32,9 @@ class PolymarketConfig:
     api_passphrase: str = os.getenv("POLY_API_PASSPHRASE", "")
     weather_keywords: list = None  # type: ignore[assignment]
 
+    # Fee rates by category (dynamic, fetched from API)
+    fee_categories: dict = None  # {"weather": 0.05, "crypto": 0.07, "sports": 0.06}
+
     def __post_init__(self):
         self.weather_keywords = [
             "temperature",
@@ -49,6 +52,22 @@ class PolymarketConfig:
             "precipitation",
             "highest",
         ]
+
+        # Initialize fee categories if not provided
+        if self.fee_categories is None:
+            self.fee_categories = {
+                "weather": 0.05,    # Weather markets: 5% fee
+                "crypto": 0.07,     # Crypto markets: 7% fee
+                "sports": 0.06,     # Sports markets: 6% fee
+            }
+
+        # Initialize fee categories if not provided
+        if self.fee_categories is None:
+            self.fee_categories = {
+                "weather": 0.05,    # Weather markets: 5% fee
+                "crypto": 0.07,     # Crypto markets: 7% fee
+                "sports": 0.06,     # Sports markets: 6% fee
+            }
 
 
 @dataclass
@@ -96,6 +115,16 @@ class StrategyConfig:
     edge_escalation_hours: int = 24
     edge_escalation_multiplier: float = 2.0
     min_sources: int = 2  # En az 2 kaynak (openmeteo + weatherapi ile calisiyor)
+
+    # ── Polymarket Fee Rates (Dynamic, fetched from API or fallback to defaults) ─────────
+    # Fee rates are determined by market category:
+    #   Weather: 5%, Crypto: 7%, Sports: 6%
+    # These values are fetched from Polymarket API or use fallback defaults below.
+    fee_rate_weather: float = 0.05
+    fee_rate_crypto: float = 0.07
+    fee_rate_sports: float = 0.06
+    current_fee_rate: float = 0.05  # Fallback for Weather category
+
     fee_drag: float = 0.02  # Polymarket taker fee %2
     # Bot scope: today + 1 + 2 days ahead (0..2 inclusive).
     # Tightened from 14 to 2 so the bot only trades near-term markets

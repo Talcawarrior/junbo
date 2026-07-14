@@ -500,18 +500,18 @@ class TestStrategyParams:
 
     def test_default_min_edge(self):
         """Default min_edge = 5%."""
-        assert Config.strategy.min_edge == 0.05
+        assert bot_config.strategy.min_edge == 0.05
 
     def test_min_entry_price_gate(self):
         """Min entry price gate."""
         # Polymarket public-search'te genelde entry_price ~0.5
-        # Long-shot bets (<0.3) filtrelenmeli
-        assert Config.strategy.min_entry_price == 0.01  # Default (permissive)
+        # Long-shot bets (< 30%) filtrelenmeli
+        assert bot_config.strategy.min_entry_price == 0.01  # Default (permissive)
 
     def test_inefficiency_min_gate(self):
         """Inefficiency min gate."""
         # Negatif = gate disabled
-        assert Config.strategy.inefficiency_min == -1.0
+        assert bot_config.strategy.inefficiency_min == -1.0
 
 
 if __name__ == "__main__":

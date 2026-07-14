@@ -22,6 +22,9 @@ Formula inventory:
 
 from __future__ import annotations
 
+# Import bot_config for dynamic fee rates
+from config.settings import bot_config
+
 # ---------------------------------------------------------------------------
 # 1. Max bet per position
 # ---------------------------------------------------------------------------
@@ -156,7 +159,7 @@ def settlement_pnl(
 # ---------------------------------------------------------------------------
 
 
-def polymarket_fee(shares: float, price: float, fee_rate: float) -> float:
+def polymarket_fee(shares: float, price: float, fee_rate: float, category: str = "weather") -> float:
     """Polymarket taker fee at trade match time.
 
     Official formula (per docs.polymarket.com):
@@ -164,7 +167,7 @@ def polymarket_fee(shares: float, price: float, fee_rate: float) -> float:
 
     Where:
       C        = number of shares traded
-      feeRate  = category rate (Weather = 0.05, Crypto = 0.07, etc.)
+      feeRate  = category rate (Weather = 0.05, Crypto = 0.07, Sports = 0.06)
       p        = trade price (0.01–0.99)
 
     Fee is collected at order match time, NOT at market settlement.
@@ -175,10 +178,19 @@ def polymarket_fee(shares: float, price: float, fee_rate: float) -> float:
     Used by:
       - scheduler.py (:336)  — early-exit fee
     """
+
+    # Use dynamic fee rate from category if provided
+    if category == "weather":
+        fee_rate = bot_config.strategy.fee_rate_weather
+    elif category == "crypto":
+        fee_rate = bot_config.strategy.fee_rate_crypto
+    elif category == "sports":
+        fee_rate = bot_config.strategy.fee_rate_sports
+
     return shares * fee_rate * price * (1.0 - price)
 
 
-def polymarket_fee_from_stake(stake: float, price: float, fee_rate: float) -> float:
+def polymarket_fee_from_stake(stake: float, price: float, fee_rate: float, category: str = "weather") -> float:
     """Stake-based shortcut for polymarket_fee.
 
     Since shares = stake / price, the fee formula simplifies to:
@@ -189,6 +201,15 @@ def polymarket_fee_from_stake(stake: float, price: float, fee_rate: float) -> fl
     """
     if price <= 0:
         return 0.0
+
+    # Use dynamic fee rate from category if provided
+    if category == "weather":
+        fee_rate = bot_config.strategy.fee_rate_weather
+    elif category == "crypto":
+        fee_rate = bot_config.strategy.fee_rate_crypto
+    elif category == "sports":
+        fee_rate = bot_config.strategy.fee_rate_sports
+
     return stake * fee_rate * (1.0 - price)
 
 
