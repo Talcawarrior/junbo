@@ -33,7 +33,7 @@ class PolymarketConfig:
     weather_keywords: list = None  # type: ignore[assignment]
 
     # Fee rates by category (dynamic, fetched from API)
-    fee_categories: dict = None  # {"weather": 0.05, "crypto": 0.07, "sports": 0.06}
+    fee_categories: dict = None  # {"weather": 0.05, ...}
 
     def __post_init__(self):
         self.weather_keywords = [
@@ -57,8 +57,6 @@ class PolymarketConfig:
         if self.fee_categories is None:
             self.fee_categories = {
                 "weather": 0.05,    # Weather markets: 5% fee
-                "crypto": 0.07,     # Crypto markets: 7% fee
-                "sports": 0.06,     # Sports markets: 6% fee
             }
 
         # Initialize fee categories if not provided
@@ -116,14 +114,11 @@ class StrategyConfig:
     edge_escalation_multiplier: float = 2.0
     min_sources: int = 2  # En az 2 kaynak (openmeteo + weatherapi ile calisiyor)
 
-    # ── Polymarket Fee Rates (Dynamic, fetched from API or fallback to defaults) ─────────
-    # Fee rates are determined by market category:
-    #   Weather: 5%, Crypto: 7%, Sports: 6%
-    # These values are fetched from Polymarket API or use fallback defaults below.
+    # ── Polymarket Dynamic Fee Rate (fetched from API) ──────────────────────
+    # Default: 5% (Weather category). Fetch from Polymarket API at startup.
+    # If API fails, fallback to this default.
     fee_rate_weather: float = 0.05
-    fee_rate_crypto: float = 0.07
-    fee_rate_sports: float = 0.06
-    current_fee_rate: float = 0.05  # Fallback for Weather category
+    current_fee_rate: float = 0.05  # Updated dynamically from API
 
     fee_drag: float = 0.02  # Polymarket taker fee %2
     # Bot scope: today + 1 + 2 days ahead (0..2 inclusive).
@@ -593,6 +588,43 @@ def apply_persisted_strategy_params() -> dict:
     return applied
 
 
+def fetch_and_apply_fee_rate() -> float:
+    """Fetch fee rate from Polymarket API for weather category.
+
+    Polymarket uses category-based fee rates:
+    - Weather: 5% (default)
+    - Crypto: 7%
+    - Sports: 6%
+
+    This function fetches the current rate from the CLOB API endpoint.
+    If the API call fails, returns the default (0.05).
+    """
+    import requests
+
+    try:
+        # Polymarket CLOB API endpoint for fee rates
+        url = f"{bot_config.polymarket.polymarket_clob_api}/fee"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            # Look for weather category fee rate
+            if "fee_rate" in data:
+                fee_rate = float(data["fee_rate"])
+                bot_config.strategy.current_fee_rate = fee_rate
+                return fee_rate
+            # Try nested structure
+            if "categories" in data and "weather" in data["categories"]:
+                fee_rate = float(data["categories"]["weather"])
+                bot_config.strategy.current_fee_rate = fee_rate
+                return fee_rate
+    except Exception as e:
+        import logging
+        logging.getLogger("CONFIG").warning("Could not fetch fee rate from API: %s", e)
+
+    # Fallback to default
+    return bot_config.strategy.current_fee_rate
+
+
 # Apply persisted Karpathy-search winners at import time.
 try:
     _applied_params = apply_persisted_strategy_params()
@@ -607,3 +639,12 @@ except Exception as _e:
     import logging
 
     logging.getLogger("CONFIG").warning("Could not apply persisted strategy params: %s", _e)
+
+# Fetch dynamic fee rate from Polymarket API at import time
+try:
+    _fetched_fee = fetch_and_apply_fee_rate()
+    import logging
+    logging.getLogger("CONFIG").info("Polymarket fee rate: %.2f%%", _fetched_fee * 100)
+except Exception as _e:
+    import logging
+    logging.getLogger("CONFIG").warning("Could not fetch fee rate: %s", _e)

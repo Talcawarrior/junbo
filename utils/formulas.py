@@ -159,7 +159,7 @@ def settlement_pnl(
 # ---------------------------------------------------------------------------
 
 
-def polymarket_fee(shares: float, price: float, fee_rate: float, category: str = "weather") -> float:
+def polymarket_fee(shares: float, price: float, fee_rate: float = None) -> float:
     """Polymarket taker fee at trade match time.
 
     Official formula (per docs.polymarket.com):
@@ -167,48 +167,31 @@ def polymarket_fee(shares: float, price: float, fee_rate: float, category: str =
 
     Where:
       C        = number of shares traded
-      feeRate  = category rate (Weather = 0.05, Crypto = 0.07, Sports = 0.06)
+      feeRate  = fetched from Polymarket API (default: 0.05 for weather)
       p        = trade price (0.01–0.99)
 
     Fee is collected at order match time, NOT at market settlement.
     Settlement fee is always zero (p→1 ⇒ p(1-p)→0).
-
-    This is the canonical implementation. All fee calculations go through this.
-
-    Used by:
-      - scheduler.py (:336)  — early-exit fee
     """
-
-    # Use dynamic fee rate from category if provided
-    if category == "weather":
-        fee_rate = bot_config.strategy.fee_rate_weather
-    elif category == "crypto":
-        fee_rate = bot_config.strategy.fee_rate_crypto
-    elif category == "sports":
-        fee_rate = bot_config.strategy.fee_rate_sports
+    if fee_rate is None:
+        fee_rate = bot_config.strategy.current_fee_rate
 
     return shares * fee_rate * price * (1.0 - price)
 
 
-def polymarket_fee_from_stake(stake: float, price: float, fee_rate: float, category: str = "weather") -> float:
+def polymarket_fee_from_stake(stake: float, price: float, fee_rate: float = None) -> float:
     """Stake-based shortcut for polymarket_fee.
 
     Since shares = stake / price, the fee formula simplifies to:
       fee = (stake / price) × feeRate × p × (1-p) = stake × feeRate × (1-p)
 
-    Used by:
-      - bet_placer.py — entry_fee at bet creation time
+    Fee rate is fetched from Polymarket API (default: 0.05 for weather).
     """
     if price <= 0:
         return 0.0
 
-    # Use dynamic fee rate from category if provided
-    if category == "weather":
-        fee_rate = bot_config.strategy.fee_rate_weather
-    elif category == "crypto":
-        fee_rate = bot_config.strategy.fee_rate_crypto
-    elif category == "sports":
-        fee_rate = bot_config.strategy.fee_rate_sports
+    if fee_rate is None:
+        fee_rate = bot_config.strategy.current_fee_rate
 
     return stake * fee_rate * (1.0 - price)
 
