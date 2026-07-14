@@ -1,10 +1,16 @@
-"""Junbo test suite - Unit, integration ve API testleri.
+"""Junbo Test Suite - Vibe Coding Test Framework
 
-Test edilmesi gerekenler:
-1. Calculator - Olasılık hesaplama, Kelly kriteri
-2. Formulas - Tüm finansal formüller
-3. Slippage & Gas fee modelleri
-4. Bot loop'ları
-5. API endpoints
-6. UI component'leri (bet paneli, dashboard)
+Test katmanları:
+1. Regression tests (en kritik)
+2. Unit tests (pytest + parametrize)
+3. Property-based testing (Hypothesis)
+4. Golden/snapshot tests
+5. Static analysis (mypy, ruff)
+6. Integration/E2E tests
+
+Kullanım:
+    pytest tests/ -v
+    pytest tests/ -v --cov=.
+    pytest tests/test_regression.py -v
+    pytest tests/test_property_based.py -v
 """

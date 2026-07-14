@@ -1,4 +1,4 @@
 {
-  "min_edge": 0.05,
-  "kelly_fraction": 0.24999999999999994
+  "min_edge": 0.045000000000000005,
+  "kelly_fraction": 0.25
 }
