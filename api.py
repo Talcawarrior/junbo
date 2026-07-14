@@ -26,8 +26,7 @@ from config.logging_config import setup_logging
 
 # Package Imports
 from config.settings import config
-from data_pipeline.poly_data_helper import PolyDataPipeline
-from data_pipeline.resolved_markets_helper import ResolvedMarketsClient
+
 from database.db import (
     ensure_initial_portfolio,
     get_db_session,
@@ -466,22 +465,6 @@ def run_asi_calibration_recalculate(_key: str = Depends(verify_api_key)):
         state.calibration_engine = CalibrationEngine()
     biases = state.calibration_engine.calculate_biases()
     return {"status": "success", "cities_calibrated": len(biases)}
-
-
-@app.get("/api/asi/trades")
-def get_asi_trades():
-    """Retrieve on-chain Polymarket trades fetched from warproxxx/poly_data."""
-    pipeline = PolyDataPipeline()
-    df = pipeline.load_trades_dataset()
-    return df.head(50).to_dict(orient="records")
-
-
-@app.get("/api/asi/orderbook")
-def get_asi_orderbook(market_id: str = "2513866"):
-    """Retrieve high-fidelity CLOB orderbook depth from resolvedmarkets.com."""
-    client = ResolvedMarketsClient()
-    orderbook = client.fetch_historical_orderbook(market_id)
-    return orderbook
 
 
 # --- Standard Endpoints ---

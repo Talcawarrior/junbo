@@ -304,7 +304,7 @@ def check_orderbook_depth(
         return True, 0.0
 
     try:
-        from data_pipeline.resolved_markets_helper import ResolvedMarketsClient
+        from data_pipeline.resolvedmarkets_ingest import ResolvedMarketsClient
 
         client = ResolvedMarketsClient()
         ob = client.fetch_historical_orderbook(condition_id)

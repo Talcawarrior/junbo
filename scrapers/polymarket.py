@@ -12,7 +12,7 @@ from database.db import get_session
 from database.models import WeatherMarket
 from engine.market_parser import MarketParser
 from scrapers.async_client import AsyncHttpClient
-from utils.errors import ScraperError
+
 from utils.retry import retry
 
 logger = logging.getLogger("SCRAPER_POLYMARKET")
@@ -316,7 +316,7 @@ class PolymarketScraper:
         try:
             raw_markets = self._fetch_raw_markets()
         except Exception as e:
-            raise ScraperError(f"Polymarket API hatası: {e}")
+            raise Exception(f"Polymarket API hatası: {e}")
 
         weather_markets = [m for m in raw_markets if self._is_weather_market(m)]
         logger.info(f"{len(weather_markets)} hava durumu marketi bulundu")
