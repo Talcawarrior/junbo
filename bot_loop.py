@@ -33,11 +33,8 @@ def _get_scan_interval(now: datetime) -> int:
 async def scan_and_bet_loop(state):
     """Background loop: fetch, parse, forecast, then a single-cycle DB session for analyze/bet/update/risk.
 
-    Midnight strategy:
-    - After 00:00, use a shorter scan interval (midnight_scan_interval)
-      for the first midnight_scan_window minutes to catch 2-day-ahead
-      markets as early as possible (earlier = cheaper Polymarket prices).
-    - The first cycle after midnight runs immediately (no initial sleep).
+    Her adım bağımsız çalışır - biri hata verirse diğeri devam eder.
+    Scan her durumda tamamlanır.
     """
     from jobs.scheduler import (
         run_cycle,
@@ -52,32 +49,76 @@ async def scan_and_bet_loop(state):
     while state.is_running:
         # Tarama BAŞLADIĞINDA kaydet (bitişte değil)
         state.last_scan = datetime.now(timezone.utc).replace(tzinfo=None)
+        scan_start = datetime.now(timezone.utc)
+        scan_success = True
+
         try:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             today = now.date()
 
             # Midnight detection: if day changed, run immediately
-            # (skip initial sleep on first cycle after midnight)
             is_new_day = last_day is not None and today != last_day
             last_day = today
 
             if is_new_day:
                 logger.info("Midnight detected — running immediate scan for 2-day-ahead markets")
 
-            # Data fetching (each with its own session — I/O bound, no shared state needed)
-            await asyncio.to_thread(run_fetch_markets)
-            await asyncio.to_thread(run_parse_markets)
-            await asyncio.to_thread(run_fetch_weather)
-            # Core DB operations — single shared session for consistency
-            await asyncio.to_thread(run_cycle)
+            # Step 1: Fetch markets (bağımsız - hata verirse devam et)
+            try:
+                await asyncio.wait_for(asyncio.to_thread(run_fetch_markets), timeout=120)
+                logger.info("Step 1/4: Markets fetched")
+            except asyncio.TimeoutError:
+                logger.warning("Step 1/4: Markets fetch TIMEOUT (120s)")
+                scan_success = False
+            except Exception as e:
+                logger.warning("Step 1/4: Markets fetch FAILED: %s", e)
+                scan_success = False
+
+            # Step 2: Parse markets
+            try:
+                await asyncio.wait_for(asyncio.to_thread(run_parse_markets), timeout=60)
+                logger.info("Step 2/4: Markets parsed")
+            except asyncio.TimeoutError:
+                logger.warning("Step 2/4: Markets parse TIMEOUT (60s)")
+            except Exception as e:
+                logger.warning("Step 2/4: Markets parse FAILED: %s", e)
+
+            # Step 3: Fetch weather (en uzun adım - timeout 180s)
+            try:
+                await asyncio.wait_for(asyncio.to_thread(run_fetch_weather), timeout=180)
+                logger.info("Step 3/4: Weather fetched")
+            except asyncio.TimeoutError:
+                logger.warning("Step 3/4: Weather fetch TIMEOUT (180s)")
+                scan_success = False
+            except Exception as e:
+                logger.warning("Step 3/4: Weather fetch FAILED: %s", e)
+                scan_success = False
+
+            # Step 4: Analyze & Bet
+            try:
+                await asyncio.wait_for(asyncio.to_thread(run_cycle), timeout=300)
+                logger.info("Step 4/4: Cycle complete")
+            except asyncio.TimeoutError:
+                logger.warning("Step 4/4: Cycle TIMEOUT (300s)")
+            except Exception as e:
+                logger.warning("Step 4/4: Cycle FAILED: %s", e)
 
             # Her 10 döngüde bir stale bet temizliği
             stale_check_counter += 1
             if stale_check_counter >= 10:
                 stale_check_counter = 0
-                await asyncio.to_thread(_cleanup_stale_bets)
+                try:
+                    await asyncio.to_thread(_cleanup_stale_bets)
+                except Exception as e:
+                    logger.warning("Stale cleanup failed: %s", e)
+
         except Exception as e:
-            logger.error("Scan error: %s", e)
+            logger.error("Scan loop unexpected error: %s", e)
+
+        # Tarama süresini logla
+        scan_duration = (datetime.now(timezone.utc) - scan_start).total_seconds()
+        status = "OK" if scan_success else "PARTIAL"
+        logger.info("Scan completed [%s] in %.1fs", status, scan_duration)
 
         # Dynamic interval: fast during midnight window, normal otherwise
         now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -126,34 +167,3 @@ def _cleanup_stale_bets():
         if cancelled > 0:
             session.commit()
             logger.info("Stale cleanup: cancelled %d old bets", cancelled)
-
-
-async def settlement_loop(state):
-    """Background loop: run SIA optimization (hourly) and settle resolved bets."""
-    from jobs.scheduler import run_settle
-
-    last_cleanup_date = None
-
-    while state.is_running:
-        try:
-            await asyncio.to_thread(run_settle)
-
-            # Daily DB cleanup: archive old forecasts, VACUUM
-            today = datetime.now(timezone.utc).date()
-            if last_cleanup_date != today:
-                from database.db_cleanup import auto_cleanup
-
-                await asyncio.to_thread(auto_cleanup, hot_days=10, cold_days=120)
-                last_cleanup_date = today
-
-            # SIA optimization: hourly
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
-            if state.sia_loop is not None and (
-                state.sia_last_run is None
-                or (now - state.sia_last_run).total_seconds() >= state.sia_interval_hours * 3600
-            ):
-                await asyncio.to_thread(state.sia_loop.run_optimization_cycle)
-                state.sia_last_run = datetime.now(timezone.utc).replace(tzinfo=None)
-        except Exception as e:
-            logger.error("Settle error: %s", e)
-        await asyncio.sleep(state.config.SETTLEMENT_INTERVAL)
