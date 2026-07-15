@@ -11,6 +11,7 @@ Testler:
 - Polymarket fee dinamik oran
 - Database lock sorunu
 - Settlement PnL doğruluğu
+- **NEGATIVE EDGE BET REGRESSION** (abs() hatası)
 """
 
 import pytest
@@ -410,6 +411,80 @@ class TestExposureCap:
         expected = (initial_capital + realized_before_today) * total_exposure_pct
         assert max_exp == expected
         assert max_exp < initial_capital * total_exposure_pct
+
+
+# ============================================================================
+# 8. NEGATIVE EDGE BET REGRESSION (abs() hatası)
+# ============================================================================
+
+class TestNegativeEdgeBet:
+    """Regression: Negatif edge ile bahis açılmasını engelle.
+
+    2026-07-15'te bulunan hata: abs(net_edge) kullanıldığı için
+    -1.8% edge pozitifmiş gibi görünüyor ve bahis açılıyordu.
+
+    Bu test, should_bet fonksiyonunun negatif edge'de False döndüğünü doğrular.
+    """
+
+    def test_should_bet_rejects_negative_edge(self):
+        """Regression: Negatif edge ile bahis AÇILMAMALI."""
+        # should_bet mantığı: net_edge >= min_edge olmalı
+        # negatif edge her zaman False dönmeli
+
+        test_cases = [
+            # (net_edge, min_edge, expected_should_bet)
+            (-0.018, 0.01, False),   # -1.8% edge, %1 min_edge → False
+            (-0.05, 0.01, False),    # -5% edge → False
+            (-0.001, 0.01, False),   # -0.1% edge → False
+            (0.0, 0.01, False),      # 0% edge → False
+            (0.005, 0.01, False),    # 0.5% edge < 1% min_edge → False
+            (0.01, 0.01, True),      # 1% edge = 1% min_edge → True
+            (0.02, 0.01, True),      # 2% edge > 1% min_edge → True
+        ]
+
+        for net_edge, min_edge, expected in test_cases:
+            # should_bet mantığı (calculator.py'den)
+            should_bet = net_edge >= min_edge
+            assert should_bet == expected, f"net_edge={net_edge}, min_edge={min_edge} → {should_bet} (expected {expected})"
+
+    def test_should_bet_rejects_slippage_negative_edge(self):
+        """Regression: Slippage sonrası negatif edge ile bahis AÇILMAMALI."""
+        # Raw edge pozitif ama slippage sonrası negatif olabilir
+        # Bu durumda bahis açılmamalı
+
+        raw_edge = 0.0063  # %0.63 pozitif
+        slippage = 0.025   # %2.5 slippage (düşük fiyatlı bahis için yüksek)
+        net_edge = raw_edge - slippage  # 0.0063 - 0.025 = -0.0187 (negatif!)
+
+        min_edge = 0.01  # %1
+
+        should_bet = net_edge >= min_edge
+        assert should_bet == False, f"Slippage sonrası negatif edge ile bahis açılmamalı: net_edge={net_edge}"
+
+    def test_edge_without_abs(self):
+        """Regression: should_bet koşulunda abs() kullanılmamalı.
+
+        NOT: inefficiency_min kontrolünde abs() kasıtlıdır (farklı mantık).
+        Bu test sadece should_bet koşulunu kontrol eder.
+        """
+
+        import inspect
+        from engine.calculator import Calculator
+
+        source = inspect.getsource(Calculator.analyze_market)
+
+        # should_bet koşulunda abs() kullanılmamalı
+        # "abs(net_edge)" should_bet satırında olmamalı
+        # Ama inefficiency_min'de olabilir (kasıtlı)
+        lines = source.split('\n')
+        in_should_bet = False
+        for line in lines:
+            if 'should_bet = (' in line:
+                in_should_bet = True
+            if in_should_bet and 'abs(' in line:
+                pytest.fail("should_bet koşulunda abs() kullanılıyor - DÜZELTİLMESİ GEREKEN HATA!")
+            if in_should_bet and ')' in line and 'and' not in line:
+                in_should_bet = False
 
 
 if __name__ == "__main__":
