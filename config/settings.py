@@ -632,11 +632,6 @@ except Exception as _e:
 
     logging.getLogger("CONFIG").warning("Could not apply persisted strategy params: %s", _e)
 
-# Fetch dynamic fee rate from Polymarket API at import time
-try:
-    _fetched_fee = fetch_and_apply_fee_rate()
-    import logging
-    logging.getLogger("CONFIG").info("Polymarket fee rate: %.2f%%", _fetched_fee * 100)
-except Exception as _e:
-    import logging
-    logging.getLogger("CONFIG").warning("Could not fetch fee rate: %s", _e)
+# NOTE: Fee rate is fetched lazily (not at import time) to avoid blocking startup.
+# Call fetch_and_apply_fee_rate() when needed, e.g., at bot startup.
+# The default fee_rate_weather (0.05) is used until then.
