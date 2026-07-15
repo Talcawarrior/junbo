@@ -447,8 +447,8 @@ class WeatherEngine:
             }
 
             # Global throttle - Open-Meteo rate limit için
-            import time
-            time.sleep(5)  # 5 saniye bekle
+            from utils.api_throttle import throttle_open_meteo
+            throttle_open_meteo()
 
             try:
                 async with aiohttp.ClientSession() as session:

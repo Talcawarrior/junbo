@@ -68,15 +68,13 @@ _last_call = 0.0
 _lock = threading.Lock()
 
 
+# Global throttle - tüm Open-Meteo istekleri için paylaşımlı
+from utils.api_throttle import throttle_open_meteo
+
+
 def _throttle(host: str) -> None:
     """Global throttle: tüm thread'ler aynı rate limit'i paylaşır."""
-    global _last_call
-    with _lock:
-        now = time.monotonic()
-        wait = _MIN_INTERVAL_S - (now - _last_call)
-        if wait > 0:
-            time.sleep(wait)
-        _last_call = time.monotonic()
+    throttle_open_meteo()
 _LAST_CALL_AT: dict[str, float] = {}
 _THROTTLE_LOCK = threading.Lock()
 
