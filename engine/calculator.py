@@ -441,6 +441,10 @@ class WeatherEngine:
                 "forecast_days": 14,
             }
 
+            # Global throttle - Open-Meteo rate limit için
+            import time
+            time.sleep(5)  # 5 saniye bekle
+
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as resp:
