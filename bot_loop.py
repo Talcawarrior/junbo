@@ -50,7 +50,6 @@ async def scan_and_bet_loop(state):
         # Tarama BAŞLADIĞINDA kaydet (bitişte değil)
         state.last_scan = datetime.now(timezone.utc).replace(tzinfo=None)
         scan_start = datetime.now(timezone.utc)
-        scan_success = True
 
         try:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -63,45 +62,34 @@ async def scan_and_bet_loop(state):
             if is_new_day:
                 logger.info("Midnight detected — running immediate scan for 2-day-ahead markets")
 
-            # Step 1: Fetch markets (bağımsız - hata verirse devam et)
+            # Data fetching - her adım bağımsız, hata verse bile devam et
+            logger.info("Scan starting: fetching markets...")
             try:
-                await asyncio.wait_for(asyncio.to_thread(run_fetch_markets), timeout=120)
-                logger.info("Step 1/4: Markets fetched")
-            except asyncio.TimeoutError:
-                logger.warning("Step 1/4: Markets fetch TIMEOUT (120s)")
-                scan_success = False
+                await asyncio.to_thread(run_fetch_markets)
+                logger.info("Scan: markets fetched OK")
             except Exception as e:
-                logger.warning("Step 1/4: Markets fetch FAILED: %s", e)
-                scan_success = False
+                logger.warning("Scan: markets fetch failed: %s", e)
 
-            # Step 2: Parse markets
+            logger.info("Scan: parsing markets...")
             try:
-                await asyncio.wait_for(asyncio.to_thread(run_parse_markets), timeout=60)
-                logger.info("Step 2/4: Markets parsed")
-            except asyncio.TimeoutError:
-                logger.warning("Step 2/4: Markets parse TIMEOUT (60s)")
+                await asyncio.to_thread(run_parse_markets)
+                logger.info("Scan: markets parsed OK")
             except Exception as e:
-                logger.warning("Step 2/4: Markets parse FAILED: %s", e)
+                logger.warning("Scan: markets parse failed: %s", e)
 
-            # Step 3: Fetch weather (en uzun adım - timeout 180s)
+            logger.info("Scan: fetching weather...")
             try:
-                await asyncio.wait_for(asyncio.to_thread(run_fetch_weather), timeout=180)
-                logger.info("Step 3/4: Weather fetched")
-            except asyncio.TimeoutError:
-                logger.warning("Step 3/4: Weather fetch TIMEOUT (180s)")
-                scan_success = False
+                await asyncio.to_thread(run_fetch_weather)
+                logger.info("Scan: weather fetched OK")
             except Exception as e:
-                logger.warning("Step 3/4: Weather fetch FAILED: %s", e)
-                scan_success = False
+                logger.warning("Scan: weather fetch failed: %s", e)
 
-            # Step 4: Analyze & Bet
+            logger.info("Scan: running analysis cycle...")
             try:
-                await asyncio.wait_for(asyncio.to_thread(run_cycle), timeout=300)
-                logger.info("Step 4/4: Cycle complete")
-            except asyncio.TimeoutError:
-                logger.warning("Step 4/4: Cycle TIMEOUT (300s)")
+                await asyncio.to_thread(run_cycle)
+                logger.info("Scan: cycle complete OK")
             except Exception as e:
-                logger.warning("Step 4/4: Cycle FAILED: %s", e)
+                logger.warning("Scan: cycle failed: %s", e)
 
             # Her 10 döngüde bir stale bet temizliği
             stale_check_counter += 1
@@ -117,8 +105,7 @@ async def scan_and_bet_loop(state):
 
         # Tarama süresini logla
         scan_duration = (datetime.now(timezone.utc) - scan_start).total_seconds()
-        status = "OK" if scan_success else "PARTIAL"
-        logger.info("Scan completed [%s] in %.1fs", status, scan_duration)
+        logger.info("Scan completed in %.1fs", scan_duration)
 
         # Dynamic interval: fast during midnight window, normal otherwise
         now = datetime.now(timezone.utc).replace(tzinfo=None)
