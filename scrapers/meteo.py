@@ -130,8 +130,8 @@ class MeteoFetcher:
                 timeout=15,
             )
             if resp.status_code == 429:
-                logger.warning("Open-Meteo 429 Rate Limit! Waiting 30s...")
-                time.sleep(30)
+                logger.warning("Open-Meteo 429 Rate Limit! Waiting 120s...")
+                time.sleep(120)
                 return None
             resp.raise_for_status()
             data = resp.json()
