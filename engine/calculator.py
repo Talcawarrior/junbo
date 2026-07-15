@@ -387,6 +387,10 @@ METRIC_MAP = {
 }
 
 
+# Global cache - tüm WeatherEngine instance'ları paylaşır
+_WEATHER_CACHE = {}
+
+
 class WeatherEngine:
     """Weather engine consensus calculator (FastAPI / test compatibility wrapper)."""
 
@@ -394,8 +398,8 @@ class WeatherEngine:
         self.db_session_factory = db_session_factory
         self.config = cfg or config
         self.model_weights = self.config.get_normalized_weights()
-        # Local cache for the current session to avoid redundant fetches (e.g. max/min overlap)
-        self._forecast_cache = {}
+        # Global cache kullan
+        self._forecast_cache = _WEATHER_CACHE
 
     @staticmethod
     def _compute_effective_min_edge(market, std: float | None = None) -> float:
