@@ -318,8 +318,8 @@ class RiskManager:
         if entry <= 0:
             return False, ""
 
-        # Fiyat 0.99'a ulaştı → kesin kazanç, hemen kapat (settlement bekleme)
-        if current_price >= 0.99:
+        # Fiyat 0.98'e ulaştı → kesin kazanç, hemen kapat (settlement bekleme)
+        if current_price >= 0.98:
             return True, f"near_certain_win: price={current_price:.2f}"
 
         profit_pct = (current_price - entry) / entry
