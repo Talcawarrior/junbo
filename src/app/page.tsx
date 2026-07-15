@@ -1346,6 +1346,11 @@ export default function DashboardPage() {
                 Son güncelleme: {data.lastUpdated.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
               </span>
             )}
+            {data.health?.activity_24h?.pass_reasons?.[0]?.time && (
+              <span className="text-[10px] tabular-nums" style={{ color: TEAL }}>
+                Son Tarama: {new Date(data.health.activity_24h.pass_reasons[0].time).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+              </span>
+            )}
             <button className="p-2 rounded-md hover:bg-gray-100 transition-colors" aria-label="Dark mode">
               <Moon className="h-4 w-4 text-gray-500" />
             </button>
