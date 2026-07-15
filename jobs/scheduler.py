@@ -77,8 +77,8 @@ def run_analyze(session=None):
         except Exception as e:
             return (mid, None, str(e))
 
-    # Paralel analiz: 4 worker
-    max_workers = min(4, len(market_ids)) if market_ids else 1
+    # Paralel analiz: 2 worker (Open-Meteo rate limit için)
+    max_workers = min(2, len(market_ids)) if market_ids else 1
     logger.info("Starting parallel analysis: %d markets, %d workers", len(market_ids), max_workers)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
