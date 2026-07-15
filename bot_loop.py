@@ -1,6 +1,6 @@
 """Background bot loops: scan-and-bet, settlement, stale cleanup.
 
-Extracted from main.py to reduce file size and separate concerns.
+ASIAbot ile aynı yapıda: asyncio.gather + semaphore + timeout.
 """
 
 import asyncio
@@ -12,29 +12,31 @@ from database.models import OPEN_BET_STATUSES, Bet, WeatherMarket
 
 logger = logging.getLogger("BOT_LOOP")
 
+# Timeout values (seconds)
+_FETCH_TIMEOUT = 120
+_CYCLE_TIMEOUT = 300
+_CLEANUP_TIMEOUT = 60
+
 
 def _is_midnight_window(now: datetime) -> bool:
-    """Check if *now* is within the midnight fast-scan window (00:00 .. N minutes)."""
     from config.settings import bot_config
-
     window_minutes = bot_config.midnight_scan_window
     return now.hour == 0 and now.minute < window_minutes
 
 
 def _get_scan_interval(now: datetime) -> int:
-    """Return scan interval: fast during midnight window, normal otherwise."""
     from config.settings import bot_config
-
     if _is_midnight_window(now):
         return bot_config.midnight_scan_interval
     return bot_config.scan_interval
 
 
 async def scan_and_bet_loop(state):
-    """Background loop: fetch, parse, forecast, then a single-cycle DB session for analyze/bet/update/risk.
+    """Scan loop - ASIAbot ile aynı yapıda.
 
-    Her adım bağımsız çalışır - biri hata verirse diğeri devam eder.
-    Scan her durumda tamamlanır.
+    1. fetch_markets (senkron)
+    2. parse + weather (asyncio.gather ile paralel)
+    3. run_cycle (senkron)
     """
     from jobs.scheduler import (
         run_cycle,
@@ -44,79 +46,57 @@ async def scan_and_bet_loop(state):
     )
 
     stale_check_counter = 0
-    last_day = None  # Track day changes for immediate midnight scan
+    last_day = None
 
     while state.is_running:
-        # Tarama BAŞLADIĞINDA kaydet (bitişte değil)
         state.last_scan = datetime.now(timezone.utc).replace(tzinfo=None)
-        scan_start = datetime.now(timezone.utc)
-
         try:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             today = now.date()
 
-            # Midnight detection: if day changed, run immediately
             is_new_day = last_day is not None and today != last_day
             last_day = today
 
             if is_new_day:
-                logger.info("Midnight detected — running immediate scan for 2-day-ahead markets")
+                logger.info("Midnight detected — running immediate scan")
 
-            # Data fetching - her adım bağımsız, hata verse bile devam et
-            logger.info("Scan starting: fetching markets...")
-            try:
-                await asyncio.to_thread(run_fetch_markets)
-                logger.info("Scan: markets fetched OK")
-            except Exception as e:
-                logger.warning("Scan: markets fetch failed: %s", e)
+            # STEP 1: Fetch markets (senkron)
+            await asyncio.wait_for(asyncio.to_thread(run_fetch_markets), timeout=_FETCH_TIMEOUT)
 
-            logger.info("Scan: parsing markets...")
-            try:
-                await asyncio.to_thread(run_parse_markets)
-                logger.info("Scan: markets parsed OK")
-            except Exception as e:
-                logger.warning("Scan: markets parse failed: %s", e)
+            # STEP 2: Parse + Weather PARALEL
+            parse_and_weather = await asyncio.gather(
+                asyncio.wait_for(asyncio.to_thread(run_parse_markets), timeout=_FETCH_TIMEOUT),
+                asyncio.wait_for(asyncio.to_thread(run_fetch_weather), timeout=_FETCH_TIMEOUT),
+                return_exceptions=True,
+            )
+            for result in parse_and_weather:
+                if isinstance(result, Exception):
+                    logger.error("Parallel step error: %s", result)
 
-            logger.info("Scan: fetching weather...")
-            try:
-                await asyncio.to_thread(run_fetch_weather)
-                logger.info("Scan: weather fetched OK")
-            except Exception as e:
-                logger.warning("Scan: weather fetch failed: %s", e)
+            # STEP 3: Run cycle (senkron)
+            await asyncio.wait_for(asyncio.to_thread(run_cycle), timeout=_CYCLE_TIMEOUT)
 
-            logger.info("Scan: running analysis cycle...")
-            try:
-                await asyncio.to_thread(run_cycle)
-                logger.info("Scan: cycle complete OK")
-            except Exception as e:
-                logger.warning("Scan: cycle failed: %s", e)
-
-            # Her 10 döngüde bir stale bet temizliği
+            # Stale cleanup her 10 döngüde
             stale_check_counter += 1
             if stale_check_counter >= 10:
                 stale_check_counter = 0
                 try:
-                    await asyncio.to_thread(_cleanup_stale_bets)
+                    await asyncio.wait_for(asyncio.to_thread(_cleanup_stale_bets), timeout=_CLEANUP_TIMEOUT)
                 except Exception as e:
                     logger.warning("Stale cleanup failed: %s", e)
 
+        except asyncio.TimeoutError:
+            logger.error("Scan step timed out - recovering")
         except Exception as e:
-            logger.error("Scan loop unexpected error: %s", e)
+            logger.error("Scan error: %s", e)
 
-        # Tarama süresini logla
-        scan_duration = (datetime.now(timezone.utc) - scan_start).total_seconds()
-        logger.info("Scan completed in %.1fs", scan_duration)
-
-        # Dynamic interval: fast during midnight window, normal otherwise
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         interval = _get_scan_interval(now)
-        if _is_midnight_window(now):
-            logger.debug("Midnight window active — scanning every %ds", interval)
         await asyncio.sleep(interval)
 
 
 async def settlement_loop(state):
-    """Background loop: run SIA optimization (hourly) and settle resolved bets."""
+    """Settlement loop."""
     from jobs.scheduler import run_settle
 
     last_cleanup_date = None
@@ -125,15 +105,12 @@ async def settlement_loop(state):
         try:
             await asyncio.to_thread(run_settle)
 
-            # Daily DB cleanup: archive old forecasts, VACUUM
             today = datetime.now(timezone.utc).date()
             if last_cleanup_date != today:
                 from database.db_cleanup import auto_cleanup
-
                 await asyncio.to_thread(auto_cleanup, hot_days=10, cold_days=120)
                 last_cleanup_date = today
 
-            # SIA optimization: hourly
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             if state.sia_loop is not None and (
                 state.sia_last_run is None
@@ -147,7 +124,6 @@ async def settlement_loop(state):
 
 
 def _cleanup_stale_bets():
-    """Cancel open bets whose target_date has passed by >48h and market is unresolvable."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0)
     with get_session() as session:
@@ -162,18 +138,14 @@ def _cleanup_stale_bets():
         cancelled = 0
         for bet in stale:
             market = session.query(WeatherMarket).filter(WeatherMarket.id == bet.market_id).first()
-            # Only cancel if:
-            # 1. Market doesn't exist (test market), OR
-            # 2. target_date + 48h has passed and market still not resolved
             should_cancel = False
             if not market:
-                should_cancel = True  # Test market — can never resolve
+                should_cancel = True
             elif market.target_date and (now - market.target_date).total_seconds() > 48 * 3600:
-                should_cancel = True  # Too old, force cancel
+                should_cancel = True
 
             if should_cancel:
                 from utils.accounting import credit_sale
-
                 bet.status = "cancelled"
                 bet.settled_at = now
                 bet.close_reason = "stale_cleanup"
