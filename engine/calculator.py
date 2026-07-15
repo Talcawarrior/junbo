@@ -431,6 +431,7 @@ class WeatherEngine:
         # Cache check
         target_str = target_date.strftime("%Y-%m-%d")
         cache_key = (round(latitude, 4), round(longitude, 4), target_str)
+        logger.info("WeatherEngine cache_key=%s, cache_size=%d", cache_key, len(self._forecast_cache))
         if cache_key in self._forecast_cache:
             data = self._forecast_cache[cache_key]
             logger.info("Ensemble CACHE HIT for %s", cache_key)
