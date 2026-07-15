@@ -454,8 +454,8 @@ class WeatherEngine:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                         if resp.status == 429:
-                            logger.warning("Ensemble API: Open-Meteo 429 Rate Limit! Waiting 30s...")
-                            await asyncio.sleep(30)
+                            logger.warning("Ensemble API: Open-Meteo 429 Rate Limit! Waiting 60s...")
+                            await asyncio.sleep(60)
                             return None
                         if resp.status != 200:
                             return None
