@@ -330,7 +330,7 @@ class BotConfig:
     weather_fee_rate: float = 0.05
 
     # ── Intervals ──────────────────────────────────────────────────
-    scan_interval: int = 300  # 5 dakika (orijinal değer)
+    scan_interval: int = 900  # 15 dakika (Open-Meteo rate limit için)
     settlement_interval: int = 120
     sia_interval: int = 86400
     # Midnight scan: after 00:00, scan every N seconds for the first
