@@ -429,7 +429,7 @@ class WeatherEngine:
         cache_key = (round(latitude, 4), round(longitude, 4), target_str)
         if cache_key in self._forecast_cache:
             data = self._forecast_cache[cache_key]
-            logger.debug("Ensemble cache hit for %s", cache_key)
+            logger.info("Ensemble CACHE HIT for %s", cache_key)
         else:
             url = f"{Config.OPEN_METEO_API}/forecast"
             params = {
