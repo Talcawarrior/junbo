@@ -115,6 +115,37 @@ async def scan_and_bet_loop(state):
         await asyncio.sleep(interval)
 
 
+async def settlement_loop(state):
+    """Background loop: run SIA optimization (hourly) and settle resolved bets."""
+    from jobs.scheduler import run_settle
+
+    last_cleanup_date = None
+
+    while state.is_running:
+        try:
+            await asyncio.to_thread(run_settle)
+
+            # Daily DB cleanup: archive old forecasts, VACUUM
+            today = datetime.now(timezone.utc).date()
+            if last_cleanup_date != today:
+                from database.db_cleanup import auto_cleanup
+
+                await asyncio.to_thread(auto_cleanup, hot_days=10, cold_days=120)
+                last_cleanup_date = today
+
+            # SIA optimization: hourly
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            if state.sia_loop is not None and (
+                state.sia_last_run is None
+                or (now - state.sia_last_run).total_seconds() >= state.sia_interval_hours * 3600
+            ):
+                await asyncio.to_thread(state.sia_loop.run_optimization_cycle)
+                state.sia_last_run = datetime.now(timezone.utc).replace(tzinfo=None)
+        except Exception as e:
+            logger.error("Settle error: %s", e)
+        await asyncio.sleep(state.config.SETTLEMENT_INTERVAL)
+
+
 def _cleanup_stale_bets():
     """Cancel open bets whose target_date has passed by >48h and market is unresolvable."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
