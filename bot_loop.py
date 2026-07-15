@@ -50,6 +50,8 @@ async def scan_and_bet_loop(state):
     last_day = None  # Track day changes for immediate midnight scan
 
     while state.is_running:
+        # Tarama BAŞLADIĞINDA kaydet (bitişte değil)
+        state.last_scan = datetime.now(timezone.utc).replace(tzinfo=None)
         try:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             today = now.date()
@@ -76,7 +78,6 @@ async def scan_and_bet_loop(state):
                 await asyncio.to_thread(_cleanup_stale_bets)
         except Exception as e:
             logger.error("Scan error: %s", e)
-        state.last_scan = datetime.now(timezone.utc).replace(tzinfo=None)
 
         # Dynamic interval: fast during midnight window, normal otherwise
         now = datetime.now(timezone.utc).replace(tzinfo=None)
