@@ -45,11 +45,17 @@ def run_fetch_weather():
 
 
 def run_analyze(session=None):
-    """Run forecast analyses for open markets. Optional session for batched cycles."""
+    """Run forecast analyses for open markets. Optional session for batched cycles.
+
+    Paralel analiz: 4 worker ile aynı anda 4 market analiz edilir.
+    Hesaplamalar birebir aynıdır, sadece hızlanır.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     from engine.calculator import Calculator
 
-    calc = Calculator()
     analyzed = 0
+    errors = 0
+
     with get_session_or(session) as sess:
         markets = (
             sess.query(WeatherMarket)
@@ -62,16 +68,31 @@ def run_analyze(session=None):
         )
         market_ids = [m.id for m in markets]
 
-        for mid in market_ids:
-            try:
-                result = calc.analyze_market(mid, session=sess)
-                if result is not None:
-                    analyzed += 1
-            except Exception as e:
-                logger.error(f"Analiz hatası {mid}: {e}")
-                continue
+    def analyze_single(mid):
+        """Tek bir marketi analiz et (her thread kendi session'unu oluşturur)."""
+        try:
+            calc = Calculator()
+            result = calc.analyze_market(mid)  # Session yok → kendi session'unu oluşturur
+            return (mid, result, None)
+        except Exception as e:
+            return (mid, None, str(e))
 
-    return f"{analyzed} market analiz edildi ve kaydedildi"
+    # Paralel analiz: 4 worker
+    max_workers = min(4, len(market_ids)) if market_ids else 1
+    logger.info("Starting parallel analysis: %d markets, %d workers", len(market_ids), max_workers)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(analyze_single, mid): mid for mid in market_ids}
+        for future in as_completed(futures):
+            mid, result, error = future.result()
+            if result is not None:
+                analyzed += 1
+            elif error:
+                logger.error("Analysis error %s: %s", mid, error)
+                errors += 1
+
+    logger.info("Parallel analysis complete: %d analyzed, %d errors, %d total", analyzed, errors, len(market_ids))
+    return f"{analyzed} market analiz edildi ({len(market_ids)} toplam, {errors} hata)"
 
 
 def run_place_bets():
