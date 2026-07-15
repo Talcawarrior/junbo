@@ -1176,8 +1176,8 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
                     label: "Max Drawdown", 
                     value: kpiData ? `%${fmtNum(kpiData.maxDrawdown)}` : "—",
                     target: "< 5% Mükemmel, < 15% Kabul",
-                    color: RED,
-                    tooltip: "Zirveden dipine en büyük düşüş. <5% mükemmel, 5-15% kabul edilebilir, >20% riskli"
+                    color: kpiData ? (kpiData.maxDrawdown < 5 ? "#22c55e" : kpiData.maxDrawdown < 15 ? "#eab308" : RED) : TEXT_PRIMARY,
+                    tooltip: "Zirveden dipine en büyük düşüş. <5% mükemmel, 5-15% kabul edilebilir, >15% riskli"
                   },
                   { 
                     label: "Expectancy", 
