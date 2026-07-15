@@ -330,7 +330,7 @@ class BotConfig:
     weather_fee_rate: float = 0.05
 
     # ── Intervals ──────────────────────────────────────────────────
-    scan_interval: int = 900  # 15 dakika (399 market ~10 dk'da analiz ediliyor)
+    scan_interval: int = 1200  # 20 dakika (399 market ~12 dk'da analiz ediliyor)
     settlement_interval: int = 120
     sia_interval: int = 86400
     # Midnight scan: after 00:00, scan every N seconds for the first
