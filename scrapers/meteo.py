@@ -63,7 +63,20 @@ def _cache_clear() -> None:
 # limits. Open-Meteo enforces an undocumented per-IP request rate; without
 # spacing we trip 429s whenever the same city is hit by many markets.
 # 3s interval is very safe for grouped requests.
-_MIN_INTERVAL_S = 3.0
+_MIN_INTERVAL_S = 5.0  # Open-Meteo minimum interval (5 saniye)
+_last_call = 0.0
+_lock = threading.Lock()
+
+
+def _throttle(host: str) -> None:
+    """Global throttle: tüm thread'ler aynı rate limit'i paylaşır."""
+    global _last_call
+    with _lock:
+        now = time.monotonic()
+        wait = _MIN_INTERVAL_S - (now - _last_call)
+        if wait > 0:
+            time.sleep(wait)
+        _last_call = time.monotonic()
 _LAST_CALL_AT: dict[str, float] = {}
 _THROTTLE_LOCK = threading.Lock()
 
