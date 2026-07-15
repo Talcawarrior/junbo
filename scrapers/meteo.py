@@ -63,18 +63,7 @@ def _cache_clear() -> None:
 # limits. Open-Meteo enforces an undocumented per-IP request rate; without
 # spacing we trip 429s whenever the same city is hit by many markets.
 # 3s interval is very safe for grouped requests.
-_MIN_INTERVAL_S = 5.0  # Open-Meteo minimum interval (5 saniye)
-_last_call = 0.0
-_lock = threading.Lock()
-
-
-# Global throttle - tüm Open-Meteo istekleri için paylaşımlı
-from utils.api_throttle import throttle_open_meteo
-
-
-def _throttle(host: str) -> None:
-    """Global throttle: tüm thread'ler aynı rate limit'i paylaşır."""
-    throttle_open_meteo()
+_MIN_INTERVAL_S = 3.0
 _LAST_CALL_AT: dict[str, float] = {}
 _THROTTLE_LOCK = threading.Lock()
 
@@ -141,8 +130,8 @@ class MeteoFetcher:
                 timeout=15,
             )
             if resp.status_code == 429:
-                logger.warning("Open-Meteo 429 Rate Limit! Waiting 60s...")
-                time.sleep(60)
+                logger.warning("Open-Meteo 429 Rate Limit! Waiting 30s...")
+                time.sleep(30)
                 return None
             resp.raise_for_status()
             data = resp.json()

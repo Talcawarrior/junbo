@@ -387,10 +387,6 @@ METRIC_MAP = {
 }
 
 
-# Global cache - tüm WeatherEngine instance'ları paylaşır
-_WEATHER_CACHE = {}
-
-
 class WeatherEngine:
     """Weather engine consensus calculator (FastAPI / test compatibility wrapper)."""
 
@@ -398,8 +394,8 @@ class WeatherEngine:
         self.db_session_factory = db_session_factory
         self.config = cfg or config
         self.model_weights = self.config.get_normalized_weights()
-        # Global cache kullan
-        self._forecast_cache = _WEATHER_CACHE
+        # Local cache for the current session to avoid redundant fetches (e.g. max/min overlap)
+        self._forecast_cache = {}
 
     @staticmethod
     def _compute_effective_min_edge(market, std: float | None = None) -> float:
@@ -431,10 +427,9 @@ class WeatherEngine:
         # Cache check
         target_str = target_date.strftime("%Y-%m-%d")
         cache_key = (round(latitude, 4), round(longitude, 4), target_str)
-        logger.info("WeatherEngine cache_key=%s, cache_size=%d", cache_key, len(self._forecast_cache))
         if cache_key in self._forecast_cache:
             data = self._forecast_cache[cache_key]
-            logger.info("Ensemble CACHE HIT for %s", cache_key)
+            logger.debug("Ensemble cache hit for %s", cache_key)
         else:
             url = f"{Config.OPEN_METEO_API}/forecast"
             params = {
@@ -446,16 +441,12 @@ class WeatherEngine:
                 "forecast_days": 14,
             }
 
-            # Global throttle - Open-Meteo rate limit için
-            from utils.api_throttle import throttle_open_meteo
-            throttle_open_meteo()
-
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                         if resp.status == 429:
-                            logger.warning("Ensemble API: Open-Meteo 429 Rate Limit! Waiting 60s...")
-                            await asyncio.sleep(60)
+                            logger.warning("Ensemble API: Open-Meteo 429 Rate Limit! Waiting 30s...")
+                            await asyncio.sleep(30)
                             return None
                         if resp.status != 200:
                             return None
