@@ -247,12 +247,43 @@ def portfolio_current_value(
 # ---------------------------------------------------------------------------
 
 
+def pnl_ratio(current_price: float, entry_price: float) -> float:
+    """Fiyat değişimi oranı (0-1 arası ratio, percentage DEĞİL).
+
+    pnl_ratio = (current_price - entry_price) / entry_price
+
+    Tüm exit check'ler bu fonksiyonu kullanmalı.
+    1.0 = %100 kâr, -0.3 = %30 zarar.
+
+    Kullanım:
+      - check_take_profit: pnl_ratio >= cfg.take_profit_pct
+      - check_stop_loss: pnl_ratio <= -cfg.stop_loss_pct
+      - check_time_decay: pnl_ratio <= cfg.time_decay_threshold
+    """
+    if entry_price <= 0:
+        return 0.0
+    return (current_price - entry_price) / entry_price
+
+
+def drop_ratio(peak_price: float, current_price: float) -> float:
+    """Tepeden düşüş oranı (trailing stop için).
+
+    drop_ratio = (peak_price - current_price) / peak_price
+
+    Kullanım:
+      - check_trailing_stop: drop_ratio >= cfg.trailing_stop_pct
+    """
+    if peak_price <= 0:
+        return 0.0
+    return (peak_price - current_price) / peak_price
+
+
 def roi_pct(pnl: float, stake: float) -> float:
     """Return on investment as a percentage.
 
     ROI = (pnl / stake) × 100
 
-    Tek formül - hem kâr/zarar hem de fiyat değişimi için kullanılır.
+    Kullanım: API display, historical stats
     """
     if stake <= 0:
         return 0.0

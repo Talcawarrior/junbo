@@ -295,23 +295,23 @@ class RiskManager:
             return RiskConfig()
 
     def check_stop_loss(self, bet, current_price: float, market=None) -> tuple:  # pylint: disable=unused-argument
-        """Stop-loss: pozisyon %stop_loss_pct'den fazla zarardaysa kapat.
+        """Stop-loss: pozisyon %stop_loss_pct'den fazla zarardaysa kapat."""
+        from utils.formulas import pnl_ratio
 
-        PnL hesaplaması: (current_price - entry_price) / entry_price
-        Returns: (should_exit: bool, reason: str)
-        """
         cfg = self._get_risk_config()
         raw = bet.entry_price if bet.entry_price is not None else bet.price
         entry = float(raw) if raw is not None else 0.0
         if entry <= 0:
             return False, ""
-        loss_pct = (current_price - entry) / entry
-        if loss_pct <= -cfg.stop_loss_pct:
-            return True, f"stop_loss: {loss_pct:.1%}"
+        ratio = pnl_ratio(current_price, entry)
+        if ratio <= -cfg.stop_loss_pct:
+            return True, f"stop_loss: {ratio:.1%}"
         return False, ""
 
     def check_take_profit(self, bet, current_price: float, market=None) -> tuple:  # pylint: disable=unused-argument
         """Take-profit: pozisyon %take_profit_pct'den fazla kardaysa veya fiyat 0.98'e ulaştıysa kapat."""
+        from utils.formulas import pnl_ratio
+
         cfg = self._get_risk_config()
         raw = bet.entry_price if bet.entry_price is not None else bet.price
         entry = float(raw) if raw is not None else 0.0
@@ -322,14 +322,15 @@ class RiskManager:
         if current_price >= 0.98:
             return True, f"near_certain_win: price={current_price:.2f}"
 
-        # Ratio hesapla — check_stop_loss ile aynı pattern
-        profit_ratio = (current_price - entry) / entry
-        if profit_ratio >= cfg.take_profit_pct:
-            return True, f"take_profit: {profit_ratio:.1%}"
+        ratio = pnl_ratio(current_price, entry)
+        if ratio >= cfg.take_profit_pct:
+            return True, f"take_profit: {ratio:.1%}"
         return False, ""
 
     def check_time_decay(self, bet, current_price: float, market) -> tuple:
         """Time decay: settlement'a <time_decay_hours kala ve zarardaysa kapat."""
+        from utils.formulas import pnl_ratio
+
         cfg = self._get_risk_config()
         if not market or not hasattr(market, "target_date"):
             return False, ""
@@ -348,11 +349,11 @@ class RiskManager:
                 raw = bet.entry_price if bet.entry_price is not None else bet.price
                 entry = float(raw) if raw is not None else 0.0
                 if entry > 0:
-                    loss_pct = (current_price - entry) / entry
-                    if loss_pct <= cfg.time_decay_threshold:
+                    ratio = pnl_ratio(current_price, entry)
+                    if ratio <= cfg.time_decay_threshold:
                         return (
                             True,
-                            f"time_decay: {hours_left:.1f}h left, {loss_pct:.1%}",
+                            f"time_decay: {hours_left:.1f}h left, {ratio:.1%}",
                         )
         except Exception:
             pass
@@ -364,6 +365,8 @@ class RiskManager:
         Sadece pozisyon kâra geçmişse (peak > entry) tetiklenir.
         Peak <= entry ise pozisyon hiç kâra geçmemiş, TS koruma sağlamaz.
         """
+        from utils.formulas import drop_ratio
+
         cfg = self._get_risk_config()
         raw = bet.entry_price if bet.entry_price is not None else bet.price
         entry = float(raw) if raw is not None else 0.0
@@ -407,11 +410,11 @@ class RiskManager:
 
         # Tepeden düşüş kontrolü
         if peak > 0:
-            drop_pct = (peak - current_price) / peak
-            if drop_pct >= cfg.trailing_stop_pct:
+            ratio = drop_ratio(peak, current_price)
+            if ratio >= cfg.trailing_stop_pct:
                 return (
                     True,
-                    f"trailing_stop: dropped {drop_pct:.1%} from peak {peak:.3f}",
+                    f"trailing_stop: dropped {ratio:.1%} from peak {peak:.3f}",
                 )
 
         return False, ""
@@ -1202,9 +1205,10 @@ class SIALoop:
             total = win_count + loss_count
 
             # ROI = realized PnL / total stake (not portfolio.total_value)
+            from utils.formulas import roi_pct
             total_realized = sum(b.pnl or 0.0 for b in all_closed)
             total_stake = sum(b.amount or 0.0 for b in all_closed)
-            roi = (total_realized / total_stake * 100) if total_stake > 0 else 0.0
+            roi = roi_pct(total_realized, total_stake)
 
             summary = {
                 "win_rate": win_count / total if total > 0 else 0.5,

@@ -38,7 +38,7 @@ from engine.calculator import WeatherEngine
 from engine.strategy import BettingEngine, RiskManager, SIALoop
 from executor.settler import SettlementEngine
 from scrapers.polymarket import PolymarketScraper
-from utils.formulas import max_exposure_cap, portfolio_current_value
+from utils.formulas import max_exposure_cap, portfolio_current_value, roi_pct, win_rate_pct, pnl_ratio
 from utils.price_sanity import safe_ev
 from utils.weights_store import load_weights
 
@@ -278,7 +278,7 @@ def get_status():
         ) or 0.0
 
         # ROI for CLOSED bets: realized PNL / total stake (bet amounts)
-        total_roi = (realized_pnl_db / total_stake_settled) * 100 if total_stake_settled > 0 else 0
+        total_roi = roi_pct(realized_pnl_db, total_stake_settled)
         # Daily ROI: daily realized PNL / total stake settled today
         total_stake_today = (
             db.query(func.coalesce(func.sum(Bet.amount), 0.0))
@@ -288,7 +288,7 @@ def get_status():
             )
             .scalar()
         ) or 0.0
-        daily_roi = (daily_pnl / total_stake_today) * 100 if total_stake_today > 0 else 0
+        daily_roi = roi_pct(daily_pnl, total_stake_today)
 
         # --- Sharpe Ratio & Max Drawdown ---
         import math
@@ -773,7 +773,7 @@ def get_history():
         for bet in settled_bets:
             pnl = bet.pnl or bet.realized_pnl or 0.0
             stake = bet.amount or 0.0
-            roi = (pnl / stake * 100) if stake > 0 else 0.0
+            roi = roi_pct(pnl, stake)
             # Get actual edge from Analysis (net edge after slippage+fee)
             analysis = bet_analyses.get(bet.analysis_id) if bet.analysis_id else None
             edge_pct = round((analysis.edge or 0) * 100, 2) if analysis and analysis.edge else None
@@ -810,8 +810,8 @@ def get_history():
                     "exit_type": exit_type,
                 }
             )
-        win_rate = (total_won / (total_won + total_lost) * 100) if (total_won + total_lost) > 0 else 0
-        overall_roi = (total_pnl_all / total_stake_all * 100) if total_stake_all > 0 else 0.0
+        win_rate = win_rate_pct(total_won, total_won + total_lost)
+        overall_roi = roi_pct(total_pnl_all, total_stake_all)
         profit_factor = round(total_win_pnl / total_loss_pnl, 2) if total_loss_pnl > 0 else 0.0
         return {
             "history": history,
@@ -1180,10 +1180,10 @@ def get_health_check():
         total_settled = len(settled_all)
         wins_all = sum(1 for b in settled_all if b.pnl and b.pnl > 0)
         losses_all = sum(1 for b in settled_all if b.pnl is not None and b.pnl <= 0)
-        win_rate_all = (wins_all / total_settled * 100) if total_settled > 0 else 0
+        win_rate_all = win_rate_pct(wins_all, total_settled)
         total_pnl_all_health = sum(b.pnl or 0.0 for b in settled_all)
         total_stake_all_health = sum(b.amount or 0.0 for b in settled_all)
-        roi_all = (total_pnl_all_health / total_stake_all_health * 100) if total_stake_all_health > 0 else 0
+        roi_all = roi_pct(total_pnl_all_health, total_stake_all_health)
 
         # 4b. Exit type breakdown for wins/losses (donut charts)
         exit_type_map = {
@@ -1224,7 +1224,7 @@ def get_health_check():
         recent_total = sum(
             1 for b in settled_all if ((b.settled_at and b.settled_at >= h24) or (b.closed_at and b.closed_at >= h24))
         )
-        recent_win_rate = (wins_all / total_settled * 100) if total_settled > 0 else 0
+        recent_win_rate = win_rate_pct(wins_all, total_settled)
 
         if recent_total >= 10 and recent_losses >= 7:
             red_flags.append(
