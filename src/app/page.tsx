@@ -1303,23 +1303,31 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
 // ==========================================
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<TabId>("overview");
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("darkMode") === "true";
+    }
+    return false;
+  });
   const data = useApiData();
 
-  // Dark mode renkleri
-  const bgColor = darkMode ? "#0f172a" : "#f8fafc";
-  const headerBg = darkMode ? "#1e293b" : "#ffffff";
-  const textColor = darkMode ? "#f1f5f9" : "#0f172a";
-  const mutedColor = darkMode ? "#94a3b8" : "#64748b";
-  const borderColor = darkMode ? "#334155" : "#e2e8f0";
+  useEffect(() => {
+    const root = document.documentElement;
+    if (darkMode) {
+      root.classList.add("dark");
+    } else {
+      root.classList.remove("dark");
+    }
+    localStorage.setItem("darkMode", String(darkMode));
+  }, [darkMode]);
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: bgColor, fontFamily: "'Inter', system-ui, sans-serif" }}>
+    <div className="min-h-screen flex flex-col bg-gray-50/50 dark:bg-gray-900/50" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
       {/* ---- HEADER ---- */}
-      <header className="sticky top-0 z-50 border-b" style={{ backgroundColor: headerBg, borderColor: borderColor }}>
+      <header className="sticky top-0 z-50 bg-white dark:bg-gray-900 border-b" style={{ borderColor: BORDER }}>
         <div className="max-w-7xl mx-auto flex items-center justify-between px-4 sm:px-6 h-14">
           <div className="flex items-center gap-3">
-            <h1 className="text-lg font-bold tracking-tight" style={{ color: textColor }}>Junbo</h1>
+            <h1 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100">Junbo</h1>
             <div className="flex items-center gap-1.5">
               {data.isLoading && !data.status ? (
                 <>
@@ -1360,13 +1368,15 @@ export default function DashboardPage() {
                 Son Tarama: {new Date(data.health.activity_24h.pass_reasons[0].time).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
               </span>
             )}
-            <button 
-                className="p-2 rounded-md hover:bg-gray-100 transition-colors" 
-                aria-label="Dark mode"
-                onClick={() => setDarkMode(!darkMode)}
-                style={{ color: darkMode ? "#fbbf24" : "#6b7280" }}
+            <button
+                className="p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                onClick={() => setDarkMode((d) => !d)}
               >
-                {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                {darkMode ? (
+                  <Sun className="h-4 w-4 text-yellow-400" />
+                ) : (
+                  <Moon className="h-4 w-4 text-gray-500" />
+                )}
               </button>
           </div>
         </div>
