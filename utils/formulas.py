@@ -252,13 +252,23 @@ def roi_pct(pnl: float, stake: float) -> float:
 
     ROI = (pnl / stake) × 100
 
-    Used by:
-      - main.py (:282, :855, :904)
-      - API trade-history and health stats
+    Tek formül - hem kâr/zarar hem de fiyat değişimi için kullanılır.
     """
     if stake <= 0:
         return 0.0
     return (pnl / stake) * 100
+
+
+def profit_pct(current_price: float, entry_price: float) -> float:
+    """Fiyat değişimi yüzdesi - take profit için kullanılır.
+
+    profit = (current_price - entry_price) / entry_price × 100
+
+    Tek formül - roi_pct ile aynı mantık, sadece parametre isimleri farklı.
+    """
+    if entry_price <= 0:
+        return 0.0
+    return ((current_price - entry_price) / entry_price) * 100
 
 
 # ---------------------------------------------------------------------------
