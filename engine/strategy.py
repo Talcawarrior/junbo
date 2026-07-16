@@ -327,7 +327,7 @@ class RiskManager:
         # Tek formül kullan
         pct = profit_pct(current_price, entry)
         if pct >= cfg.take_profit_pct * 100:
-            return True, f"take_profit: {pct:.1%}"
+            return True, f"take_profit: {pct:.1f}%"
         return False, ""
 
     def check_time_decay(self, bet, current_price: float, market) -> tuple:
