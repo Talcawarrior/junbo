@@ -129,6 +129,14 @@ state = BotState()
 async def lifespan(_app: FastAPI):
     """Lifespan context manager for startup and shutdown."""
     logger.info("Junbo Weather Prediction Bot starting...")
+
+    # Startup'ta DB backup al (API ile başlatılsa bile)
+    try:
+        from db_backup import create_backup
+        create_backup("startup")
+    except Exception as e:
+        logger.warning("Startup backup warning: %s", e)
+
     init_db()
     state.initialize_modules()
 
@@ -1050,6 +1058,20 @@ async def stop_bot(_key: str = Depends(verify_api_key)):
 @app.post("/api/reset")
 async def reset_bot(_key: str = Depends(verify_api_key)):
     """Reset the bot state and clear in-flight DB rows WITHOUT auto-restart."""
+    # Silmeden ÖNCE backup al — asla veri kaybı olmasın
+    try:
+        from db_backup import create_backup
+        create_backup("pre_reset")
+    except Exception as e:
+        logger.warning("Pre-reset backup failed: %s", e)
+
+    # Bets ve portfolio'yu parquet'a arşivle (reset sonrası kurtarma için)
+    try:
+        from database.db_cleanup import archive_bets_and_portfolio
+        archive_bets_and_portfolio()
+    except Exception as e:
+        logger.warning("Pre-reset archive failed: %s", e)
+
     await stop_bot()
     db = get_db_session()
     try:

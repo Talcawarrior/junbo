@@ -78,7 +78,7 @@ def kelly_bet_amount(
     *,
     fraction: float = 0.15,
     min_bet: float = 1.0,
-    max_bet_pct: float = 0.03,
+    max_bet_pct: float = None,
 ) -> float:
     """Compute a Kelly-sized dollar bet for the given portfolio.
 
@@ -92,9 +92,15 @@ def kelly_bet_amount(
         Current total portfolio value (cash + unrealized PnL) in dollars.
     prob, price, fraction, min_bet, max_bet_pct
         See :func:`kelly_fraction` plus the per-bet floor and cap.
+        max_bet_pct: defaults to bot_config.strategy.max_bet_pct (0.003).
     """
     if portfolio_value <= 0:
         return 0.0
+
+    # Tek kaynak: bot_config.strategy.max_bet_pct
+    if max_bet_pct is None:
+        from config.settings import bot_config
+        max_bet_pct = bot_config.strategy.max_bet_pct
 
     f_star = kelly_fraction(prob, price)
     if f_star <= 0:

@@ -397,10 +397,7 @@ class WeatherEngine:
         # Local cache for the current session to avoid redundant fetches (e.g. max/min overlap)
         self._forecast_cache = {}
 
-    @staticmethod
-    def _compute_effective_min_edge(market, std: float | None = None) -> float:
-        """Return the time-to-close-scaled min_edge. Delegates to utils.probability."""
-        return compute_effective_min_edge(market, std=std)
+    # _compute_effective_min_edge Calculator sınıfında (satır 364) tanımlı.
 
     async def get_multi_model_forecast(
         self,

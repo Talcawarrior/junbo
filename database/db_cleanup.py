@@ -237,3 +237,43 @@ def auto_cleanup(hot_days: int = 10, cold_days: int = 120) -> dict:
         result.get("purged_files", 0),
     )
     return result
+
+
+def archive_bets_and_portfolio():
+    """Settlement/reset ÖNCESI bets ve portfolio'yu parquet'a arşivle.
+
+    Silindikten sonra kurtarma için kullanılır.
+    Dosyalar: data/archive/bets_snapshot_YYYYMMDD_HHMMSS.parquet
+              data/archive/portfolio_snapshot_YYYYMMDD_HHMMSS.parquet
+    """
+    os.makedirs(ARCHIVE_DIR, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    conn = sqlite3.connect(config.DB_PATH)
+    result = {}
+
+    # Bets tablosunu arşivle
+    try:
+        df = pd.read_sql_query("SELECT * FROM bets", conn)
+        if not df.empty:
+            path = os.path.join(ARCHIVE_DIR, f"bets_snapshot_{ts}.parquet")
+            df.to_parquet(path, index=False, compression="snappy")
+            result["bets"] = {"archived": len(df), "file": path}
+            logger.info("Bets archived: %d rows -> %s", len(df), path)
+    except Exception as e:
+        logger.warning("Bets archive failed: %s", e)
+        result["bets"] = {"error": str(e)}
+
+    # Portfolio snapshot
+    try:
+        df = pd.read_sql_query("SELECT * FROM portfolio", conn)
+        if not df.empty:
+            path = os.path.join(ARCHIVE_DIR, f"portfolio_snapshot_{ts}.parquet")
+            df.to_parquet(path, index=False, compression="snappy")
+            result["portfolio"] = {"archived": len(df), "file": path}
+            logger.info("Portfolio archived: %s", path)
+    except Exception as e:
+        logger.warning("Portfolio archive failed: %s", e)
+        result["portfolio"] = {"error": str(e)}
+
+    conn.close()
+    return result

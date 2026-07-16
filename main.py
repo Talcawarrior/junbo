@@ -222,6 +222,18 @@ def run_cli():
         _ensure_port_free(config.PORT, config.HOST)
         uvicorn.run(app, host=config.HOST, port=config.PORT)
     elif args.command == "reset":
+        # Silmeden ÖNCE backup al
+        try:
+            from db_backup import create_backup
+            create_backup("pre_reset_cli")
+        except Exception:
+            pass
+        # Bets ve portfolio'yu parquet'a arşivle
+        try:
+            from database.db_cleanup import archive_bets_and_portfolio
+            archive_bets_and_portfolio()
+        except Exception:
+            pass
         db = get_db_session()
         db.query(Bet).update({"status": "cancelled"})
         db.query(Analysis).delete()

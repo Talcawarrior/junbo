@@ -290,17 +290,7 @@ def roi_pct(pnl: float, stake: float) -> float:
     return (pnl / stake) * 100
 
 
-def profit_pct(current_price: float, entry_price: float) -> float:
-    """Fiyat değişimi yüzdesi - take profit için kullanılır.
-
-    profit = (current_price - entry_price) / entry_price × 100
-
-    Tek formül - roi_pct ile aynı mantık, sadece parametre isimleri farklı.
-    """
-    if entry_price <= 0:
-        return 0.0
-    return ((current_price - entry_price) / entry_price) * 100
-
+# profit_pct KALDIRILDI — pnl_ratio() * 100 kullanın
 
 # ---------------------------------------------------------------------------
 # 11. Win rate

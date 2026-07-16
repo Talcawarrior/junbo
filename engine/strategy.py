@@ -602,9 +602,12 @@ class BettingEngine:
             market_price = yes_price
             edge = model_prob - market_price
 
-        ev = edge - self.config.FEE_DRAG
-        # Canonical source: bot_config.strategy.min_edge (matches calculator).
-        is_eligible = edge >= bot_config.strategy.min_edge and ev > 0
+        # Tek kaynak: bot_config.strategy.current_fee_rate (dinamik fee)
+        fee_rate = bot_config.strategy.current_fee_rate
+        ev = edge - fee_rate * market_price * (1 - market_price)
+        # min_edge check calculator.py'de effective_min_edge ile yapılıyor.
+        # Burada sadece EV pozitif mi diye bakıyoruz — çifte kontrol kaldırıldı.
+        is_eligible = ev > 0
 
         if not is_eligible:
             return None
