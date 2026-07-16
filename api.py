@@ -48,15 +48,26 @@ logger = logging.getLogger(__name__)
 
 # ── API Key Authentication ──────────────────────────────────────────────────
 # Protects sensitive POST endpoints (reset, asi/*, start, stop, cleanup).
-# Set JUNBO_API_KEY env var to enable. If not set, auth is disabled (dev mode).
+# JUNBO_API_KEY MUST be set. If not set, a random key is generated at startup
+# and printed to console. Destructive endpoints are NEVER open.
+
+import secrets
 
 API_KEY = os.getenv("JUNBO_API_KEY", "")
+if not API_KEY:
+    API_KEY = secrets.token_urlsafe(32)
+    print(f"\n{'='*60}")
+    print(f"WARNING: JUNBO_API_KEY not set. Generated random key:")
+    print(f"  {API_KEY}")
+    print(f"Add to .env: JUNBO_API_KEY={API_KEY}")
+    print(f"{'='*60}\n")
 
 
 async def verify_api_key(x_api_key: str = Header(default="")):
-    """FastAPI dependency: verify X-API-Key header for protected endpoints."""
-    if not API_KEY:
-        return  # No key configured — dev mode, allow all
+    """FastAPI dependency: verify X-API-Key header for protected endpoints.
+
+    NEVER bypassed. If API_KEY is empty (shouldn't happen), still rejects.
+    """
     if x_api_key != API_KEY:
         from fastapi import HTTPException
 

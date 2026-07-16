@@ -123,6 +123,14 @@ def run_cli():
     parser = argparse.ArgumentParser()
     parser.add_argument("command")
     args = parser.parse_args()
+
+    # Bot başlamadan önce DB backup al
+    try:
+        from db_backup import create_backup
+        create_backup("startup")
+    except Exception:
+        pass
+
     init_db()
     ensure_initial_portfolio()
     from jobs.scheduler import (
