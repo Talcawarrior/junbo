@@ -225,7 +225,7 @@ def adjust_edge_for_costs(
         # Since edge is measured in price/probability units (same as p),
         # the fee drag in edge units = feeRate × p × (1-p).
         if entry_price > 0:
-            fee_drag = FEE_PCT * entry_price * (1.0 - entry_price)
+            fee_drag = bot_config.strategy.current_fee_rate * entry_price * (1.0 - entry_price)
         else:
             fee_drag = 0.0
         cost += fee_drag

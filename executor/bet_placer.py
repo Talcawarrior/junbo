@@ -347,7 +347,7 @@ class BetPlacer:
             # Official formula: fee = stake × feeRate × (1-p)
             # This is charged at match time, NOT at settlement.
             # See utils/formulas.py → polymarket_fee_from_stake().
-            fee_rate = Config.WEATHER_FEE_RATE
+            fee_rate = bot_config.strategy.current_fee_rate
             entry_fee = polymarket_fee_from_stake(proposed_amount, fill_price, fee_rate)
 
             # Bet objesi oluştur
@@ -428,6 +428,7 @@ class BetPlacer:
                     bet.status = "failed"
                     bet.error_message = str(e)
                     logger.error(f"Live Bet failed {market.id}: {e}")
+                    return None
             else:
                 # Simulated / Paper trade fallback. Also covers the case
                 # where Config.DRY_RUN is true (defense-in-depth).

@@ -355,7 +355,7 @@ class TestModelReversal:
         rm = make_risk_manager()
         bet = make_mock_bet(fair_value=0.80, unrealized_pnl=-15.0, stake=100.0)
         analysis = MagicMock()
-        analysis.estimated_prob = 0.40  # 0.80 -> 0.40 = -0.50 değişim
+        analysis.estimated_probability = 0.40  # 0.80 -> 0.40 = -0.50 değişim
         should_exit, reason = rm.check_model_reversal(bet, analysis)
         assert should_exit is True
         assert "model_reversal" in reason.lower()
@@ -365,7 +365,7 @@ class TestModelReversal:
         rm = make_risk_manager()
         bet = make_mock_bet(fair_value=0.55, unrealized_pnl=-5.0, stake=100.0)
         analysis = MagicMock()
-        analysis.estimated_prob = 0.53  # Küçük değişim
+        analysis.estimated_probability = 0.53  # Küçük değişim
         should_exit, reason = rm.check_model_reversal(bet, analysis)
         assert should_exit is False
 
@@ -381,7 +381,7 @@ class TestModelReversal:
         rm = make_risk_manager()
         bet = make_mock_bet(fair_value=0.80, unrealized_pnl=10.0, stake=100.0)
         analysis = MagicMock()
-        analysis.estimated_prob = 0.35  # 0.80 -> 0.35 = -0.45
+        analysis.estimated_probability = 0.35  # 0.80 -> 0.35 = -0.45
         should_exit, reason = rm.check_model_reversal(bet, analysis)
         assert should_exit is True
 
@@ -474,7 +474,7 @@ class TestEdgeCases:
         rm = make_risk_manager()
         bet = make_mock_bet(fair_value=0.55)
         analysis = MagicMock()
-        analysis.estimated_prob = 0.55
+        analysis.estimated_probability = 0.55
         should_exit, reason = rm.check_model_reversal(bet, analysis)
         assert should_exit is False
 

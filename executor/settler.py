@@ -261,13 +261,13 @@ class SettlementEngine:
             )
             return None
 
-        if yes_price >= 0.99:
+        if yes_price >= 0.98:
             outcome = "YES"
-        elif no_price >= 0.99:
+        elif no_price >= 0.98:
             outcome = "NO"
         else:
             logger.warning(
-                "Split/no-clear resolution for %s: outcomePrices=%s (neither side >= 0.99)",
+                "Split/no-clear resolution for %s: outcomePrices=%s (neither side >= 0.98)",
                 market.id,
                 prices,
             )

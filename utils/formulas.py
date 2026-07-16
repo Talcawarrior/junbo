@@ -348,4 +348,4 @@ def exit_price_from_pnl(
     if side.upper() == "YES":
         return min(1.0, entry_price * (1.0 + realized_pnl / stake))
     else:
-        return max(0.0, entry_price * (1.0 - abs(realized_pnl) / stake))
+        return max(0.0, entry_price * (1.0 + realized_pnl / stake))

@@ -35,6 +35,7 @@ patches) — this keeps the layer useful in CI.
 
 from __future__ import annotations
 
+import ast
 import importlib
 import json
 import logging
@@ -362,6 +363,65 @@ class FeedbackAgent:
                     compile(f.read(), tmp_path, "exec")
             except SyntaxError as e:
                 return None, f"SyntaxError: {e}"
+
+            # --- C6 Safety checks before exec_module ---
+            logger.warning(
+                "C6: exec_module safety checks pending for patched harness code"
+            )
+            _forbidden_modules = {"os", "subprocess", "sys", "shutil", "ctypes"}
+            try:
+                with open(tmp_path, encoding="utf-8") as f:
+                    _tree = compile(f.read(), tmp_path, "exec")
+                for _node in ast.walk(_tree):
+                    if isinstance(_node, ast.Import):
+                        for _alias in _node.names:
+                            if _alias.name in _forbidden_modules:
+                                return None, (
+                                    f"C6: Blocked import of forbidden module '{_alias.name}'"
+                                )
+                    elif isinstance(_node, ast.ImportFrom):
+                        if _node.module and _node.module.split(".")[0] in _forbidden_modules:
+                            return None, (
+                                f"C6: Blocked from-import of forbidden module '{_node.module}'"
+                            )
+            except Exception as e:
+                return None, f"C6: Safety scan failed: {e}"
+
+            # Check 1: no eval/exec/compile calls in user code
+            _dangerous_builtins = {"eval", "exec", "compile", "__import__", "globals", "locals", "open"}
+            for _node in ast.walk(_tree):
+                if isinstance(_node, ast.Call):
+                    _func_name = ""
+                    if isinstance(_node.func, ast.Name):
+                        _func_name = _node.func.id
+                    elif isinstance(_node.func, ast.Attribute):
+                        _func_name = _node.func.attr
+                    if _func_name in _dangerous_builtins:
+                        return None, f"C6: Blocked dangerous builtin call '{_func_name}'"
+
+            # Check 2: no file/directory deletion attempts
+            _dangerous_attrs = {"remove", "rmdir", "unlink", "shutil", "system", "popen"}
+            for _node in ast.walk(_tree):
+                if isinstance(_node, ast.Attribute) and _node.attr in _dangerous_attrs:
+                    return None, f"C6: Blocked dangerous attribute access '{_node.attr}'"
+
+            # Check 3: code size sanity (no obfuscation bombs)
+            _code_size = os.path.getsize(tmp_path)
+            if _code_size > 50_000:
+                return None, f"C6: Patched code too large ({_code_size} bytes > 50KB limit)"
+
+            # Check 4: line count sanity
+            with open(tmp_path, encoding="utf-8") as f:
+                _line_count = sum(1 for _ in f)
+            if _line_count > 500:
+                return None, f"C6: Patched code too long ({_line_count} lines > 500 limit)"
+
+            # Check 5: verify no dynamic code generation patterns (exec/eval strings)
+            with open(tmp_path, encoding="utf-8") as f:
+                _src_text = f.read()
+            for _pattern in ["os.remove", "os.unlink", "subprocess", "shutil.rmtree", "os.system("]:
+                if _pattern in _src_text:
+                    return None, f"C6: Blocked dangerous pattern '{_pattern}' in source"
 
             # Load the patched module in an isolated namespace
             import importlib.util

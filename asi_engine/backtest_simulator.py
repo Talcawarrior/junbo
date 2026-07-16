@@ -141,6 +141,9 @@ class BacktestSimulator:
 
                     simulated_pnl += pnl
                     bankroll += pnl
+                    if bankroll <= 0:
+                        logger.info("Bankroll depleted at %s — ending simulation", market_date)
+                        break
 
         # Compile metrics
         final_brier = sum(brier_errors) / len(brier_errors) if brier_errors else 0.25

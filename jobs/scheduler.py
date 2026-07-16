@@ -174,8 +174,8 @@ def run_update_prices(session=None):
                                     rung["filled_at"] = datetime.now(timezone.utc).isoformat()
                                     filled_amount += rung_size
                         if filled_amount > 0:
-                            bet.ladder_data = json.dumps(ladder)
                             debit_stake(sess, filled_amount, f"ladder_fill:{bet.market_id}")
+                            bet.ladder_data = json.dumps(ladder)
                 except Exception as e:
                     logger.warning("Ladder parse hatası %s: %s", bet.id, e)
 
@@ -318,7 +318,7 @@ def run_risk_management(session=None):
                         pass  # fall back to simple calculation
 
                 # Polymarket taker fee on early exit (sell order).
-                fee_rate = 0.05  # Weather category rate
+                fee_rate = bot_config.strategy.current_fee_rate
                 fee = round(polymarket_fee(exit_shares, current_price, fee_rate), 2)
                 realized = round(raw_pnl - fee, 2)
                 proceeds_net = round(proceeds - fee, 2)
@@ -346,7 +346,7 @@ def run_risk_management(session=None):
                     portfolio.total_realized_pnl = round((portfolio.total_realized_pnl or 0.0) + realized, 2)
                     portfolio.total_won = (portfolio.total_won or 0) + (1 if realized > 0 else 0)
                     portfolio.total_lost = (portfolio.total_lost or 0) + (1 if realized <= 0 else 0)
-                    portfolio.last_updated = datetime.now(timezone.utc)
+                    portfolio.last_updated = datetime.now(timezone.utc).replace(tzinfo=None)
 
                 sess.add(bet)
                 if portfolio:
@@ -387,6 +387,8 @@ def run_cycle():
             results.append(f"analyze error: {e}")
 
         try:
+            # M5: run_place_bets intentionally manages its own DB session
+            # for bet placement atomicity — does NOT share the cycle session
             results.append(run_place_bets())
         except Exception as e:
             logger.error("Cycle place_bets error: %s", e)

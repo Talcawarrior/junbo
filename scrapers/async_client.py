@@ -109,6 +109,7 @@ async def _async_fetch_one(
     host: str,
     url: str,
     params: dict | None,
+    cache_key: tuple | None = None,
 ) -> Any:
     """Issue one GET, returning the parsed JSON body or None on failure.
 
@@ -133,10 +134,14 @@ async def _async_fetch_one(
             ) as resp:
                 if resp.status != 200:
                     logger.warning("async fetch %s -> HTTP %s", url, resp.status)
+                    if cache_key is not None:
+                        _cache_set(cache_key, None)
                     return None
                 return await resp.json()
         except (TimeoutError, aiohttp.ClientError) as exc:  # type: ignore
             logger.warning("async fetch %s failed: %s", url, exc)
+            if cache_key is not None:
+                _cache_set(cache_key, None)
             return None
 
 
@@ -207,7 +212,12 @@ class AsyncHttpClient:
         )
         try:
             tasks = [
-                asyncio.create_task(_async_fetch_one(session, sem, host, url, params))
+                asyncio.create_task(
+                    _async_fetch_one(
+                        session, sem, host, url, params,
+                        cache_key=_cache_key(url, params),
+                    )
+                )
                 for url, params, host in items
             ]
             return await asyncio.gather(*tasks, return_exceptions=False)
@@ -240,6 +250,7 @@ class AsyncHttpClient:
     ) -> Any:
         results = await self._afetch([(url, params, host)])
         value = results[0] if results else None
+        # Also cache here in case _afetch didn't cache (e.g. aiohttp-less path)
         _cache_set(key, value)
         return value
 

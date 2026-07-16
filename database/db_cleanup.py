@@ -55,6 +55,9 @@ def archive_old_forecasts(hot_days: int = 10, cold_days: int = 120) -> dict:
     cold_cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=cold_days)).isoformat()
 
     conn = sqlite3.connect(config.DB_PATH)
+    # M13: Set WAL PRAGMAs on raw connection to match SQLAlchemy mode
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     archived = 0
     result = {}
 
@@ -78,6 +81,7 @@ def archive_old_forecasts(hot_days: int = 10, cold_days: int = 120) -> dict:
                 existing = pd.read_parquet(pq_path)
                 df = pd.concat([existing, df], ignore_index=True)
 
+            # H13: Write Parquet FIRST, then DELETE — prevents data loss on write failure
             df.to_parquet(pq_path, index=False, compression="snappy")
 
             cur = conn.cursor()
@@ -115,13 +119,18 @@ def archive_old_forecasts(hot_days: int = 10, cold_days: int = 120) -> dict:
             except Exception as e:
                 logger.warning("Purge failed for %s: %s", pq_file, e)
 
-    # --- Step 4: VACUUM ---
+    # --- Step 4: VACUUM (skip if WAL mode — VACUUM blocks all readers) ---
     if archived > 0:
         try:
-            conn.execute("VACUUM")
-            logger.info("VACUUM completed")
+            journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+            if journal_mode == "wal":
+                logger.info("WAL mode active — using wal_checkpoint instead of VACUUM")
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            else:
+                conn.execute("VACUUM")
+            logger.info("Maintenance completed")
         except Exception as e:
-            logger.warning("VACUUM failed: %s", e)
+            logger.warning("Maintenance failed: %s", e)
 
     conn.close()
 
@@ -274,6 +283,18 @@ def archive_bets_and_portfolio():
     except Exception as e:
         logger.warning("Portfolio archive failed: %s", e)
         result["portfolio"] = {"error": str(e)}
+
+    # M15: Cleanup old snapshot files (keep last 30 per prefix)
+    for prefix in ("bets_snapshot_", "portfolio_snapshot_"):
+        pattern = os.path.join(ARCHIVE_DIR, f"{prefix}*.parquet")
+        files = sorted(glob.glob(pattern))
+        if len(files) > 30:
+            for old_file in files[: len(files) - 30]:
+                try:
+                    os.remove(old_file)
+                    logger.info("Purged old snapshot: %s", os.path.basename(old_file))
+                except Exception as e:
+                    logger.warning("Snapshot purge failed for %s: %s", old_file, e)
 
     conn.close()
     return result

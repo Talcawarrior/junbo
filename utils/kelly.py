@@ -111,8 +111,9 @@ def kelly_bet_amount(
         return 0.0
 
     amount = portfolio_value * fractional
-    amount = max(amount, min_bet)
-
     max_amount = portfolio_value * max_bet_pct
     amount = min(amount, max_amount)
+    amount = max(amount, min_bet) if amount > 0 else 0
+    if min_bet > max_amount:
+        return 0.0
     return round(amount, 2)

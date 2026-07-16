@@ -458,6 +458,7 @@ class PolyDataIngest:
         all_events: list[dict] = []
         # Track unique block numbers so we can batch-fetch timestamps
         block_timestamps: dict[int, int] = {}
+        original_chunk = self.cfg.block_chunk
         cur = from_block
         while cur <= to_block:  # type: ignore[reportOptionalOperand]
             chunk_end = min(cur + self.cfg.block_chunk - 1, to_block)  # type: ignore[reportOptionalOperand]
@@ -486,6 +487,8 @@ class PolyDataIngest:
                     if bn not in block_timestamps:
                         block_timestamps[bn] = None  # placeholder
 
+            # Restore original chunk size after a successful request
+            self.cfg.block_chunk = original_chunk
             save_cursor({"last_block": chunk_end})
             logger.info(
                 "  blocks %d-%d: %d events (cumulative %d)",
@@ -511,11 +514,13 @@ class PolyDataIngest:
                 block_timestamps[bn] = ts
             except Exception as exc:
                 logger.debug("getBlock failed for %d: %s", bn, exc)
-                block_timestamps[bn] = 0
+                block_timestamps[bn] = None
 
         df = pd.DataFrame(all_events)
         # Attach block timestamp (UTC)
-        df["timestamp"] = df["block_number"].map(block_timestamps).fillna(0).astype(int)
+        df["timestamp"] = df["block_number"].map(block_timestamps)
+        df = df[df["timestamp"].notna()].copy()
+        df["timestamp"] = df["timestamp"].astype(int)
         df["datetime_utc"] = pd.to_datetime(df["timestamp"], unit="s", utc=True)
         # Attach trade side from asset ids (will be refined during join)
         df["taker_side"] = df["taker_asset_id"].map(asset_id_to_side)

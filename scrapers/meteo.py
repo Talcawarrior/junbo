@@ -130,8 +130,8 @@ class MeteoFetcher:
                 timeout=15,
             )
             if resp.status_code == 429:
-                logger.warning("Open-Meteo 429 Rate Limit! Waiting 120s...")
-                time.sleep(120)
+                logger.warning("Open-Meteo 429 Rate Limit! Waiting 30s...")
+                time.sleep(30)
                 return None
             resp.raise_for_status()
             data = resp.json()
@@ -140,7 +140,7 @@ class MeteoFetcher:
             raise
 
         daily = data.get("daily", {})
-        if daily.get("temperature_2m_max"):
+        if daily.get("temperature_2m_max") and daily["temperature_2m_max"][0] is not None:
             result = {
                 "source": "openmeteo",
                 "temperature_max": daily["temperature_2m_max"][0],

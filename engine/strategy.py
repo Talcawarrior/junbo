@@ -56,6 +56,7 @@ class MockBet:
         self.city = kwargs.get("city", "")
         self.outcome = kwargs.get("outcome", "YES")
         self.stake_amount = kwargs.get("bet_size", 0.0)
+        self.amount = kwargs.get("amount", 0.0)
         self.entry_price = kwargs.get("entry_price", 0.5)
         self.fair_value = kwargs.get("fair_value", 0.5)
         self.expected_value = kwargs.get("edge", 0.0)
@@ -91,8 +92,8 @@ class RiskManager:
             p = self.db.query(Portfolio).filter(Portfolio.id == 1).first()
             if p and p.total_value:
                 self.portfolio_value = float(p.total_value)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("portfolio load fallback: %s", e)
 
     def update_portfolio(self, value: float):
         """Update portfolio value."""
@@ -212,7 +213,8 @@ class RiskManager:
             )
             # Use central formula
             return conservative_portfolio_value(initial, realized)
-        except Exception:
+        except Exception as e:
+            logger.warning("conservative_portfolio fallback: %s", e)
             return self.portfolio_value
 
     @property
@@ -260,7 +262,7 @@ class RiskManager:
             portfolio = self.db.query(Portfolio).filter(Portfolio.id == 1).first()
             if portfolio:
                 self.portfolio_value = (
-                    portfolio.current_value
+                    portfolio.total_value
                     or portfolio.initial_value
                     or self.portfolio_value
                 )
@@ -495,7 +497,7 @@ class RiskManager:
         try:
             # Bet'in açıldığı andaki model prob'u fair_value'da saklı
             entry_prob = float(getattr(bet, "fair_value", 0.5) or 0.5)
-            current_prob = float(getattr(analysis, "estimated_prob", 0.5) or 0.5)
+            current_prob = float(getattr(analysis, "estimated_probability", 0.5) or 0.5)
 
             if entry_prob <= 0 or current_prob <= 0:
                 return False, ""
@@ -749,8 +751,9 @@ class BettingEngine:
                 bet_size = self.calculate_position_size(
                     signal_dict, portfolio_value, self.risk_manager
                 )
-            except Exception:
-                bet_size = 10.0
+            except Exception as e:
+                logger.warning("Position size calculation failed: %s", e)
+                bet_size = min(bet_size, bot_config.strategy.max_bet_amount)
         signal_dict["bet_size"] = bet_size
 
         sig = SimpleSignal(
@@ -1186,11 +1189,9 @@ class SIALoop:
 
             # --- 1. Model Weights Optimization (Legacy SIA) ---
             performance = self.analyze_model_performance(days=30)
+            new_weights = None
             if performance:
                 new_weights = self.optimize_weights(performance)
-                self.model_weights = new_weights
-                if hasattr(self.config, "MODEL_WEIGHTS"):
-                    setattr(self.config, "MODEL_WEIGHTS", new_weights)
 
             # --- 2. Strategy Parameter Optimization (Financial SIA) ---
             # Aggregate overall stats for the feedback agent
@@ -1227,12 +1228,17 @@ class SIALoop:
                     brier_score=perf["brier_score"],
                     accuracy=perf["accuracy"],
                     num_predictions=perf["num_predictions"],
-                    weight=self.model_weights.get(model_name, 0),
+                    weight=(new_weights or self.model_weights).get(model_name, 0),
                     recorded_at=datetime.now(timezone.utc),
                 )
                 db.add(record)
 
             db.commit()
+            # Update in-memory state only after successful commit
+            if new_weights is not None:
+                self.model_weights = new_weights
+                if hasattr(self.config, "MODEL_WEIGHTS"):
+                    setattr(self.config, "MODEL_WEIGHTS", new_weights)
             logger.info(
                 "SIA Loop tamamlandi. Model agirliklari ve strateji parametreleri guncellendi."
             )

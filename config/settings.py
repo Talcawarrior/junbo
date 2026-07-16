@@ -112,7 +112,6 @@ class StrategyConfig:
     fee_rate_weather: float = 0.05
     current_fee_rate: float = 0.05  # Updated dynamically from API
 
-    fee_drag: float = 0.02  # Polymarket taker fee %2
     # Bot scope: today + 1 + 2 days ahead (0..2 inclusive).
     # Tightened from 14 to 2 so the bot only trades near-term markets
     # where the public weather ensemble (GFS/ECMWF/ICON/...) is still
@@ -381,6 +380,7 @@ class BotConfig:
         # ── Override from .env (single source: .env > dataclass defaults) ──
         self.initial_portfolio = float(os.getenv("INITIAL_PORTFOLIO", str(self.initial_portfolio)))
         self.max_exposure_pct = float(os.getenv("MAX_EXPOSURE_PCT", str(self.max_exposure_pct)))
+        self.strategy.total_exposure_pct = self.max_exposure_pct
         self.city_cap = int(os.getenv("CITY_CAP", str(self.city_cap)))
         self.weather_fee_rate = float(os.getenv("WEATHER_FEE_RATE", str(self.weather_fee_rate)))
         self.scan_interval = int(os.getenv("SCAN_INTERVAL", str(self.scan_interval)))
@@ -390,7 +390,7 @@ class BotConfig:
         self.midnight_scan_window = int(os.getenv("MIDNIGHT_SCAN_WINDOW", str(self.midnight_scan_window)))
         self.host = os.getenv("HOST", self.host)
         self.port = int(os.getenv("PORT", str(self.port)))
-        self.dry_run = os.getenv("DRY_RUN", "true").lower() == "true"
+        self.dry_run = os.getenv("DRY_RUN", str(self.dry_run)).lower() == "true"
         self.log_level = os.getenv("LOG_LEVEL", self.log_level)
         self.db_echo = os.getenv("DB_ECHO", "false").lower() == "true"
 
@@ -471,7 +471,6 @@ class _ConfigProxy:
         "MIN_ENTRY_PRICE": ("strategy", "min_entry_price"),
         "FLAT_BET_USD": ("strategy", "flat_bet_usd"),
         "DAILY_LOSS_LIMIT": ("strategy", "daily_loss_limit"),
-        "FEE_DRAG": ("strategy", "fee_drag"),
         "TOTAL_EXPOSURE_PCT": ("strategy", "total_exposure_pct"),
     }
 

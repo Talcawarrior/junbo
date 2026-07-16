@@ -162,8 +162,8 @@ class Bet(Base):
     city_code = Column(String)
     city = Column(String)  # compatibility
     outcome = Column(String)  # "YES" or "NO"
-    stake = Column(Float)
-    stake_amount = Column(Float, default=0.0)
+    stake = Column(Float)  # DEPRECATED: dead column, kept for DB migration compatibility
+    stake_amount = Column(Float, default=0.0)  # DEPRECATED: dead column, kept for DB migration compatibility
     entry_price = Column(Float)
     shares = Column(Float)
     current_price = Column(Float, default=0.5)
@@ -172,7 +172,7 @@ class Bet(Base):
     fair_value = Column(Float, default=0.0)
     expected_value = Column(Float, default=0.0)
     strike_temp = Column(Float)
-    bet_type = Column(String)  # YES/NO or HIGH/LOW
+    bet_type = Column(String)  # DEPRECATED: dead column, kept for DB migration compatibility
     side = Column(String)  # YES/NO/HIGH/LOW
     realized_pnl = Column(Float, default=0.0)
     status = Column(String, default=BetStatus.OPEN.value)
@@ -227,7 +227,7 @@ class ModelPerformance(Base):
     total_predictions = Column(Integer, default=0)
     correct_predictions = Column(Integer, default=0)
     accuracy = Column(Float, default=0.0)
-    num_predictions = Column(Integer, default=0)
+    num_predictions = Column(Integer, default=0)  # DEPRECATED: dead column, kept for DB migration compatibility
     brier_score = Column(Float, default=0.0)
     weight = Column(Float, default=0.0)
     last_updated = Column(

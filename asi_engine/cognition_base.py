@@ -139,13 +139,21 @@ class CognitionBase:
                         for item in raw_data
                     ]
             except Exception as e:
-                logger.error("Could not load cognition base: %s", e)
+                # H14: Keep existing nodes on corrupt JSON — do NOT clear self.nodes
+                logger.error(
+                    "Could not load cognition base: %s — keeping existing %d nodes",
+                    e,
+                    len(self.nodes),
+                )
 
     def _save_to_disk(self):
         try:
             os.makedirs(os.path.dirname(COGNITION_PATH), exist_ok=True)
-            with open(COGNITION_PATH, "w", encoding="utf-8") as f:
+            # H15: Write to temp file first, then os.replace() for atomic swap
+            tmp_path = COGNITION_PATH + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump([node.to_dict() for node in self.nodes], f, indent=2, sort_keys=True)
+            os.replace(tmp_path, COGNITION_PATH)
             logger.info("Cognition Base successfully persisted to %s", COGNITION_PATH)
         except Exception as e:
             logger.error("Could not save cognition base to disk: %s", e)
