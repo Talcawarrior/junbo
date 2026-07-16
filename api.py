@@ -337,9 +337,25 @@ def get_status():
                 if dd > max_drawdown_pct:
                     max_drawdown_pct = round(dd, 2)
 
+        # Scan loop sağlık kontrolü
+        scan_health = "unknown"
+        minutes_since_scan = None
+        if state.last_scan:
+            elapsed = (datetime.now(timezone.utc).replace(tzinfo=None) - state.last_scan).total_seconds()
+            minutes_since_scan = round(elapsed / 60)
+            if elapsed < 900:
+                scan_health = "healthy"
+            elif elapsed < 1800:
+                scan_health = "warning"
+            else:
+                scan_health = "dead"
+
         return {
             "is_running": state.is_running,
             "locked": state.locked,
+            "scan_health": scan_health,
+            "last_scan": state.last_scan.isoformat() if state.last_scan else None,
+            "minutes_since_last_scan": minutes_since_scan,
             "portfolio": {
                 "initial": initial_capital,
                 "current": portfolio_current_value(initial_capital, realized_pnl_db, unrealized_pnl_db),

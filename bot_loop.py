@@ -1,7 +1,9 @@
 """Background bot loops: scan-and-bet, settlement, stale cleanup.
 
-ASIAbot ile aynı yapıda: asyncio.gather + timeout.
-Akıllı tarama: Yeni market algılarsa hızlı moda geçer.
+ASYNCIO safety: Each loop has a SINGLE try/except wrapping the entire body
+so that no exception can silently kill the loop without logging.
+
+Watchdog: settlement_loop monitors scan_loop health via state.last_scan.
 """
 
 import asyncio
@@ -19,13 +21,17 @@ _CYCLE_TIMEOUT = 600
 _CLEANUP_TIMEOUT = 60
 
 # Akıllı tarama ayarları
-_FAST_MODE_MINUTES = 30  # Yeni market bulunursa 30 dk hızlı tarama
-_FAST_SCAN_INTERVAL = 60  # Hızlı mod: 60 saniye
-_NORMAL_SCAN_INTERVAL = 900  # Normal mod: 15 dakika
+_FAST_MODE_MINUTES = 30
+_FAST_SCAN_INTERVAL = 60
+_NORMAL_SCAN_INTERVAL = 900
+
+# Watchdog thresholds (seconds)
+_WATCHDOG_WARNING = 900    # 15 dakika — warning
+_WATCHDOG_DEAD = 1800      # 30 dakika — dead
+_WATCHDOG_RESTART = 3600   # 1 saat — restart
 
 
 def _get_market_count() -> int:
-    """Açık market sayısını döndür."""
     with get_session() as db:
         return db.query(WeatherMarket).filter(WeatherMarket.status == "open").count()
 
@@ -37,23 +43,19 @@ def _is_midnight_window(now: datetime) -> bool:
 
 
 def _get_scan_interval(now: datetime, fast_mode_until: datetime | None) -> int:
-    """Tarama aralığını hesapla - akıllı mod dahil."""
-    # Hızlı mod aktif mi?
     if fast_mode_until and now < fast_mode_until:
         return _FAST_SCAN_INTERVAL
-
-    # Midnight window
     from config.settings import bot_config
     if _is_midnight_window(now):
         return bot_config.midnight_scan_interval
-
     return _NORMAL_SCAN_INTERVAL
 
 
 async def scan_and_bet_loop(state):
-    """Scan loop - akıllı tarama ile.
+    """Scan loop — akıllı tarama ile.
 
-    Yeni market algılanırsa 30 dk boyunca hızlı tarama yapar.
+    TEK try/except ile tüm while body'si korunuyor.
+    Hata durumunda loop çökmez, 60sn recovery ile devam eder.
     """
     from jobs.scheduler import (
         run_cycle,
@@ -67,7 +69,6 @@ async def scan_and_bet_loop(state):
     previous_market_count = 0
     fast_mode_until = None
 
-    # İlk market sayısını al
     try:
         previous_market_count = _get_market_count()
         logger.info("Initial market count: %d", previous_market_count)
@@ -75,20 +76,19 @@ async def scan_and_bet_loop(state):
         logger.warning("Could not get initial market count: %s", e)
 
     while state.is_running:
-        state.last_scan = datetime.now(timezone.utc).replace(tzinfo=None)
-        scan_start = datetime.now(timezone.utc)
+        try:  # ← TEK TRY — her şey içeride
+            state.last_scan = datetime.now(timezone.utc).replace(tzinfo=None)
+            scan_start = datetime.now(timezone.utc)
 
-        try:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             today = now.date()
-
             is_new_day = last_day is not None and today != last_day
             last_day = today
 
             if is_new_day:
                 logger.info("Midnight detected — running immediate scan")
 
-            # STEP 1: Fetch markets (senkron)
+            # STEP 1: Fetch markets
             await asyncio.wait_for(asyncio.to_thread(run_fetch_markets), timeout=_FETCH_TIMEOUT)
 
             # STEP 2: Parse + Weather PARALEL
@@ -101,7 +101,7 @@ async def scan_and_bet_loop(state):
                 if isinstance(result, Exception):
                     logger.error("Parallel step error: %s", result)
 
-            # STEP 3: Run cycle (senkron)
+            # STEP 3: Run cycle
             await asyncio.wait_for(asyncio.to_thread(run_cycle), timeout=_CYCLE_TIMEOUT)
 
             # Yeni market algılama
@@ -127,33 +127,75 @@ async def scan_and_bet_loop(state):
                 except Exception as e:
                     logger.warning("Stale cleanup failed: %s", e)
 
+            # Scan duration log
+            scan_duration = (datetime.now(timezone.utc) - scan_start).total_seconds()
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            interval = _get_scan_interval(now, fast_mode_until)
+            mode = "FAST" if fast_mode_until and now < fast_mode_until else "NORMAL"
+            logger.info("Scan completed in %.1fs [%s mode], next in %ds", scan_duration, mode, interval)
+
+            await asyncio.sleep(interval)
+
+        except asyncio.CancelledError:
+            logger.info("Scan loop cancelled — shutting down")
+            break
         except asyncio.TimeoutError:
-            logger.error("Scan step timed out - recovering (retry in 60s)")
+            logger.error("Scan step timed out — retry in 60s")
             await asyncio.sleep(60)
-            continue
         except Exception as e:
-            logger.error("Scan error: %s - recovering (retry in 60s)", e)
+            logger.error("Scan error: %s — retry in 60s", e, exc_info=True)
             await asyncio.sleep(60)
-            continue
 
-        # Tarama süresini logla
-        scan_duration = (datetime.now(timezone.utc) - scan_start).total_seconds()
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        interval = _get_scan_interval(now, fast_mode_until)
-        mode = "FAST" if fast_mode_until and now < fast_mode_until else "NORMAL"
-        logger.info("Scan completed in %.1fs [%s mode], next in %ds", scan_duration, mode, interval)
-
-        await asyncio.sleep(interval)
+    logger.info("Scan loop exited (is_running=%s)", state.is_running)
 
 
 async def settlement_loop(state):
-    """Settlement loop."""
+    """Settlement loop + scan loop watchdog.
+
+    Scan loop 30dk+ süredir çalışmıyorsa log yazıyor.
+    1 saati aşkın süredir çalışmıyorsa bot'u durduruyor.
+    """
     from jobs.scheduler import run_settle
 
     last_cleanup_date = None
+    scan_healthy = True
 
     while state.is_running:
         try:
+            # ── Watchdog: scan loop sağlık kontrolü ──
+            now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+            if state.last_scan:
+                elapsed = (now_utc - state.last_scan).total_seconds()
+                if elapsed > _WATCHDOG_DEAD:
+                    if scan_healthy:
+                        logger.error(
+                            "SCAN LOOP WATCHDOG: No scan for %.1f minutes! last_scan=%s",
+                            elapsed / 60, state.last_scan
+                        )
+                        scan_healthy = False
+                    # 1 saatten fazlaysa bot'u durdur
+                    if elapsed > _WATCHDOG_RESTART:
+                        logger.critical(
+                            "SCAN LOOP DEAD for >%.0f min — stopping bot for restart",
+                            elapsed / 60
+                        )
+                        state.is_running = False
+                        break
+                elif elapsed > _WATCHDOG_WARNING:
+                    logger.warning(
+                        "SCAN LOOP WATCHDOG: Last scan %.1f min ago (warning)",
+                        elapsed / 60
+                    )
+                else:
+                    if not scan_healthy:
+                        logger.info("Scan loop recovered — healthy again")
+                    scan_healthy = True
+            else:
+                if scan_healthy:
+                    logger.warning("SCAN LOOP WATCHDOG: last_scan is None (never ran?)")
+                    scan_healthy = False
+
+            # ── Normal settlement işlemi ──
             await asyncio.to_thread(run_settle)
 
             today = datetime.now(timezone.utc).date()
@@ -162,16 +204,22 @@ async def settlement_loop(state):
                 await asyncio.to_thread(auto_cleanup, hot_days=10, cold_days=120)
                 last_cleanup_date = today
 
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
             if state.sia_loop is not None and (
                 state.sia_last_run is None
-                or (now - state.sia_last_run).total_seconds() >= state.sia_interval_hours * 3600
+                or (now_utc - state.sia_last_run).total_seconds() >= state.sia_interval_hours * 3600
             ):
                 await asyncio.to_thread(state.sia_loop.run_optimization_cycle)
                 state.sia_last_run = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        except asyncio.CancelledError:
+            logger.info("Settlement loop cancelled")
+            break
         except Exception as e:
-            logger.error("Settle error: %s", e)
+            logger.error("Settle error: %s", e, exc_info=True)
+
         await asyncio.sleep(state.config.SETTLEMENT_INTERVAL)
+
+    logger.info("Settlement loop exited (is_running=%s)", state.is_running)
 
 
 def _cleanup_stale_bets():
