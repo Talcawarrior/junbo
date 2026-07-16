@@ -14,8 +14,8 @@ from database.models import OPEN_BET_STATUSES, Bet, WeatherMarket
 logger = logging.getLogger("BOT_LOOP")
 
 # Timeout values (seconds)
-_FETCH_TIMEOUT = 120
-_CYCLE_TIMEOUT = 300
+_FETCH_TIMEOUT = 180
+_CYCLE_TIMEOUT = 600
 _CLEANUP_TIMEOUT = 60
 
 # Akıllı tarama ayarları
@@ -128,9 +128,13 @@ async def scan_and_bet_loop(state):
                     logger.warning("Stale cleanup failed: %s", e)
 
         except asyncio.TimeoutError:
-            logger.error("Scan step timed out - recovering")
+            logger.error("Scan step timed out - recovering (retry in 60s)")
+            await asyncio.sleep(60)
+            continue
         except Exception as e:
-            logger.error("Scan error: %s", e)
+            logger.error("Scan error: %s - recovering (retry in 60s)", e)
+            await asyncio.sleep(60)
+            continue
 
         # Tarama süresini logla
         scan_duration = (datetime.now(timezone.utc) - scan_start).total_seconds()

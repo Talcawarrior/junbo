@@ -1,0 +1,8 @@
+{
+  "properties": [
+    "train_end_date < test_start_date",
+    "test_start_date > train_end_date",
+    "no_future_data_in_train"
+  ],
+  "version": "1.0"
+}

@@ -312,8 +312,6 @@ class RiskManager:
 
     def check_take_profit(self, bet, current_price: float, market=None) -> tuple:  # pylint: disable=unused-argument
         """Take-profit: pozisyon %take_profit_pct'den fazla kardaysa veya fiyat 0.98'e ulaştıysa kapat."""
-        from utils.formulas import profit_pct
-
         cfg = self._get_risk_config()
         raw = bet.entry_price if bet.entry_price is not None else bet.price
         entry = float(raw) if raw is not None else 0.0
@@ -324,10 +322,10 @@ class RiskManager:
         if current_price >= 0.98:
             return True, f"near_certain_win: price={current_price:.2f}"
 
-        # Tek formül kullan
-        pct = profit_pct(current_price, entry)
-        if pct >= cfg.take_profit_pct * 100:
-            return True, f"take_profit: {pct:.1f}%"
+        # Ratio hesapla — check_stop_loss ile aynı pattern
+        profit_ratio = (current_price - entry) / entry
+        if profit_ratio >= cfg.take_profit_pct:
+            return True, f"take_profit: {profit_ratio:.1%}"
         return False, ""
 
     def check_time_decay(self, bet, current_price: float, market) -> tuple:
