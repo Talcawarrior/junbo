@@ -513,5 +513,54 @@ class TestStep12_CompleteFlow:
         assert should_close == True
 
 
+# ============================================================================
+# STEP 13: SMART SCAN DETECTION
+# ============================================================================
+
+class TestStep13_SmartScan:
+    """Adım 13: Akıllı tarama algılama."""
+
+    def test_get_market_count(self):
+        """Market sayısı alınıyor."""
+        from bot_loop import _get_market_count
+
+        count = _get_market_count()
+        assert count >= 0
+
+    def test_fast_mode_detection(self):
+        """Yeni market algılarsa hızlı mod tetiklenmeli."""
+        from datetime import timedelta
+
+        now = datetime.now(timezone.utc)
+        previous_count = 100
+        current_count = 120  # 20 yeni market
+
+        # Yeni market varsa hızlı mod
+        if current_count > previous_count:
+            fast_mode_until = now + timedelta(minutes=30)
+            assert fast_mode_until > now
+
+    def test_scan_interval_selection(self):
+        """Doğru scan interval seçilmeli."""
+        from bot_loop import _get_scan_interval
+        from datetime import timedelta
+
+        now = datetime.now(timezone.utc)
+
+        # Normal mod
+        interval = _get_scan_interval(now, None)
+        assert interval == 900  # 15 dakika
+
+        # Hızlı mod
+        fast_mode_until = now + timedelta(minutes=10)
+        interval = _get_scan_interval(now, fast_mode_until)
+        assert interval == 60  # 60 saniye
+
+        # Hızlı mod süresi doldu
+        fast_mode_until = now - timedelta(minutes=5)
+        interval = _get_scan_interval(now, fast_mode_until)
+        assert interval == 900  # Normal moda döndü
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

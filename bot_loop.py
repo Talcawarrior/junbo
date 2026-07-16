@@ -1,11 +1,12 @@
 """Background bot loops: scan-and-bet, settlement, stale cleanup.
 
-ASIAbot ile aynı yapıda: asyncio.gather + semaphore + timeout.
+ASIAbot ile aynı yapıda: asyncio.gather + timeout.
+Akıllı tarama: Yeni market algılarsa hızlı moda geçer.
 """
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from database.db import get_session
 from database.models import OPEN_BET_STATUSES, Bet, WeatherMarket
@@ -17,6 +18,17 @@ _FETCH_TIMEOUT = 120
 _CYCLE_TIMEOUT = 300
 _CLEANUP_TIMEOUT = 60
 
+# Akıllı tarama ayarları
+_FAST_MODE_MINUTES = 30  # Yeni market bulunursa 30 dk hızlı tarama
+_FAST_SCAN_INTERVAL = 60  # Hızlı mod: 60 saniye
+_NORMAL_SCAN_INTERVAL = 900  # Normal mod: 15 dakika
+
+
+def _get_market_count() -> int:
+    """Açık market sayısını döndür."""
+    with get_session() as db:
+        return db.query(WeatherMarket).filter(WeatherMarket.status == "open").count()
+
 
 def _is_midnight_window(now: datetime) -> bool:
     from config.settings import bot_config
@@ -24,19 +36,24 @@ def _is_midnight_window(now: datetime) -> bool:
     return now.hour == 0 and now.minute < window_minutes
 
 
-def _get_scan_interval(now: datetime) -> int:
+def _get_scan_interval(now: datetime, fast_mode_until: datetime | None) -> int:
+    """Tarama aralığını hesapla - akıllı mod dahil."""
+    # Hızlı mod aktif mi?
+    if fast_mode_until and now < fast_mode_until:
+        return _FAST_SCAN_INTERVAL
+
+    # Midnight window
     from config.settings import bot_config
     if _is_midnight_window(now):
         return bot_config.midnight_scan_interval
-    return bot_config.scan_interval
+
+    return _NORMAL_SCAN_INTERVAL
 
 
 async def scan_and_bet_loop(state):
-    """Scan loop - ASIAbot ile aynı yapıda.
+    """Scan loop - akıllı tarama ile.
 
-    1. fetch_markets (senkron)
-    2. parse + weather (asyncio.gather ile paralel)
-    3. run_cycle (senkron)
+    Yeni market algılanırsa 30 dk boyunca hızlı tarama yapar.
     """
     from jobs.scheduler import (
         run_cycle,
@@ -47,9 +64,20 @@ async def scan_and_bet_loop(state):
 
     stale_check_counter = 0
     last_day = None
+    previous_market_count = 0
+    fast_mode_until = None
+
+    # İlk market sayısını al
+    try:
+        previous_market_count = _get_market_count()
+        logger.info("Initial market count: %d", previous_market_count)
+    except Exception as e:
+        logger.warning("Could not get initial market count: %s", e)
 
     while state.is_running:
         state.last_scan = datetime.now(timezone.utc).replace(tzinfo=None)
+        scan_start = datetime.now(timezone.utc)
+
         try:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             today = now.date()
@@ -76,6 +104,20 @@ async def scan_and_bet_loop(state):
             # STEP 3: Run cycle (senkron)
             await asyncio.wait_for(asyncio.to_thread(run_cycle), timeout=_CYCLE_TIMEOUT)
 
+            # Yeni market algılama
+            try:
+                current_count = _get_market_count()
+                if current_count > previous_market_count:
+                    new_markets = current_count - previous_market_count
+                    fast_mode_until = datetime.now(timezone.utc) + timedelta(minutes=_FAST_MODE_MINUTES)
+                    logger.info(
+                        "NEW MARKETS DETECTED: +%d (total: %d) — FAST MODE for %d min",
+                        new_markets, current_count, _FAST_MODE_MINUTES
+                    )
+                previous_market_count = current_count
+            except Exception as e:
+                logger.warning("Market count check failed: %s", e)
+
             # Stale cleanup her 10 döngüde
             stale_check_counter += 1
             if stale_check_counter >= 10:
@@ -90,8 +132,13 @@ async def scan_and_bet_loop(state):
         except Exception as e:
             logger.error("Scan error: %s", e)
 
+        # Tarama süresini logla
+        scan_duration = (datetime.now(timezone.utc) - scan_start).total_seconds()
         now = datetime.now(timezone.utc).replace(tzinfo=None)
-        interval = _get_scan_interval(now)
+        interval = _get_scan_interval(now, fast_mode_until)
+        mode = "FAST" if fast_mode_until and now < fast_mode_until else "NORMAL"
+        logger.info("Scan completed in %.1fs [%s mode], next in %ds", scan_duration, mode, interval)
+
         await asyncio.sleep(interval)
 
 
