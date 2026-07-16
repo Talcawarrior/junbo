@@ -1340,14 +1340,14 @@ export default function DashboardPage() {
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
                   </span>
-                  <span className="text-xs font-medium text-green-600">ÇALIŞIYOR</span>
+                  <span className="text-xs font-medium text-green-600 dark:text-green-400">ÇALIŞIYOR</span>
                 </>
               ) : (
                 <>
                   <span className="relative flex h-2 w-2">
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-gray-400" />
                   </span>
-                  <span className="text-xs font-medium" style={{ color: TEXT_MUTED }}>DURDURULDU</span>
+                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400">DURDURULDU</span>
                 </>
               )}
             </div>
@@ -1359,7 +1359,7 @@ export default function DashboardPage() {
           </div>
           <div className="flex items-center gap-2">
             {data.lastUpdated && (
-              <span className="text-[10px] tabular-nums" style={{ color: TEXT_MUTED }}>
+              <span className="text-[10px] tabular-nums text-gray-500 dark:text-gray-400">
                 Son güncelleme: {data.lastUpdated.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
               </span>
             )}
@@ -1383,7 +1383,7 @@ export default function DashboardPage() {
       </header>
 
       {/* ---- TAB NAVIGATION ---- */}
-      <nav className="bg-white border-b sticky top-14 z-40" style={{ borderColor: BORDER }}>
+      <nav className="bg-white dark:bg-gray-900 border-b sticky top-14 z-40" style={{ borderColor: BORDER }}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="flex gap-0 overflow-x-auto">
             {TABS.map((tab) => (
@@ -1423,7 +1423,7 @@ export default function DashboardPage() {
 
       {/* ---- FOOTER ---- */}
       <footer className="mt-auto py-4 text-center">
-        <p className="text-xs" style={{ color: TEXT_MUTED }}>
+        <p className="text-xs text-gray-500 dark:text-gray-400">
           Junbo — Polymarket Hava Ticaret Botu - SIA Modeli ile Otomatik İşlem
         </p>
       </footer>
