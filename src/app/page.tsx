@@ -49,6 +49,7 @@ import {
 import {
   TrendingUp,
   Moon,
+  Sun,
   Wallet,
   Activity,
   Target,
@@ -1169,8 +1170,8 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
                     label: "Sharpe Ratio", 
                     value: kpiData ? fmtNum(kpiData.sharpeRatio) : "—",
                     target: "> 1.0 İyi, > 2.0 Mükemmel",
-                    color: TEXT_PRIMARY,
-                    tooltip: "Risk-başına getiri. Formül: (Ort. Getiri - Risk-Free) / Std Sapma. <0.5 zayıf, 0.5-1 orta, >1 iyi, >2 mükemmel"
+                    color: kpiData ? (kpiData.sharpeRatio < 0.5 ? RED : kpiData.sharpeRatio < 1.0 ? "#eab308" : kpiData.sharpeRatio < 2.0 ? "#22c55e" : "#16a34a") : TEXT_PRIMARY,
+                    tooltip: "Risk-başına getiri. <0.5 zayıf, 0.5-1 orta, >1 iyi, >2 mükemmel"
                   },
                   { 
                     label: "Max Drawdown", 
@@ -1302,15 +1303,23 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
 // ==========================================
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const [darkMode, setDarkMode] = useState(false);
   const data = useApiData();
 
+  // Dark mode renkleri
+  const bgColor = darkMode ? "#0f172a" : "#f8fafc";
+  const headerBg = darkMode ? "#1e293b" : "#ffffff";
+  const textColor = darkMode ? "#f1f5f9" : "#0f172a";
+  const mutedColor = darkMode ? "#94a3b8" : "#64748b";
+  const borderColor = darkMode ? "#334155" : "#e2e8f0";
+
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50/50" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+    <div className="min-h-screen flex flex-col" style={{ backgroundColor: bgColor, fontFamily: "'Inter', system-ui, sans-serif" }}>
       {/* ---- HEADER ---- */}
-      <header className="sticky top-0 z-50 bg-white border-b" style={{ borderColor: BORDER }}>
+      <header className="sticky top-0 z-50 border-b" style={{ backgroundColor: headerBg, borderColor: borderColor }}>
         <div className="max-w-7xl mx-auto flex items-center justify-between px-4 sm:px-6 h-14">
           <div className="flex items-center gap-3">
-            <h1 className="text-lg font-bold tracking-tight" style={{ color: TEXT_PRIMARY }}>Junbo</h1>
+            <h1 className="text-lg font-bold tracking-tight" style={{ color: textColor }}>Junbo</h1>
             <div className="flex items-center gap-1.5">
               {data.isLoading && !data.status ? (
                 <>
@@ -1351,9 +1360,14 @@ export default function DashboardPage() {
                 Son Tarama: {new Date(data.health.activity_24h.pass_reasons[0].time).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
               </span>
             )}
-            <button className="p-2 rounded-md hover:bg-gray-100 transition-colors" aria-label="Dark mode">
-              <Moon className="h-4 w-4 text-gray-500" />
-            </button>
+            <button 
+                className="p-2 rounded-md hover:bg-gray-100 transition-colors" 
+                aria-label="Dark mode"
+                onClick={() => setDarkMode(!darkMode)}
+                style={{ color: darkMode ? "#fbbf24" : "#6b7280" }}
+              >
+                {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </button>
           </div>
         </div>
       </header>
