@@ -312,7 +312,8 @@ class MeteoFetcher:
 
                     try:
                         for metric, mids in mids_by_metric.items():
-                            # 1. Try Ensemble (8-model)
+                            # 1. Try Ensemble (8-model tek istek)
+                            result = None
                             try:
                                 result = loop.run_until_complete(
                                     we.get_multi_model_forecast(
@@ -325,42 +326,37 @@ class MeteoFetcher:
                                         metric=metric,
                                     )
                                 )
-
-                                if result and result.get("model_count", 0) >= 3:
-                                    total += result["model_count"] * len(mids)
-                                    continue
                             except Exception as e:
-                                logger.debug(
-                                    "Ensemble failed for group %s %s: %s",
-                                    key,
-                                    metric,
-                                    e,
-                                )
+                                logger.debug("Ensemble failed for %s: %s", key, e)
 
-                            # 2. Fallback to Backup (Open-Meteo + WeatherAPI)
-                            count = self.fetch_for_markets(
-                                mids, city, target_date, metric
-                            )
-                            total += count
+                            if result and result.get("model_count", 0) >= 3:
+                                total += result["model_count"] * len(mids)
+                                continue
 
-                            # 3. DB fallback — if API failed, check for old forecasts
-                            if count == 0 and mids:
-                                for mid in mids[:1]:
-                                    existing = (
-                                        session.query(WeatherForecast)
-                                        .filter(
-                                            WeatherForecast.market_id == mid,
-                                            WeatherForecast.source.isnot(None),
-                                        )
-                                        .order_by(WeatherForecast.fetched_at.desc())
-                                        .first()
+                            # 2. Ensemble başarısız (429 veya其他) → DB fallback
+                            #    API fallback KALDIRILDI — 429'da 8x fazla istek yapıyordu
+                            cached_count = 0
+                            for mid in mids[:1]:
+                                existing = (
+                                    session.query(WeatherForecast)
+                                    .filter(
+                                        WeatherForecast.market_id == mid,
+                                        WeatherForecast.source.isnot(None),
                                     )
-                                    if existing:
-                                        logger.info(
-                                            "DB fallback: using cached forecast for %s",
-                                            mid,
-                                        )
-                                        total += 1
+                                    .order_by(WeatherForecast.fetched_at.desc())
+                                    .first()
+                                )
+                                if existing:
+                                    cached_count += 1
+                            if cached_count > 0:
+                                total += cached_count
+                                logger.debug("DB fallback: cached forecast for %s", key)
+                            else:
+                                # Son çare: tek model ile dene (8 model degil)
+                                count = self.fetch_for_markets(
+                                    mids[:3], city, target_date, metric  # max 3 market
+                                )
+                                total += count
 
                     except Exception as e:
                         logger.error("Group %s bucket error: %s", key, e)
