@@ -12,14 +12,10 @@ Test cases:
 """
 
 import pytest
-from decimal import Decimal
-import asyncio
-from datetime import datetime, timezone
-from unittest.mock import Mock, patch, MagicMock
-import numpy as np
+from unittest.mock import Mock
 
 # Eklenecek modüller
-from engine.calculator import Calculator, WeatherEngine
+from engine.calculator import Calculator
 from utils.formulas import (
     max_bet_cap,
     max_exposure_cap,
@@ -35,7 +31,7 @@ from utils.formulas import (
     win_rate_pct,
     daily_pnl,
 )
-from config.settings import Config, bot_config
+from config.settings import bot_config
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -85,7 +81,7 @@ class TestCalculatorEstimateProbability:
             days_ahead=1,
         )
 
-        prob_low = calc.estimate_probability(
+        calc.estimate_probability(
             forecasts=forecasts_low_std,
             threshold=0.5,
             days_ahead=1,
@@ -394,7 +390,7 @@ class TestPortfolioValues:
 
         pnl = unrealized_pnl(shares, current_price, entry_price)
 
-        expected = shares * (current_price - entry_price)  # -10.0
+        shares * (current_price - entry_price)  # -10.0
         assert pnl < 0
 
     def test_bet_shares(self):

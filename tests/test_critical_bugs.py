@@ -11,11 +11,9 @@ Bulduğumuz ve düzelttiğimiz kritik hataların tekrarlanmasını önler:
 8. Fee rate tutarsızlığı (hardcoded vs dynamic)
 """
 
-import json
 import os
-import sqlite3
 from datetime import datetime, timezone, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -28,7 +26,7 @@ class TestTimezoneSafety:
 
     def test_bot_loop_fast_mode_until_is_naive(self):
         """fast_mode_until naive olmalı — now ile karşılaştırılmalı."""
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timezone
 
         # Bot loop'daki pattern: now = datetime.now(timezone.utc).replace(tzinfo=None)
         now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -203,18 +201,6 @@ class TestBotStartupChain:
 
     def test_all_critical_imports(self):
         """Tüm kritik modüller import edilebilmeli."""
-        import engine.strategy
-        import engine.calculator
-        import executor.bet_placer
-        import executor.settler
-        import jobs.scheduler
-        import bot_loop
-        import api
-        import utils.formulas
-        import utils.kelly
-        import utils.slippage
-        import scrapers.polymarket
-        import scrapers.meteo
 
     def test_config_proxy_works(self):
         """Config proxy bot_config'i doğru yönlendirmeli."""
@@ -273,7 +259,7 @@ class TestDBProtection:
             from database.models import Bet
 
             with get_session() as session:
-                count = session.query(Bet).count()
+                session.query(Bet).count()
             # DB boyutu değişmemeli
             after_size = os.path.getsize(prod_path)
             assert before_size == after_size, (
@@ -295,7 +281,7 @@ class TestDBProtection:
         from db_backup import create_backup
         import tempfile
 
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory():
             # Geçici dosyaya backup al
             backup_path = create_backup("test")
             assert backup_path is not None

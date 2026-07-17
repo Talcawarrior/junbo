@@ -13,7 +13,6 @@ import time
 import sys
 import os
 import platform
-import signal
 import socket
 from datetime import datetime
 
@@ -80,7 +79,6 @@ def watchdog_loop():
     log("=== Junbo Watchdog Started ===")
 
     last_response = time.time()
-    bot_proc = None
 
     while True:
         try:
@@ -104,7 +102,7 @@ def watchdog_loop():
                     log(f"Bot DOWN for {int(elapsed)}s - restarting...")
                     stop_bot()
                     time.sleep(3)
-                    bot_proc = start_bot()
+                    start_bot()
                     last_response = time.time()
                 else:
                     log(f"Bot not responding ({int(elapsed)}s since last ok)")

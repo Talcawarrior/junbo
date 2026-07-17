@@ -78,7 +78,7 @@ def kelly_bet_amount(
     *,
     fraction: float = 0.15,
     min_bet: float = 1.0,
-    max_bet_pct: float = None,
+    max_bet_pct: float | None = None,
 ) -> float:
     """Compute a Kelly-sized dollar bet for the given portfolio.
 

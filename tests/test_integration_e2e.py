@@ -1,8 +1,6 @@
 """Integration/E2E Tests - Tüm pipeline'ı uçtan uca test eder."""
 
 import pytest
-import asyncio
-from unittest.mock import Mock, patch, AsyncMock
 from datetime import datetime, timezone, timedelta
 
 

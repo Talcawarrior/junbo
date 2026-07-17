@@ -2,9 +2,7 @@
 
 import pytest
 import asyncio
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
-from datetime import datetime, timezone, timedelta
-import json
+from unittest.mock import Mock, patch, AsyncMock
 
 
 class TestBotStartup:
@@ -35,7 +33,6 @@ class TestDataPipeline:
 
     def test_fetch_markets(self):
         """Polymarket market fetch — mock."""
-        from unittest.mock import patch, AsyncMock
         with patch('scrapers.polymarket.PolymarketScraper') as MockScraper:
             mock_instance = Mock()
             MockScraper.return_value = mock_instance

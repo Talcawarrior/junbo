@@ -10,7 +10,7 @@ Tests cover:
 
 import pytest
 import os
-from unittest.mock import patch, Mock
+from unittest.mock import patch
 
 
 # ============================================================================
@@ -22,7 +22,6 @@ class TestAIModels:
 
     def test_researcher_agent_facts(self):
         """Researcher Agent mock test."""
-        from unittest.mock import MagicMock
         with patch('asi_engine.researcher_agent.ResearcherAgent') as MockRA:
             MockRA.return_value.ask.return_value = 'This is a prediction market for weather events'
             agent = MockRA()

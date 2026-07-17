@@ -158,7 +158,7 @@ def settlement_pnl(
 # ---------------------------------------------------------------------------
 
 
-def polymarket_fee(shares: float, price: float, fee_rate: float = None) -> float:
+def polymarket_fee(shares: float, price: float, fee_rate: float | None = None) -> float:
     """Polymarket taker fee at trade match time.
 
     Official formula (per docs.polymarket.com):
@@ -178,7 +178,7 @@ def polymarket_fee(shares: float, price: float, fee_rate: float = None) -> float
     return shares * fee_rate * price * (1.0 - price)
 
 
-def polymarket_fee_from_stake(stake: float, price: float, fee_rate: float = None) -> float:
+def polymarket_fee_from_stake(stake: float, price: float, fee_rate: float | None = None) -> float:
     """Stake-based shortcut for polymarket_fee.
 
     Since shares = stake / price, the fee formula simplifies to:

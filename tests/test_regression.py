@@ -16,8 +16,6 @@ Testler:
 
 import pytest
 from datetime import datetime, timezone, timedelta
-from unittest.mock import Mock, patch, MagicMock
-from decimal import Decimal
 
 
 # ============================================================================
@@ -459,7 +457,7 @@ class TestNegativeEdgeBet:
         min_edge = 0.01  # %1
 
         should_bet = net_edge >= min_edge
-        assert should_bet == False, f"Slippage sonrası negatif edge ile bahis açılmamalı: net_edge={net_edge}"
+        assert should_bet is False, f"Slippage sonrası negatif edge ile bahis açılmamalı: net_edge={net_edge}"
 
     def test_edge_without_abs(self):
         """Regression: should_bet koşulunda abs() kullanılmamalı.

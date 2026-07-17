@@ -10,8 +10,6 @@ Kullanım:
 
 import pytest
 from datetime import datetime, timezone, timedelta
-from unittest.mock import Mock, patch, MagicMock
-import json
 
 
 # ============================================================================
@@ -26,7 +24,7 @@ class TestStep1_BotStartup:
         from config.settings import config, bot_config
 
         assert config.PORT == 8093
-        assert config.DRY_RUN == True
+        assert config.DRY_RUN is True
         assert bot_config.strategy.min_edge > 0
         assert bot_config.strategy.kelly_fraction > 0
 
@@ -49,14 +47,6 @@ class TestStep1_BotStartup:
     def test_models_import(self):
         """Tüm modüller import edilebiliyor."""
         from engine.calculator import Calculator, WeatherEngine
-        from engine.strategy import BettingEngine, RiskManager, SIALoop
-        from executor.settler import SettlementEngine
-        from executor.bet_placer import BetPlacer
-        from scrapers.polymarket import PolymarketScraper
-        from scrapers.meteo import MeteoFetcher
-        from utils.formulas import max_bet_cap, polymarket_fee, settlement_pnl
-        from utils.kelly import kelly_fraction
-        from utils.slippage import estimate_slippage
 
         assert Calculator is not None
         assert WeatherEngine is not None
@@ -165,7 +155,7 @@ class TestStep4_EdgeCalculation:
 
         min_edge = 0.01
         should_bet = net_edge >= min_edge
-        assert should_bet == False
+        assert should_bet is False
 
     def test_no_abs_in_should_bet(self):
         """should_bet koşulunda abs() kullanılmamalı."""
@@ -221,7 +211,6 @@ class TestStep5_RiskManagement:
 
     def test_trailing_stop_logic(self):
         """Trailing stop mantığı."""
-        entry = 0.30
         peak = 0.60  # Tırmanış
         current = 0.50  # Tepeden %16.7 düşüş
         trailing_stop_pct = 0.15
@@ -237,7 +226,7 @@ class TestStep5_RiskManagement:
         time_decay_threshold = -0.10
 
         should_close = hours_left <= time_decay_hours and loss_pct <= time_decay_threshold
-        assert should_close == True
+        assert should_close is True
 
 
 # ============================================================================
@@ -257,7 +246,7 @@ class TestStep6_BetPlacement:
     def test_dry_run_mode(self):
         """DRY_RUN modunda gerçek bahis yapılmaz."""
         from config.settings import config
-        assert config.DRY_RUN == True
+        assert config.DRY_RUN is True
 
     def test_max_bet_cap(self):
         """Max bet cap doğru hesaplanıyor."""
@@ -277,7 +266,7 @@ class TestStep6_BetPlacement:
         kelly = kelly_fraction(prob=0.65, price=0.55)
         # Kelly fraction uygula (varsayılan 0.15)
         bet_amount = kelly * 0.15 * portfolio
-        cap = max_bet_cap(portfolio, 0.003)
+        max_bet_cap(portfolio, 0.003)
 
         # Kelly bet cap'i aşabilir (bu normal - risk yönetimi devreye girer)
         # Sadece pozitif olduğunu doğrula
@@ -510,7 +499,7 @@ class TestStep12_CompleteFlow:
             should_close = False
 
         # %30 zarar = %30 stop-loss threshold → tetiklenmeli
-        assert should_close == True
+        assert should_close is True
 
 
 # ============================================================================
@@ -529,7 +518,6 @@ class TestStep13_SmartScan:
 
     def test_fast_mode_detection(self):
         """Yeni market algılarsa hızlı mod tetiklenmeli."""
-        from datetime import timedelta
 
         now = datetime.now(timezone.utc)
         previous_count = 100
@@ -543,7 +531,6 @@ class TestStep13_SmartScan:
     def test_scan_interval_selection(self):
         """Doğru scan interval seçilmeli."""
         from bot_loop import _get_scan_interval
-        from datetime import timedelta
 
         now = datetime.now(timezone.utc)
 

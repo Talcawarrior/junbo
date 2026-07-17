@@ -33,7 +33,7 @@ class PolymarketConfig:
     weather_keywords: list = None  # type: ignore[assignment]
 
     # Fee rates by category (dynamic, fetched from API)
-    fee_categories: dict = None  # {"weather": 0.05, ...}
+    fee_categories: dict | None = None  # {"weather": 0.05, ...}
 
     def __post_init__(self):
         self.weather_keywords = [

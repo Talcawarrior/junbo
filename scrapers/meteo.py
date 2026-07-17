@@ -11,7 +11,6 @@ import requests
 from config.settings import bot_config, config
 from database.db import get_session
 from database.models import WeatherForecast, WeatherMarket
-from scrapers.async_client import AsyncHttpClient
 from utils.retry import retry
 
 logger = logging.getLogger("SCRAPER_METEO")
