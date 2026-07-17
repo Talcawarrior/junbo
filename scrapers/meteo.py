@@ -61,10 +61,13 @@ def _cache_clear() -> None:
 # Per-host request throttle to keep us under Open-Meteo's free-tier burst
 # limits. Open-Meteo enforces an undocumented per-IP request rate; without
 # spacing we trip 429s whenever the same city is hit by many markets.
-# 3s interval is very safe for grouped requests.
 _MIN_INTERVAL_S = 1.0
 _LAST_CALL_AT: dict[str, float] = {}
 _THROTTLE_LOCK = threading.Lock()
+
+# Global rate-limit flag — 429'da tüm API isteklerini durdur
+import time as _time
+_RATE_LIMITED_UNTIL = 0.0  # monotonic timestamp
 
 
 def _throttle(host: str) -> None:
@@ -100,6 +103,7 @@ class MeteoFetcher:
     def _fetch_open_meteo(
         self, lat: float, lon: float, target_date: str
     ) -> dict | None:
+        global _RATE_LIMITED_UNTIL
         """Open-Meteo API (Ã¼cretsiz, key gerekmez).
 
         Results are cached in-process keyed by (lat, lon, date, source) so
@@ -112,6 +116,11 @@ class MeteoFetcher:
         cached = _cache_get(cache_key)
         if cached is not None or cache_key in _FETCH_CACHE:
             return cached
+
+        # Global rate-limit kontrolü
+        if _time.monotonic() < _RATE_LIMITED_UNTIL:
+            logger.debug("Rate-limited, skipping Open-Meteo for (%s,%s)", lat, lon)
+            return None
 
         _throttle("open-meteo.com")
         try:
@@ -129,8 +138,8 @@ class MeteoFetcher:
                 timeout=15,
             )
             if resp.status_code == 429:
-                logger.warning("Open-Meteo 429 Rate Limit! Waiting 30s...")
-                time.sleep(30)
+                _RATE_LIMITED_UNTIL = _time.monotonic() + 300  # 5dk
+                logger.warning("Open-Meteo 429 — all requests paused for 5min")
                 return None
             resp.raise_for_status()
             data = resp.json()
