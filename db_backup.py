@@ -19,7 +19,7 @@ from datetime import datetime
 DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DB_PATH = os.path.join(DB_DIR, "bot.db")
 BACKUP_DIR = os.path.join(DB_DIR, "backups")
-MAX_BACKUPS = 30
+MAX_BACKUPS = 10
 
 
 def create_backup(label="auto"):

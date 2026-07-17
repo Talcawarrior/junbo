@@ -13,6 +13,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+import secrets
 
 from fastapi import Depends, FastAPI, Header, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,7 +39,7 @@ from engine.calculator import WeatherEngine
 from engine.strategy import BettingEngine, RiskManager, SIALoop
 from executor.settler import SettlementEngine
 from scrapers.polymarket import PolymarketScraper
-from utils.formulas import max_exposure_cap, portfolio_current_value, roi_pct, win_rate_pct, pnl_ratio
+from utils.formulas import max_exposure_cap, portfolio_current_value, roi_pct, win_rate_pct
 from utils.price_sanity import safe_ev
 from utils.weights_store import load_weights
 
@@ -51,13 +52,11 @@ logger = logging.getLogger(__name__)
 # JUNBO_API_KEY MUST be set. If not set, a random key is generated at startup
 # and printed to console. Destructive endpoints are NEVER open.
 
-import secrets
-
 API_KEY = os.getenv("JUNBO_API_KEY", "")
 if not API_KEY:
     API_KEY = secrets.token_urlsafe(32)
     print(f"\n{'='*60}")
-    print(f"WARNING: JUNBO_API_KEY not set. Generated random key:")
+    print("WARNING: JUNBO_API_KEY not set. Generated random key:")
     print(f"  {API_KEY}")
     print(f"Add to .env: JUNBO_API_KEY={API_KEY}")
     print(f"{'='*60}\n")
@@ -227,10 +226,28 @@ def get_status():
             )
             .scalar()
         ) or 0.0
+        # Daily PnL'ye partial TP'leri de ekle
+        daily_partial_tp = (
+            db.query(func.coalesce(func.sum(Bet.realized_pnl), 0.0))
+            .filter(
+                Bet.status.in_(OPEN_BET_STATUSES),
+                Bet.partial_tp_done.is_(True),
+                Bet.placed_at >= _today_start,
+            )
+            .scalar()
+        ) or 0.0
+        daily_pnl = round(daily_pnl + daily_partial_tp, 2)
 
         realized_pnl_db = (
             db.query(func.coalesce(func.sum(Bet.pnl), 0.0)).filter(Bet.status.in_(_closed_statuses)).scalar()
         ) or 0.0
+        # Partial TP: open betlerdeki realized_pnl'yi de ekle (partial_tp_done=True)
+        partial_tp_realized = (
+            db.query(func.coalesce(func.sum(Bet.realized_pnl), 0.0))
+            .filter(Bet.status.in_(OPEN_BET_STATUSES), Bet.partial_tp_done.is_(True))
+            .scalar()
+        ) or 0.0
+        realized_pnl_db = round(realized_pnl_db + partial_tp_realized, 2)
 
         # 2. Unrealized PnL (Open bets)
         open_statuses = OPEN_BET_STATUSES
@@ -258,6 +275,9 @@ def get_status():
                     "entry_price": float(bet.entry_price or 0),
                     "current_price": float(bet.current_price or bet.entry_price or 0),
                     "unrealized_pnl": float(bet.unrealized_pnl or 0),
+                    "realized_pnl": float(bet.realized_pnl or 0),
+                    "partial_tp_done": bool(bet.partial_tp_done or False),
+                    "covered_fraction": float(bet.covered_fraction or 0.0),
                     "edge": float(bet.expected_value or 0) * 100,
                     "shares": float(bet.shares or 0),
                     "amount": float(bet.amount or 0),
@@ -695,7 +715,11 @@ def get_signals():
             )
             for a in (
                 db.query(Analysis)
-                .join(latest_subq, (Analysis.market_id == latest_subq.c.market_id) & (Analysis.analyzed_at == latest_subq.c.max_ts))
+                .join(
+                    latest_subq,
+                    (Analysis.market_id == latest_subq.c.market_id)
+                    & (Analysis.analyzed_at == latest_subq.c.max_ts),
+                )
                 .all()
             ):
                 latest_analysis_by_market[a.market_id] = a
@@ -741,6 +765,9 @@ def get_signals():
                     "current_price": current,
                     "stake_amount": bet.amount or bet.stake_amount,
                     "unrealized_pnl": float(bet.unrealized_pnl or 0.0),
+                    "realized_pnl": float(bet.realized_pnl or 0.0),
+                    "partial_tp_done": bool(bet.partial_tp_done or False),
+                    "covered_fraction": float(bet.covered_fraction or 0.0),
                     "fair_value": fair_value,
                     "edge": live_edge,
                     "entry_edge": entry_edge,
@@ -815,6 +842,15 @@ def get_history():
         )
         avg_edge = float(avg_edge_q or 0.0)
 
+        # Partial TP: open betlerde partial_tp_done=True olanlar (işlem geçmişinde göster)
+        partial_tp_bets = (
+            db.query(Bet)
+            .filter(Bet.status.in_(OPEN_BET_STATUSES), Bet.partial_tp_done.is_(True))
+            .order_by(Bet.placed_at.desc())
+            .limit(100)
+            .all()
+        )
+
         # History list: all settled + closed_early (most recent 300)
         all_closed_statuses = ["settled", "won", "lost", "closed_early"]
         # Use coalesce(settled_at, closed_at) for correct ordering
@@ -875,6 +911,33 @@ def get_history():
                     "exit_type": exit_type,
                 }
             )
+        # Partial TP entries: open betlerde partial_tp_done=True
+        partial_tp_count = 0
+        partial_tp_pnl = 0.0
+        for bet in partial_tp_bets:
+            pnl = float(bet.realized_pnl or 0.0)
+            stake = float(bet.amount or 0.0)
+            roi = roi_pct(pnl, stake)
+            partial_tp_pnl += pnl
+            partial_tp_count += 1
+            history.append(
+                {
+                    "id": bet.id,
+                    "city": bet.city,
+                    "outcome": bet.side or "YES",
+                    "entry_price": bet.entry_price,
+                    "stake_amount": stake,
+                    "realized_pnl": pnl,
+                    "roi": round(roi, 2),
+                    "edge": None,
+                    "result": "PARTIAL_TP",
+                    "placed_at": bet.placed_at.isoformat() if bet.placed_at else None,
+                    "settled_at": None,
+                    "closed_at": None,
+                    "exit_type": "PT",
+                }
+            )
+
         win_rate = win_rate_pct(total_won, total_won + total_lost)
         overall_roi = roi_pct(total_pnl_all, total_stake_all)
         profit_factor = round(total_win_pnl / total_loss_pnl, 2) if total_loss_pnl > 0 else 0.0
@@ -893,6 +956,8 @@ def get_history():
                 "total_loss_pnl": round(total_loss_pnl, 2),
                 "profit_factor": profit_factor,
                 "avg_edge": round(avg_edge * 100, 2) if avg_edge else 0.0,
+                "partial_tp_count": partial_tp_count,
+                "partial_tp_pnl": round(partial_tp_pnl, 2),
             },
         }
     finally:
@@ -937,9 +1002,7 @@ def get_equity_curve():
             pnl = float(row.daily_pnl or 0)
             running += pnl
             # Format: "24 Haz"
-            from datetime import datetime as dt
-
-            d = dt.strptime(day_str, "%Y-%m-%d")
+            d = datetime.strptime(day_str, "%Y-%m-%d")
             label = f"{d.day} {d.strftime('%b')}"
             points.append(
                 {
@@ -958,9 +1021,7 @@ def get_equity_curve():
         ) or 0.0
         realized_now = running - initial  # all realized PnL accumulated
         today_val = initial + realized_now + float(unrealized)
-        from datetime import datetime, timezone as tz
-
-        today = datetime.now(tz.utc).replace(tzinfo=None)
+        today = datetime.now(timezone.utc).replace(tzinfo=None)
         label = f"{today.day} {today.strftime('%b')}"
         if points and points[-1]["date"] == label:
             points[-1]["value"] = round(today_val, 2)
@@ -977,7 +1038,10 @@ def get_equity_curve():
         return {"initial": initial, "points": points}
     except Exception as e:
         logger.error("Equity curve error: %s", e)
-        return JSONResponse(status_code=500, content={"error": str(e), "initial": config.INITIAL_PORTFOLIO, "points": []})
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "initial": config.INITIAL_PORTFOLIO, "points": []},
+        )
     finally:
         db.close()
 
@@ -1169,7 +1233,7 @@ async def reset_bot(_key: str = Depends(verify_api_key)):
             }
         except Exception as e:
             db.rollback()
-            logger.error(f"Reset error: {e}")
+            logger.error("Reset error: %s", e)
             return JSONResponse(status_code=500, content={"error": str(e)})
         finally:
             db.close()
@@ -1405,13 +1469,15 @@ def get_health_check():
                 }
             )
 
-        # 6. Daily PnL Timeline (last 7 days)
+        # 6. Daily PnL Timeline — forward from today (17/07, 18/07, 19/07, ...)
+        # Shows next 30 days. Past days with no data are not shown; today is
+        # the first (leftmost) bar. Future days show $0 until bets close.
         from sqlalchemy import or_
 
         daily_pnl = []
-        for i in range(7):
-            day_start = (now - timedelta(days=i + 1)).replace(hour=0, minute=0, second=0, microsecond=0)
-            day_end = (now - timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0)
+        for i in range(30):
+            day_start = (now + timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end = (now + timedelta(days=i + 1)).replace(hour=0, minute=0, second=0, microsecond=0)
             day_bets = (
                 db.query(Bet)
                 .filter(
@@ -1428,18 +1494,23 @@ def get_health_check():
                 .all()
             )
             day_pnl = sum(b.pnl or 0.0 for b in day_bets)
+            day_stake = sum(b.amount or 0.0 for b in day_bets)
             day_wins = sum(1 for b in day_bets if b.pnl and b.pnl > 0)
             day_losses = sum(1 for b in day_bets if b.pnl is not None and b.pnl <= 0)
+            day_total = day_wins + day_losses
             daily_pnl.append(
                 {
                     "date": day_start.strftime("%m/%d"),
                     "pnl": round(day_pnl, 2),
+                    "stake": round(day_stake, 2),
                     "wins": day_wins,
                     "losses": day_losses,
-                    "total": day_wins + day_losses,
+                    "total": day_total,
+                    "win_rate": round(day_wins / day_total * 100, 1) if day_total > 0 else 0.0,
+                    "roi": round(day_pnl / day_stake * 100, 2) if day_stake > 0 else 0.0,
                 }
             )
-        daily_pnl.reverse()
+        # Ascending order already: 17/07, 18/07, 19/07, ... (no reverse needed)
 
         # 7. Overall verdict
         if not red_flags or all(f["severity"] == "info" for f in red_flags):
