@@ -54,12 +54,15 @@ def run(name: str, cmd: list[str], fast_only: bool = False) -> bool:
 def main() -> int:
     fast = "--fast" in sys.argv
     passed = 0
-    total = 4
+    total = 5
 
     start_all = time.time()
 
     tests = [
         ("LINT", ["python", "-m", "ruff", "check", ".", "--select", "F821,E722"]),
+        ("CRITICAL", ["python", "-m", "pytest",
+                      "tests/test_critical_bugs.py",
+                      "-q", "--tb=line", "--no-header"]),
         ("UNIT", ["python", "-m", "pytest",
                   "tests/test_take_profit_comprehensive.py",
                   "tests/test_active_risk_management.py",

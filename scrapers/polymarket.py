@@ -225,8 +225,11 @@ class PolymarketScraper:
                 v = raw.get(key)
                 if v is not None:
                     try:
-                        yes_price = float(v)
-                        break
+                        p = float(v)
+                        # bestBid=0 means "no orderbook", not actual price
+                        if p > 0:
+                            yes_price = p
+                            break
                     except (TypeError, ValueError):
                         pass
         if no_price is None:
@@ -234,8 +237,11 @@ class PolymarketScraper:
                 v = raw.get(key)
                 if v is not None:
                     try:
-                        no_price = float(v)
-                        break
+                        p = float(v)
+                        # bestAsk=1 means "no orderbook", not actual price
+                        if p < 1:
+                            no_price = p
+                            break
                     except (TypeError, ValueError):
                         pass
         if no_price is None and yes_price is not None:
