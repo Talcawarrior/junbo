@@ -109,7 +109,7 @@ async def scan_and_bet_loop(state):
                 current_count = _get_market_count()
                 if current_count > previous_market_count:
                     new_markets = current_count - previous_market_count
-                    fast_mode_until = datetime.now(timezone.utc) + timedelta(minutes=_FAST_MODE_MINUTES)
+                    fast_mode_until = (datetime.now(timezone.utc) + timedelta(minutes=_FAST_MODE_MINUTES)).replace(tzinfo=None)
                     logger.info(
                         "NEW MARKETS DETECTED: +%d (total: %d) — FAST MODE for %d min",
                         new_markets, current_count, _FAST_MODE_MINUTES

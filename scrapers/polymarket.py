@@ -240,6 +240,18 @@ class PolymarketScraper:
                         pass
         if no_price is None and yes_price is not None:
             no_price = max(0.0, min(1.0, 1.0 - yes_price))
+        # Fallback: outcomePrices (Gamma API v2 format — tokens empty)
+        if yes_price is None:
+            op = raw.get("outcomePrices", "")
+            if op:
+                try:
+                    parsed_op = json.loads(op) if isinstance(op, str) else op
+                    if isinstance(parsed_op, list) and len(parsed_op) >= 2:
+                        yes_price = float(parsed_op[0]) if parsed_op[0] else None
+                        if no_price is None:
+                            no_price = float(parsed_op[1]) if parsed_op[1] else None
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    pass
         if yes_price is None:
             yes_price = 0.5
         if no_price is None:
