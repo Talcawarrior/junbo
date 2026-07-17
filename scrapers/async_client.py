@@ -42,8 +42,8 @@ logger = logging.getLogger("SCRAPER_ASYNC")
 
 
 # ---- Public knobs (module-level so tests can monkeypatch) -------------
-MAX_CONCURRENT = 8
-_THROTTLE_S = 0.25
+MAX_CONCURRENT = 20
+_THROTTLE_S = 1.0
 _TIMEOUT_S = 15.0
 _USER_AGENT = "Junbo/1.0 (+tier3-12)"
 

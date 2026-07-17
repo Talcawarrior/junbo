@@ -62,7 +62,7 @@ def _cache_clear() -> None:
 # limits. Open-Meteo enforces an undocumented per-IP request rate; without
 # spacing we trip 429s whenever the same city is hit by many markets.
 # 3s interval is very safe for grouped requests.
-_MIN_INTERVAL_S = 3.0
+_MIN_INTERVAL_S = 1.0
 _LAST_CALL_AT: dict[str, float] = {}
 _THROTTLE_LOCK = threading.Lock()
 
@@ -342,6 +342,25 @@ class MeteoFetcher:
                                 mids, city, target_date, metric
                             )
                             total += count
+
+                            # 3. DB fallback — if API failed, check for old forecasts
+                            if count == 0 and mids:
+                                for mid in mids[:1]:
+                                    existing = (
+                                        session.query(WeatherForecast)
+                                        .filter(
+                                            WeatherForecast.market_id == mid,
+                                            WeatherForecast.source.isnot(None),
+                                        )
+                                        .order_by(WeatherForecast.fetched_at.desc())
+                                        .first()
+                                    )
+                                    if existing:
+                                        logger.info(
+                                            "DB fallback: using cached forecast for %s",
+                                            mid,
+                                        )
+                                        total += 1
 
                     except Exception as e:
                         logger.error("Group %s bucket error: %s", key, e)
