@@ -16,8 +16,7 @@ Formula inventory:
   10. portfolio_current       — initial + all PnL (market value, includes unrealised)
   11. roi_pct                 — return on stake
   12. win_rate_pct            — wins / closed
-  13. daily_pnl               — today's profit / loss
-  14. bet_shares              — stake / price (shares purchased)
+  13. bet_shares              — stake / price (shares purchased)
 """
 
 from __future__ import annotations
@@ -292,8 +291,20 @@ def roi_pct(pnl: float, stake: float) -> float:
 
 # profit_pct KALDIRILDI — pnl_ratio() * 100 kullanın
 
+
 # ---------------------------------------------------------------------------
-# 11. Win rate
+# 11. Daily PnL
+# ---------------------------------------------------------------------------
+
+
+def daily_pnl(today_realized: float, open_bets: list) -> float:
+    """Today's total PnL = realised today + sum(unrealised on open bets)."""
+    unrealized_total = sum(getattr(b, "unrealized_pnl", 0) or 0 for b in open_bets)
+    return today_realized + float(unrealized_total)
+
+
+# ---------------------------------------------------------------------------
+# 12. Win rate
 # ---------------------------------------------------------------------------
 
 
@@ -310,42 +321,4 @@ def win_rate_pct(wins: int, total_closed: int) -> float:
     return (wins / total_closed) * 100
 
 
-# ---------------------------------------------------------------------------
-# 12. Daily PnL
-# ---------------------------------------------------------------------------
 
-
-def daily_pnl(today_realized: float, open_bets: list) -> float:
-    """Today's total PnL = realised today + sum(unrealised on open bets).
-
-    Used by:
-      - main.py (:293)  — API daily_pnl
-    """
-    unrealized_total = sum(getattr(b, "unrealized_pnl", 0) or 0 for b in open_bets)
-    return today_realized + float(unrealized_total)
-
-
-# ---------------------------------------------------------------------------
-# 13. Exit price from PnL (for frontend exit-price reconstruction)
-# ---------------------------------------------------------------------------
-
-
-def exit_price_from_pnl(
-    entry_price: float, realized_pnl: float, stake: float, side: str
-) -> float:
-    """Reconstruct the exit price from a closed bet's PnL.
-
-    For YES side:
-      exit = entry + (pnl / stake)
-    For NO side:
-      exit = entry - (|pnl| / stake)
-
-    Used by:
-      - frontend (api.ts:575-576) — trade history
-    """
-    if stake <= 0:
-        return entry_price
-    if side.upper() == "YES":
-        return min(1.0, entry_price * (1.0 + realized_pnl / stake))
-    else:
-        return max(0.0, entry_price * (1.0 + realized_pnl / stake))

@@ -142,7 +142,7 @@ class BacktestSimulator:
                     simulated_pnl += pnl
                     bankroll += pnl
                     if bankroll <= 0:
-                        logger.info("Bankroll depleted at %s — ending simulation", market_date)
+                        logger.info("Bankroll depleted — ending simulation")
                         break
 
         # Compile metrics

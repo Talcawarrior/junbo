@@ -352,55 +352,6 @@ class MeteoFetcher:
 
         return total
 
-    def _parallel_fetch_sources(
-        self, lat: float, lon: float, target_date: str
-    ) -> dict[str, dict | None]:
-        """Fetch Open-Meteo + WeatherAPI concurrently via AsyncHttpClient.
-
-        Returns a dict keyed by source name with the same shape as the
-        legacy ``_fetch_open_meteo`` / ``_fetch_weatherapi`` return
-        values (or ``None`` on a per-source failure). On aiohttp-less
-        installs the AsyncHttpClient falls back to a sequential
-        ``requests`` path so behavior is preserved.
-        """
-        if not hasattr(self, "_async_client") or self._async_client is None:
-            self._async_client = AsyncHttpClient()
-        # Delegate to the existing per-source cache-aware methods so
-        # cache + throttle + retry behavior stays in one place.
-        return {
-            "openmeteo": self._fetch_open_meteo(lat, lon, target_date),
-            "weatherapi": self._fetch_weatherapi(lat, lon, target_date),
-        }
-
-    # ------------------------------------------------------------------
-    # Backward-compatibility alias
-    # ------------------------------------------------------------------
-    # Older callers (and tests/test_meteo.py) expected a method named
-    # `fetch_weather_data` on this class. The refactor that introduced
-    # `fetch_for_market` / `fetch_all_markets` dropped the legacy name
-    # without keeping an alias, which broke the test contract.
-    # This thin shim satisfies `hasattr(fetcher, "fetch_weather_data")`
-    # and delegates to the modern per-market entry point.
-    def fetch_weather_data(self, *args, **kwargs):  # noqa: D401 - compat shim
-        """Deprecated: use :meth:`fetch_for_market` instead.
-
-        Kept for backward compatibility with the pre-refactor public API
-        and with ``tests/test_meteo.py::test_meteo_fetch``.
-        """
-        # If called as fetch_weather_data(market_id, city, target_date, metric)
-        # forward to the modern API. Otherwise return 0 to keep the legacy
-        # contract observable.
-        if len(args) >= 4:
-            return self.fetch_for_market(args[0], args[1], args[2], args[3])
-        if {"market_id", "city", "target_date", "metric"}.issubset(kwargs):
-            return self.fetch_for_market(
-                kwargs["market_id"],
-                kwargs["city"],
-                kwargs["target_date"],
-                kwargs["metric"],
-            )
-        return 0
-
     def fetch_for_market(
         self, market_id: str, city: str, target_date: datetime, metric: str
     ) -> int:

@@ -29,9 +29,6 @@ class SettlementEngine:
     ``outcomePrices`` are available.
     """
 
-    def __init__(self):
-        pass
-
     # ── Public API ─────────────────────────────────────────────────────────
 
     def settle_all(self) -> dict:
@@ -77,8 +74,12 @@ class SettlementEngine:
                     result = self._settle_market(session, market, risk_manager)
                     if result is None:
                         pending_count += 1
-                        # 48-hour pending alert (status unchanged)
-                        self._check_stale_pending(market, now_naive)
+                        if market.target_date and (now_naive - market.target_date) > timedelta(hours=48):
+                            logger.error(
+                                "Market %s has been pending >48h (target=%s). Gamma API may not have resolved it yet.",
+                                market.id,
+                                market.target_date,
+                            )
                     else:
                         won_count += result.get("won", 0)
                         lost_count += result.get("lost", 0)
@@ -151,7 +152,7 @@ class SettlementEngine:
         outcome = self._fetch_market_resolution(market)
         if outcome is None and market.target_date and (now_naive - market.target_date) > timedelta(hours=24):
             # Fallback: resolution tarihi +48h geçmişse, outcomePrices'a bak
-            outcome = self._fallback_price_resolution(market)
+            outcome = self._fetch_market_resolution(market, force=True)
             if outcome:
                 logger.warning(
                     "Market %s resolved via fallback price resolution (48h+ past target): outcome=%s",
@@ -229,22 +230,22 @@ class SettlementEngine:
 
     # ── Gamma API resolution ───────────────────────────────────────────────
 
-    def _fetch_market_resolution(self, market) -> str | None:
+    def _fetch_market_resolution(self, market, force: bool = False) -> str | None:
         """Fetch market resolution from Polymarket Gamma API.
 
         Returns ``"YES"``, ``"NO"``, or ``None`` if not yet resolved.
 
-        Resolution criteria (ALL must hold):
-          1. ``closed == true``
-          2. ``umaResolutionStatus == "resolved"``
-          3. ``outcomePrices`` is a parseable JSON string list
+        When *force* is False (default), the market must be officially closed
+        with a resolved status.  When *force* is True, any outcomePrices with
+        a clear winner (≥0.98) is accepted — used as a 48h+ fallback.
         """
         data = self._call_gamma_api(market)
         if data is None:
             return None
 
-        if not data.get("closed") or data.get("umaResolutionStatus") != "resolved":
-            return None
+        if not force:
+            if not data.get("closed") or data.get("umaResolutionStatus") != "resolved":
+                return None
 
         prices = self._parse_outcome_prices(market, data.get("outcomePrices"))
         if prices is None:
@@ -275,41 +276,10 @@ class SettlementEngine:
 
         market.raw_data = json.dumps(
             {
-                "source": "polymarket",
+                "source": "fallback_price" if force else "polymarket",
                 "outcome": outcome,
                 "outcomePrices": prices,
-                "umaResolutionStatus": data.get("umaResolutionStatus"),
-                "settled_at": datetime.now(timezone.utc).isoformat(),
-            }
-        )
-        return outcome
-
-    def _fallback_price_resolution(self, market) -> str | None:
-        """Fallback: if target_date +48h passed but Gamma API not resolved,
-        use current outcomePrices to determine winner.
-        YES >= 0.98 → YES won, NO >= 0.98 → NO won."""
-        data = self._call_gamma_api(market)
-        if data is None:
-            return None
-        prices = self._parse_outcome_prices(market, data.get("outcomePrices"))
-        if prices is None:
-            return None
-        try:
-            yes_price = float(prices[0])
-            no_price = float(prices[1])
-        except (TypeError, ValueError):
-            return None
-        if yes_price >= 0.98:
-            outcome = "YES"
-        elif no_price >= 0.98:
-            outcome = "NO"
-        else:
-            return None
-        market.raw_data = json.dumps(
-            {
-                "source": "fallback_price",
-                "outcome": outcome,
-                "outcomePrices": prices,
+                "umaResolutionStatus": data.get("umaResolutionStatus") if not force else None,
                 "settled_at": datetime.now(timezone.utc).isoformat(),
             }
         )
@@ -354,13 +324,3 @@ class SettlementEngine:
         return list(prices)
 
     # ── Helpers ────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _check_stale_pending(market, now_naive: datetime) -> None:
-        """Log an ERROR if a market has been pending longer than 48 hours."""
-        if market.target_date and (now_naive - market.target_date) > timedelta(hours=48):
-            logger.error(
-                "Market %s has been pending >48h (target=%s). Gamma API may not have resolved it yet.",
-                market.id,
-                market.target_date,
-            )
