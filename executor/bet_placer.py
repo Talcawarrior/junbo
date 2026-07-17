@@ -503,19 +503,20 @@ class BetPlacer:
         raise ValueError(f"Token ID bulunamadı: {side}")
 
     def place_all_pending(self) -> int:
-        """should_bet=True olan tum analizler icin bet ac."""
+        """should_bet=True olan tum analizler icin bet ac.
+
+        Önceliklendirme (edge × kalan_gün):
+        - Yüksek edge + uzak vade = en yüksek öncelik
+        - Düşük edge + yakın vade = en düşük öncelik
+        - Exposure cap dolana kadar en yüksek öncelikli bet'ler açılır
+        """
         placed = 0
-        # Build mapping of analysis_id -> market_id + set of markets that
-        # already have bets, inside a single session.
-        aid_to_market: dict[int, str] = {}
         markets_with_bets: set[str] = set()
 
         with get_session() as session:
-            # Only use the LATEST analysis per market (highest id).
-            # This prevents old analyses with stale recommended_amount
-            # (e.g. pre-config-change $29.70) from being placed.
             from sqlalchemy import func as sa_func
 
+            # Only use the LATEST analysis per market (highest id).
             subq = (
                 session.query(
                     Analysis.market_id,
@@ -525,13 +526,15 @@ class BetPlacer:
                 .group_by(Analysis.market_id)
                 .subquery()
             )
-            pending = session.query(Analysis).join(subq, Analysis.id == subq.c.max_id).all()
+            pending = (
+                session.query(Analysis, WeatherMarket.target_date)
+                .join(subq, Analysis.id == subq.c.max_id)
+                .join(WeatherMarket, Analysis.market_id == WeatherMarket.id)
+                .all()
+            )
 
             # Dedup: skip market_ids that already have ANY non-rejected Bet.
-            # Previous logic deduped by analysis_id which was useless — SIA
-            # creates a new analysis (new ID) each cycle for the same market,
-            # so the old check never caught duplicates.
-            market_ids = {a.market_id for a in pending}
+            market_ids = {a.market_id for a, _ in pending}
             if market_ids:
                 existing_rows = (
                     session.query(Bet.market_id)
@@ -543,25 +546,64 @@ class BetPlacer:
                 )
                 markets_with_bets = {row[0] for row in existing_rows if row[0] is not None}
 
-            for a in pending:
-                aid_to_market[a.id] = a.market_id
+            # ── Priority scoring ──────────────────────────────────────
+            # Score = net_edge × (days_to_resolution / max_days_ahead)
+            # Higher edge + further out = higher priority.
+            # This naturally prioritises markets that are both
+            # mispriced AND have time for the edge to play out.
+            now = datetime.now(timezone.utc).replace(tzinfo=None)  # naive, matches DB
+            max_days = getattr(bot_config.strategy, "max_days_ahead", 2)
+            scored: list[tuple[float, int, str]] = []  # (priority_score, analysis_id, market_id)
 
-        for aid, mkt_id in aid_to_market.items():
-            if mkt_id in markets_with_bets:
-                logger.debug(
-                    "Market %s already has a bet, skipping analysis %d",
-                    mkt_id,
-                    aid,
-                )
-                continue
+            for a, target_date in pending:
+                mkt_id = a.market_id
+                if mkt_id in markets_with_bets:
+                    continue
+
+                if target_date:
+                    # Strip tzinfo from target_date if present to avoid
+                    # "can't subtract offset-naive and offset-aware datetimes"
+                    td = target_date.replace(tzinfo=None) if getattr(target_date, 'tzinfo', None) else target_date
+                    days_left = max(0.0, (td - now).total_seconds() / 86400.0)
+                else:
+                    days_left = 0.0
+                time_factor = min(days_left, float(max_days)) / max_days if max_days > 0 else 0.0
+                edge = float(a.edge or 0)
+                score = edge * time_factor  # 0.0 .. 0.10 range
+                scored.append((-score, a.id, mkt_id))  # negative for ascending sort
+
+            # Sort by priority: highest score first
+            scored.sort()
+            logger.info(
+                "Bet prioritization: %d candidates sorted by edge×days (top: %.4f, bottom: %.4f)",
+                len(scored),
+                -scored[0][0] if scored else 0,
+                -scored[-1][0] if scored else 0,
+            )
+
+            # Debug: log top 5 priorities
+            for s, aid, mkt_id in scored[:5]:
+                logger.debug("  priority=%.4f analysis=%d market=%s", -s, aid, mkt_id)
+
+        # ── Place bets in priority order ──────────────────────────────
+        for neg_score, aid, mkt_id in scored:
+            score = -neg_score
             try:
                 bet = self.place_bet(aid)
                 if bet is not None:
                     placed += 1
-                    # Track this market to skip duplicate analyses in same batch
                     markets_with_bets.add(mkt_id)
+                    logger.info(
+                        "Bet placed (priority=%.4f edge×days): analysis=%d market=%s",
+                        score, aid, mkt_id,
+                    )
+                else:
+                    logger.debug(
+                        "Bet rejected (priority=%.4f): analysis=%d market=%s",
+                        score, aid, mkt_id,
+                    )
             except Exception as e:
-                logger.error(f"Bet hatasi (analysis {aid}): {e}")
+                logger.error("Bet hatasi (analysis %d, priority=%.4f): %s", aid, score, e)
                 continue
 
         return placed

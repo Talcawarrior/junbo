@@ -48,24 +48,6 @@ class SimpleSignal:
             setattr(self, k, v)
 
 
-class MockBet:
-    """Fallback bet object when DB insert fails."""
-
-    def __init__(self, **kwargs):
-        self.id = 999
-        self.city = kwargs.get("city", "")
-        self.outcome = kwargs.get("outcome", "YES")
-        self.stake_amount = kwargs.get("bet_size", 0.0)
-        self.amount = kwargs.get("amount", 0.0)
-        self.entry_price = kwargs.get("entry_price", 0.5)
-        self.fair_value = kwargs.get("fair_value", 0.5)
-        self.expected_value = kwargs.get("edge", 0.0)
-        self.unrealized_pnl = 0.0
-        self.realized_pnl = 0.0
-        self.status = "active"
-        self.placed_at = datetime.now(timezone.utc)
-
-
 class RiskManager:
     """Risk management with Kelly sizing and circuit breakers."""
 
@@ -311,7 +293,15 @@ class RiskManager:
         return False, ""
 
     def check_take_profit(self, bet, current_price: float, market=None) -> tuple:  # pylint: disable=unused-argument
-        """Take-profit: pozisyon %take_profit_pct'den fazla kardaysa veya fiyat 0.98'e ulaştıysa kapat."""
+        """Take-profit: pozisyon %take_profit_pct'den fazla kardaysa veya fiyat 0.98'e ulaştıysa kapat.
+
+        Partial take-profit: düşük girişli ("lottery ticket") bahislerde,
+        ~%100 kârda sadece ana parayı kurtaracak kadar satılır, kalan pozisyon
+        trailing stop ile "free ride" devam eder. (Bizim RiskConfig flat'tır;
+        spec'teki tier sistemi YOK — sadece entry fiyatı + kâr ile tetiklenir.)
+        Bu fonksiyon SADECE karar verir; pozisyon küçültme + muhasebe
+        scheduler._partial_close_early içinde yapılır (çift mutasyon yok).
+        """
         from utils.formulas import pnl_ratio
 
         cfg = self._get_risk_config()
@@ -320,10 +310,27 @@ class RiskManager:
         if entry <= 0:
             return False, ""
 
-        # Fiyat 0.98'e ulaştı → kesin kazanç, hemen kapat (settlement bekleme)
+        # Fiyat 0.98'e ulaştı → kesin kazanç, hemen TAM kapat (partial değil)
         if current_price >= 0.98:
             return True, f"near_certain_win: price={current_price:.2f}"
 
+        # Partial TP: zaten yapıldıysa tekrar tetikleme (trailing stop'a bırak)
+        if bool(getattr(bet, "partial_tp_done", False)):
+            return False, ""
+
+        # Partial TP: düşük giriş (<=0.35) ve ~%100 kâr
+        if entry <= 0.35 and current_price > 0:
+            profit_pct = (current_price - entry) / entry
+            if profit_pct >= 1.0:
+                fraction_to_sell = entry / current_price
+                if 0 < fraction_to_sell < 1:
+                    # Karar yeterli; scheduler pozisyonu küçültür.
+                    return (
+                        True,
+                        f"partial_take_profit: sold {fraction_to_sell:.1%} @ {current_price:.2f}",
+                    )
+
+        # Normal (tam) take-profit
         ratio = pnl_ratio(current_price, entry)
         if ratio >= cfg.take_profit_pct:
             return True, f"take_profit: {ratio:.1%}"
@@ -840,18 +847,12 @@ class BettingEngine:
                     self.risk_manager.increment_city_bet(city_code)
             return bet
         except Exception as e:
-            logger.error("Bet DB insert error (fallback): %s", e)
+            logger.error(
+                "Bet DB insert failed; aborting placement (no fallback bet): %s", e
+            )
             if self.db:
                 self.db.rollback()
-
-            return MockBet(
-                city=city,
-                outcome=getattr(signal, "outcome", "YES"),
-                bet_size=bet_size,
-                entry_price=getattr(signal, "entry_price", 0.5),
-                fair_value=getattr(signal, "fair_value", 0.5),
-                edge=getattr(signal, "edge", 0.0),
-            )
+            return None
 
 
 class SIALoop:

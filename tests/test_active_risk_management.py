@@ -37,6 +37,8 @@ def make_mock_bet(**kwargs):
     bet.close_reason = kwargs.get("close_reason", None)
     bet.closed_at = kwargs.get("closed_at", None)
     bet.placed_at = kwargs.get("placed_at", datetime.now(timezone.utc) - timedelta(hours=1))
+    bet.partial_tp_done = kwargs.get("partial_tp_done", False)
+    bet.covered_fraction = kwargs.get("covered_fraction", 0.0)
     return bet
 
 
@@ -433,11 +435,11 @@ class TestEdgeCases:
 
     def test_stop_loss_configurable_threshold(self):
         """Farklı stop_loss_pct değerleriyle test."""
-        # Varsayılan %30
+        # Varsayılan %25
         rm = make_risk_manager()
         bet = make_mock_bet(entry_price=0.50)
-        should_exit, _ = rm.check_stop_loss(bet, 0.36)  # %28 zarar
-        assert should_exit is False  # %30'u geçmedi
+        should_exit, _ = rm.check_stop_loss(bet, 0.40)  # %20 zarar
+        assert should_exit is False  # %25'i geçmedi
 
     def test_take_profit_configurable_threshold(self):
         """Farklı take_profit_pct değerleriyle test."""

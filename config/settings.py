@@ -157,7 +157,7 @@ class RiskConfig:
     """Active risk management: position-level stop-loss, take-profit, time decay, rebalance."""
 
     # Position-level limits
-    stop_loss_pct: float = 0.30  # %30 kayıpta otomatik kapat
+    stop_loss_pct: float = 0.25  # %25 kayıpta otomatik kapat
     take_profit_pct: float = 1.0  # %100 karda otomatik kapat
     trailing_stop_pct: float = 0.15  # %15 trailing stop (tepeden düşüşte)
 
@@ -577,43 +577,6 @@ def apply_persisted_strategy_params() -> dict:
             pass
 
     return applied
-
-
-def fetch_and_apply_fee_rate() -> float:
-    """Fetch fee rate from Polymarket API for weather category.
-
-    Polymarket uses category-based fee rates:
-    - Weather: 5% (default)
-    - Crypto: 7%
-    - Sports: 6%
-
-    This function fetches the current rate from the CLOB API endpoint.
-    If the API call fails, returns the default (0.05).
-    """
-    import requests
-
-    try:
-        # Polymarket CLOB API endpoint for fee rates
-        url = f"{bot_config.polymarket_clob_api}/fee"
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            # Look for weather category fee rate
-            if "fee_rate" in data:
-                fee_rate = float(data["fee_rate"])
-                bot_config.strategy.current_fee_rate = fee_rate
-                return fee_rate
-            # Try nested structure
-            if "categories" in data and "weather" in data["categories"]:
-                fee_rate = float(data["categories"]["weather"])
-                bot_config.strategy.current_fee_rate = fee_rate
-                return fee_rate
-    except Exception as e:
-        import logging
-        logging.getLogger("CONFIG").warning("Could not fetch fee rate from API: %s", e)
-
-    # Fallback to default
-    return bot_config.strategy.current_fee_rate
 
 
 # Apply persisted Karpathy-search winners at import time.

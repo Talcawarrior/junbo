@@ -195,6 +195,10 @@ class Bet(Base):
     close_reason = Column(String, nullable=True)
     closed_at = Column(DateTime, nullable=True)  # Early exit zamanı
 
+    # Partial take-profit state (principal recovery without full closure)
+    partial_tp_done = Column(Boolean, default=False, nullable=False)
+    covered_fraction = Column(Float, default=0.0, nullable=False)  # fraction sold on partial TP
+
 
 class Portfolio(Base):
     """Portfolio state for tracking balances (integrated to match existing Junbo frontend)."""

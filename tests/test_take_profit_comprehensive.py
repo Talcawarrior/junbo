@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from config.settings import Config, bot_config
+from config.settings import bot_config
 from engine.strategy import RiskManager
 
 
@@ -29,6 +29,9 @@ def make_mock_bet(**kwargs):
     bet.entry_price = kwargs.get("entry_price", 0.50)
     bet.price = kwargs.get("price", 0.50)
     bet.result_data = kwargs.get("result_data", None)
+    # Yeni partial-TP alanları: gerçek Bet gibi varsayılan False / 0.0
+    bet.partial_tp_done = kwargs.get("partial_tp_done", False)
+    bet.covered_fraction = kwargs.get("covered_fraction", 0.0)
     # placed_at: check_early_exit minimum hold kontrolü için
     # Varsayılan olarak 10 dakika önce — minimum hold'u geçer
     bet.placed_at = kwargs.get(
@@ -157,8 +160,10 @@ class TestTakeProfit:
         bet = make_mock_bet(entry_price=0.27)
         should_exit, reason = rm.check_take_profit(bet, 0.73)
         assert should_exit is True
-        # Reason '170%' civarında olmalı, '17000%' DEĞİL
-        assert "17" in reason  # "170.4%" contains "17"
+        # Partial TP reason shows the SOLD fraction (entry/current = 0.27/0.73 ≈ 37.0%),
+        # not the profit %. Key guard: no double-multiply (no "17000%").
+        assert "partial_take_profit" in reason
+        assert "37.0%" in reason
         assert "17000" not in reason  # Double-multiply would give "17000%"
 
 
@@ -177,10 +182,10 @@ class TestStopLoss:
         assert "stop_loss" in reason
 
     def test_stop_loss_above_threshold(self):
-        """%28 zararda tetiklenmemeli (%30 eşiği)."""
+        """%20 zararda tetiklenmemeli (%25 eşiği)."""
         rm = make_risk_manager()
         bet = make_mock_bet(entry_price=0.50)
-        should_exit, _ = rm.check_stop_loss(bet, 0.36)
+        should_exit, _ = rm.check_stop_loss(bet, 0.40)
         assert should_exit is False
 
     def test_stop_loss_deep_loss(self):
