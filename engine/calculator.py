@@ -24,6 +24,10 @@ from utils.slippage import (
 
 logger = logging.getLogger("ENGINE_CALCULATOR")
 
+# Global rate-limit flag: ilk 429'te 5dk boyunca tüm Open-Meteo isteklerini durdur
+import time as _time
+_RATE_LIMITED_UNTIL = 0.0  # monotonic timestamp
+
 
 class Calculator:
     """Calculates forecasting probability, Kelly stake sizes, and analyzes markets."""
@@ -414,6 +418,11 @@ class WeatherEngine:
         if target_date is None:
             target_date = datetime.now(timezone.utc).replace(tzinfo=None)
 
+        # Global rate-limit kontrolü
+        if _time.monotonic() < _RATE_LIMITED_UNTIL:
+            logger.debug("Rate-limited, skipping API call for %s", city_code)
+            return None
+
         api_model_names = []
         for internal_name in self.model_weights.keys():
             api_name = OPEN_METEO_MODEL_MAP.get(internal_name, internal_name)
@@ -442,8 +451,10 @@ class WeatherEngine:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                         if resp.status == 429:
-                            logger.warning("Ensemble API: Open-Meteo 429 Rate Limit! Waiting 120s...")
-                            await asyncio.sleep(120)
+                            # Global rate-limit: tüm döngü boyunca API'yi engelle
+                            import time as _time
+                            _RATE_LIMITED_UNTIL = _time.monotonic() + 300  # 5dk
+                            logger.warning("Ensemble 429 — all API calls paused for 5min")
                             return None
                         if resp.status != 200:
                             return None
