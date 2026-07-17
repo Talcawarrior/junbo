@@ -234,7 +234,7 @@ export interface TradeHistoryEntry {
   entryPrice: number;
   exitPrice: number;
   pnl: number;
-  result: "WIN" | "LOSS";
+  result: "WIN" | "LOSS" | "PARTIAL_TP";
   edge: number;
   duration: string;
   closedAt: string;  // formatted closing date/time

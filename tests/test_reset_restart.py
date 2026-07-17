@@ -1,9 +1,12 @@
 """Tests for the auto-restart-after-reset UX fix.
 
 Uses mock DB session to avoid touching production database.
+
+⚠️ DANGER: This test calls the REAL /api/reset endpoint.
+DO NOT REMOVE the pytest.skip() at the bottom.
+If enabled, it will DELETE ALL PRODUCTION DATA.
 """
 
-from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
 
