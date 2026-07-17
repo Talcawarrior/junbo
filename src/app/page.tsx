@@ -783,8 +783,8 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
                       <TableCell className="text-right font-mono text-sm tabular-nums" style={{ color: TEXT_PRIMARY }}>{fmtPrice(t.exitPrice)}</TableCell>
                       <TableCell className="text-right font-mono text-sm font-semibold tabular-nums" style={{ color: t.pnl >= 0 ? TEAL : RED }}>{fmtUsd(t.pnl)}</TableCell>
                       <TableCell>
-                        <Badge className="text-[10px] font-bold px-2 py-0.5 h-5" style={{ backgroundColor: t.result === "WIN" ? GREEN_LIGHT : RED_LIGHT, color: t.result === "WIN" ? "#16A34A" : RED, border: `1px solid ${t.result === "WIN" ? "#16A34A" : RED}33` }}>
-                          {t.result === "WIN" ? "✓ WIN" : "✗ LOSS"}
+                        <Badge className="text-[10px] font-bold px-2 py-0.5 h-5" style={{ backgroundColor: t.result === "WIN" ? GREEN_LIGHT : t.result === "PARTIAL_TP" ? "#FFF7ED" : RED_LIGHT, color: t.result === "WIN" ? "#16A34A" : t.result === "PARTIAL_TP" ? "#D97706" : RED, border: `1px solid ${t.result === "WIN" ? "#16A34A" : t.result === "PARTIAL_TP" ? "#D97706" : RED}33` }}>
+                          {t.result === "WIN" ? "✓ WIN" : t.result === "PARTIAL_TP" ? "◐ PT" : "✗ LOSS"}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm tabular-nums" style={{ color: TEXT_PRIMARY }}>{t.edge}%</TableCell>
@@ -793,6 +793,7 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
                           const exitLabels: Record<string, { label: string; color: string; bg: string }> = {
                             ST: { label: "ST", color: "#6B7280", bg: "#F3F4F6" },
                             TP: { label: "TP", color: "#16A34A", bg: "#DCFCE7" },
+                            PT: { label: "PT", color: "#D97706", bg: "#FFF7ED" },
                             SL: { label: "SL", color: "#DC2626", bg: "#FEE2E2" },
                             TS: { label: "TS", color: "#D97706", bg: "#FEF3C7" },
                             TD: { label: "TD", color: "#7C3AED", bg: "#EDE9FE" },
@@ -949,6 +950,7 @@ function ModelsTab({ modelScores }: { modelScores: ModelScore[] }) {
 // HEALTH TAB
 // ==========================================
 function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData?: KpiData }) {
+  const pnlScrollRef = useRef<HTMLDivElement>(null);
   const h = health ?? {
     verdict: "healthy" as const,
     verdict_text: "Veri bekleniyor",
@@ -973,16 +975,29 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
     info: { bg: "rgba(59,130,246,0.1)", color: "#3b82f6", icon: <Info className="h-3.5 w-3.5" /> },
   };
 
-  function PnlTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number; payload?: { trades: number } }>; label?: string }) {
+  function PnlTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number; payload?: { wins?: number; losses?: number; total?: number; stake?: number; win_rate?: number; roi?: number } }>; label?: string }) {
     if (!active || !payload?.length) return null;
-    const trades = payload[0].payload?.trades ?? 0;
+    const p = payload[0].payload ?? {};
+    const total = p.total ?? 0;
+    const wins = p.wins ?? 0;
+    const losses = p.losses ?? 0;
+    const winRate = p.win_rate ?? 0;
+    const roi = p.roi ?? 0;
+    const stake = p.stake ?? 0;
     return (
-      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-lg text-xs">
+      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-lg text-xs space-y-1">
         <p className="font-medium text-gray-500 mb-1">{label}</p>
         <p className="font-mono font-semibold" style={{ color: payload[0].value >= 0 ? TEAL : RED }}>
-          {fmtUsd(payload[0].value)}
+          {fmtUsd(payload[0].value)} PnL
         </p>
-        <p className="text-gray-400">{fmtInt(trades)} işlem</p>
+        {total > 0 && (
+          <>
+            <p className="text-gray-400">{fmtInt(total)} işlem ({fmtInt(wins)}W / {fmtInt(losses)}L)</p>
+            <p className="text-gray-400">Win rate: %{winRate} &middot; ROI: %{roi}</p>
+            {stake > 0 && <p className="text-gray-400">Stake: ${stake.toFixed(2)}</p>}
+          </>
+        )}
+        {total === 0 && <p className="text-gray-400">İşlem yok</p>}
       </div>
     );
   }
@@ -1218,7 +1233,7 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
         </Card>
       </section>
 
-      {/* Daily PnL Timeline */}
+      {/* Daily PnL Timeline — scrollable */}
       <Card className="shadow-sm py-4 gap-3" style={{ borderColor: BORDER }}>
         <CardHeader className="pb-0 pt-0 px-5">
           <div className="flex items-center gap-2">
@@ -1231,19 +1246,26 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
             {h.daily_pnl_timeline.length === 0 ? (
               <div className="flex items-center justify-center h-full text-sm" style={{ color: TEXT_MUTED }}>Henüz veri yok</div>
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={h.daily_pnl_timeline} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={BORDER} vertical={false} />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: TEXT_MUTED }} axisLine={{ stroke: BORDER }} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: TEXT_MUTED }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `$${v}`} width={50} />
-                  <Tooltip content={<PnlTooltip />} cursor={{ fill: "rgba(0,0,0,0.04)" }} />
-                  <Bar dataKey="pnl" radius={[4, 4, 0, 0]} barSize={36}>
-                    {h.daily_pnl_timeline.map((entry, i) => (
-                      <Cell key={i} fill={entry.pnl >= 0 ? TEAL : RED} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <div className="relative">
+                {/* Scrollable chart container */}
+                <div ref={pnlScrollRef} className="overflow-x-auto custom-scroll pb-1" style={{ scrollBehavior: "smooth" }}>
+                  <div style={{ width: Math.max(h.daily_pnl_timeline.length * 64, 500) }}>
+                    <ResponsiveContainer width="100%" height={260}>
+                      <BarChart data={h.daily_pnl_timeline} margin={{ top: 5, right: 12, left: 10, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={BORDER} vertical={false} />
+                        <XAxis dataKey="date" tick={{ fontSize: 11, fill: TEXT_MUTED }} axisLine={{ stroke: BORDER }} tickLine={false} interval={0} angle={-20} textAnchor="end" height={40} />
+                        <YAxis tick={{ fontSize: 11, fill: TEXT_MUTED }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `$${v}`} width={50} />
+                        <Tooltip content={<PnlTooltip />} cursor={{ fill: "rgba(0,0,0,0.04)" }} />
+                        <Bar dataKey="pnl" radius={[4, 4, 0, 0]} barSize={36}>
+                          {h.daily_pnl_timeline.map((entry, i) => (
+                            <Cell key={i} fill={entry.pnl >= 0 ? TEAL : RED} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
             )}
           </ChartWrapper>
         </CardContent>

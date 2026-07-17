@@ -80,11 +80,11 @@ export interface HistoryEntry {
   realized_pnl: number;
   roi: number;
   edge: number | null;
-  result: "WIN" | "LOSS";
+  result: "WIN" | "LOSS" | "PARTIAL_TP";
   placed_at: string | null;
   settled_at: string | null;
   closed_at: string | null;  // Early exit time
-  exit_type: string;  // ST, TP, SL, TS, TD, OT
+  exit_type: string;  // ST, TP, SL, TS, TD, OT, PT
 }
 
 export interface HistoryStats {
@@ -151,7 +151,12 @@ export interface HealthResponse {
   daily_pnl_timeline: Array<{
     date: string;
     pnl: number;
-    trades: number;
+    stake: number;
+    wins: number;
+    losses: number;
+    total: number;
+    win_rate: number;
+    roi: number;
   }>;
 }
 
@@ -649,9 +654,11 @@ function mapTradeHistory(history: HistoryEntry[]): TradeHistoryEntry[] {
 
     // Compute exit price from pnl and entry
     const stake = h.stake_amount || 10;
-    const exitPrice = h.result === "WIN"
+    const exitPrice = h.result === "PARTIAL_TP"
       ? Math.min(1.0, h.entry_price * (1.0 + h.realized_pnl / stake))
-      : Math.max(0, h.entry_price * (1.0 - Math.abs(h.realized_pnl) / stake));
+      : h.result === "WIN"
+        ? Math.min(1.0, h.entry_price * (1.0 + h.realized_pnl / stake))
+        : Math.max(0, h.entry_price * (1.0 - Math.abs(h.realized_pnl) / stake));
 
     // closed_at for early exits, settled_at for normal settlements
     const closeDate = h.closed_at || h.settled_at;
