@@ -68,6 +68,8 @@ async def scan_and_bet_loop(state):
     last_day = None
     previous_market_count = 0
     fast_mode_until = None
+    last_weather_fetch = None  # Son weather fetch zamanı
+    _WEATHER_FETCH_INTERVAL = 3600  # Saatte 1 kez Open-Meteo'dan çek (saatlik güncelleniyor)
 
     try:
         previous_market_count = _get_market_count()
@@ -91,15 +93,27 @@ async def scan_and_bet_loop(state):
             # STEP 1: Fetch markets
             await asyncio.wait_for(asyncio.to_thread(run_fetch_markets), timeout=_FETCH_TIMEOUT)
 
-            # STEP 2: Parse + Weather PARALEL
-            parse_and_weather = await asyncio.gather(
-                asyncio.wait_for(asyncio.to_thread(run_parse_markets), timeout=_FETCH_TIMEOUT),
-                asyncio.wait_for(asyncio.to_thread(run_fetch_weather), timeout=_FETCH_TIMEOUT),
-                return_exceptions=True,
+            # STEP 2: Parse PARALEL + Weather (sadece saatte 1 kez)
+            now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+            should_fetch_weather = (
+                last_weather_fetch is None
+                or (now_utc - last_weather_fetch).total_seconds() >= _WEATHER_FETCH_INTERVAL
             )
-            for result in parse_and_weather:
-                if isinstance(result, Exception):
-                    logger.error("Parallel step error: %s", result)
+
+            if should_fetch_weather:
+                logger.info("Weather fetch triggered (last: %s)", last_weather_fetch)
+                parse_and_weather = await asyncio.gather(
+                    asyncio.wait_for(asyncio.to_thread(run_parse_markets), timeout=_FETCH_TIMEOUT),
+                    asyncio.wait_for(asyncio.to_thread(run_fetch_weather), timeout=_FETCH_TIMEOUT),
+                    return_exceptions=True,
+                )
+                last_weather_fetch = datetime.now(timezone.utc).replace(tzinfo=None)
+            else:
+                # Sadece parse — weather cache'den geliyor
+                try:
+                    await asyncio.wait_for(asyncio.to_thread(run_parse_markets), timeout=_FETCH_TIMEOUT)
+                except Exception as e:
+                    logger.error("Parse step error: %s", e)
 
             # STEP 3: Run cycle
             await asyncio.wait_for(asyncio.to_thread(run_cycle), timeout=_CYCLE_TIMEOUT)

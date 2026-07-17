@@ -23,13 +23,8 @@ logger = logging.getLogger("SCRAPER_METEO")
 _FETCH_CACHE: dict[tuple[float, float, str, str], tuple] = {}
 _FETCH_CACHE_LOCK = threading.Lock()
 
-# Successes live for 30 minutes; failures for 5 minutes. The original
-# cache remembered failures for the lifetime of the process, which
-# made the scraper silently stop working after the first 429 hit: the
-# (lat, lon, date, source) tuple was stored as None and every later
-# call returned the cached failure forever. With TTL the bot recovers
-# on its own and only re-issues requests every few minutes.
-_SUCCESS_TTL_S = 30.0 * 60.0
+# Successes live for 60 minutes (Open-Meteo updates hourly); failures for 5 minutes.
+_SUCCESS_TTL_S = 60.0 * 60.0
 _FAILURE_TTL_S = 5.0 * 60.0
 
 
