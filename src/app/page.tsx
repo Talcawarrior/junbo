@@ -364,67 +364,7 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
         </>
       )}
 
-      {/* Portfolio Chart + Win/Loss Donut */}
-      <section className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-        <Card className="lg:col-span-3 shadow-sm py-4 gap-3" style={{ borderColor: BORDER }}>
-          <CardHeader className="pb-0 pt-0 px-5">
-            <div className="flex items-center gap-2">
-              <BarChart3 className="h-4 w-4" style={{ color: TEXT_MUTED }} />
-              <CardTitle className="text-sm font-semibold" style={{ color: TEXT_PRIMARY }}>Portföy Değeri (30 Gün)</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="px-4">
-            <ChartWrapper height={280}>
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={portfolioData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                  <defs>
-                    <linearGradient id="portfolioGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={TEAL} stopOpacity={0.25} />
-                      <stop offset="95%" stopColor={TEAL} stopOpacity={0.02} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke={BORDER} vertical={false} />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: TEXT_MUTED }} axisLine={{ stroke: BORDER }} tickLine={false} />
-                  <YAxis domain={["auto", "auto"]} tick={{ fontSize: 11, fill: TEXT_MUTED }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `$${(v / 1000).toFixed(1)}k`} width={45} />
-                  <Tooltip content={<PortfolioTooltip />} />
-                  <Area type="monotone" dataKey="value" stroke={TEAL} strokeWidth={2} fill="url(#portfolioGradient)" dot={false} activeDot={{ r: 4, stroke: TEAL, strokeWidth: 2, fill: "#fff" }} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </ChartWrapper>
-          </CardContent>
-        </Card>
-
-        {/* Win/Loss Donut */}
-        <Card className="shadow-sm py-4 gap-3" style={{ borderColor: BORDER }}>
-          <CardHeader className="pb-0 pt-0 px-5">
-            <CardTitle className="text-sm font-semibold" style={{ color: TEXT_PRIMARY }}>Win / Loss</CardTitle>
-          </CardHeader>
-          <CardContent className="px-4 flex flex-col items-center justify-center">
-            <ChartWrapper height={180} width={180}>
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={winLossData} cx="50%" cy="50%" innerRadius={50} outerRadius={75} paddingAngle={3} dataKey="value" strokeWidth={0}>
-                    {winLossData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-            </ChartWrapper>
-            <div className="flex gap-6 mt-3 text-xs">
-              <div className="flex items-center gap-1.5">
-                <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: TEAL }} />
-                <span style={{ color: TEXT_MUTED }}>Kazanan: <b style={{ color: TEXT_PRIMARY }}>{fmtInt(kpiData.wins)}</b></span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: RED }} />
-                <span style={{ color: TEXT_MUTED }}>Kaybeden: <b style={{ color: TEXT_PRIMARY }}>{fmtInt(kpiData.losses)}</b></span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </section>
-
-      {/* Open Positions + Activity Feed */}
+      {/* Open Positions + Activity Feed — ÜSTTE */}
       <section className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         <Card className="lg:col-span-3 shadow-sm py-4 gap-3" style={{ borderColor: BORDER }}>
           <CardHeader className="pb-0 pt-0 px-5">
@@ -512,6 +452,66 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
         </Card>
       </section>
 
+      {/* Portfolio Chart + Win/Loss Donut — AŞAĞIDA */}
+      <section className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+        <Card className="lg:col-span-3 shadow-sm py-4 gap-3" style={{ borderColor: BORDER }}>
+          <CardHeader className="pb-0 pt-0 px-5">
+            <div className="flex items-center gap-2">
+              <BarChart3 className="h-4 w-4" style={{ color: TEXT_MUTED }} />
+              <CardTitle className="text-sm font-semibold" style={{ color: TEXT_PRIMARY }}>Portföy Değeri (30 Gün)</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent className="px-4">
+            <ChartWrapper height={280}>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={portfolioData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                  <defs>
+                    <linearGradient id="portfolioGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={TEAL} stopOpacity={0.25} />
+                      <stop offset="95%" stopColor={TEAL} stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke={BORDER} vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: TEXT_MUTED }} axisLine={{ stroke: BORDER }} tickLine={false} />
+                  <YAxis domain={["auto", "auto"]} tick={{ fontSize: 11, fill: TEXT_MUTED }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `$${(v / 1000).toFixed(1)}k`} width={45} />
+                  <Tooltip content={<PortfolioTooltip />} />
+                  <Area type="monotone" dataKey="value" stroke={TEAL} strokeWidth={2} fill="url(#portfolioGradient)" dot={false} activeDot={{ r: 4, stroke: TEAL, strokeWidth: 2, fill: "#fff" }} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </ChartWrapper>
+          </CardContent>
+        </Card>
+
+        {/* Win/Loss Donut */}
+        <Card className="shadow-sm py-4 gap-3" style={{ borderColor: BORDER }}>
+          <CardHeader className="pb-0 pt-0 px-5">
+            <CardTitle className="text-sm font-semibold" style={{ color: TEXT_PRIMARY }}>Win / Loss</CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 flex flex-col items-center justify-center">
+            <ChartWrapper height={180} width={180}>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={winLossData} cx="50%" cy="50%" innerRadius={50} outerRadius={75} paddingAngle={3} dataKey="value" strokeWidth={0}>
+                    {winLossData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </ChartWrapper>
+            <div className="flex gap-6 mt-3 text-xs">
+              <div className="flex items-center gap-1.5">
+                <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: TEAL }} />
+                <span style={{ color: TEXT_MUTED }}>Kazanan: <b style={{ color: TEXT_PRIMARY }}>{fmtInt(kpiData.wins)}</b></span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: RED }} />
+                <span style={{ color: TEXT_MUTED }}>Kaybeden: <b style={{ color: TEXT_PRIMARY }}>{fmtInt(kpiData.losses)}</b></span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
       {/* Edge Distribution */}
       <Card className="shadow-sm py-4 gap-3" style={{ borderColor: BORDER }}>
         <CardHeader className="pb-0 pt-0 px-5">
@@ -539,7 +539,7 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
 // TRADE HISTORY TAB
 // ==========================================
 function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: TradeHistoryEntry[]; historyStats: HistoryStats | null; totalPnl: number }) {
-  const [filterResult, setFilterResult] = useState<"ALL" | "WIN" | "LOSS">("ALL");
+  const [filterResult, setFilterResult] = useState<"ALL" | "WIN" | "LOSS" | "PARTIAL_TP">("ALL");
   const [filterSide, setFilterSide] = useState<"ALL" | "YES" | "NO">("ALL");
   const [filterExit, setFilterExit] = useState<"ALL" | "ST" | "TP" | "SL" | "TS" | "TD">("ALL");
   const [filterDate, setFilterDate] = useState<string>("");
@@ -554,6 +554,7 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
     const tenDaysAgo = new Date();
     tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
     data = data.filter((t) => {
+      if (t.result === "PARTIAL_TP") return true; // Açık pozisyonlar her zaman göster
       if (!t.closedAtISO) return false;
       return new Date(t.closedAtISO) >= tenDaysAgo;
     });
@@ -644,7 +645,7 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
             <div className="flex items-center gap-1.5">
               <Filter className="h-3.5 w-3.5" style={{ color: TEXT_MUTED }} />
               <span className="text-[11px] font-medium" style={{ color: TEXT_MUTED }}>Sonuç:</span>
-              {(["ALL", "WIN", "LOSS"] as const).map((v) => (
+              {(["ALL", "WIN", "PARTIAL_TP", "LOSS"] as const).map((v) => (
                 <button key={v} onClick={() => setFilterResult(v)}
                   className="px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors"
                   style={{
@@ -652,7 +653,7 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
                     backgroundColor: filterResult === v ? TEAL_LIGHT : "transparent",
                     color: filterResult === v ? TEAL : TEXT_MUTED,
                   }}>
-                  {v === "ALL" ? "Tümü" : v === "WIN" ? "Kazanan" : "Kaybeden"}
+                  {v === "ALL" ? "Tümü" : v === "WIN" ? "Kazanan" : v === "PARTIAL_TP" ? "◐ PT" : "Kaybeden"}
                 </button>
               ))}
             </div>
