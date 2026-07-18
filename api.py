@@ -1470,12 +1470,12 @@ def get_health_check():
             )
 
         # 6. Daily PnL Timeline — forward from today (17/07, 18/07, 19/07, ...)
-        # Shows next 30 days. Past days with no data are not shown; today is
-        # the first (leftmost) bar. Future days show $0 until bets close.
+        # Shows 31 days: yesterday through 29 days ahead.
+        # Past days with data get real PnL bars; future days show $0.
         from sqlalchemy import or_
 
         daily_pnl = []
-        for i in range(30):
+        for i in range(-1, 29):
             day_start = (now + timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0)
             day_end = (now + timedelta(days=i + 1)).replace(hour=0, minute=0, second=0, microsecond=0)
             day_bets = (
@@ -1500,7 +1500,7 @@ def get_health_check():
             day_total = day_wins + day_losses
             daily_pnl.append(
                 {
-                    "date": day_start.strftime("%m/%d"),
+                    "date": f"{day_start.day}/{day_start.month}",
                     "pnl": round(day_pnl, 2),
                     "stake": round(day_stake, 2),
                     "wins": day_wins,
