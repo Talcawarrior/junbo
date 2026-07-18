@@ -66,7 +66,11 @@ async def price_poller_loop(state):
     current_price + unrealized_pnl degerlerini gunceller.
     Boylece UI ve PnL tarama dongusunden bagimsiz olarak canli kalir.
     """
-    from jobs.scheduler import run_fetch_markets, run_update_prices
+    from jobs.scheduler import (
+        run_fetch_markets,
+        run_risk_management,
+        run_update_prices,
+    )
 
     logger.info("Price poller loop basladi (interval=%ds)", _PRICE_POLL_INTERVAL)
     while state.is_running:
@@ -76,6 +80,14 @@ async def price_poller_loop(state):
             )
             await asyncio.wait_for(
                 asyncio.to_thread(run_update_prices), timeout=_FETCH_TIMEOUT
+            )
+            # Risk yönetimini de fiyat poller'a bağla: stop-loss / take-profit /
+            # trailing stop kontrolleri artık her 5 dakikada bir (fiyat
+            # tazelemeyle aynı döngüde) çalışır. Böylece son dakikalarda hızla
+            # düşen, vadeye yakın bahisler 15 dakikalık tarama döngüsünden
+            # kaçıp settlement'e gitmez.
+            await asyncio.wait_for(
+                asyncio.to_thread(run_risk_management), timeout=_FETCH_TIMEOUT
             )
             state.last_price_update = datetime.now(timezone.utc).replace(tzinfo=None)
         except asyncio.CancelledError:
