@@ -9,7 +9,7 @@ Watchdog: settlement_loop monitors scan_loop health via state.last_scan.
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 
 from database.db import get_session
 from database.models import OPEN_BET_STATUSES, Bet, WeatherMarket
@@ -31,10 +31,11 @@ _FAST_SCAN_INTERVAL = 60
 # temposunda açılabilir.
 _NORMAL_SCAN_INTERVAL = 300  # 5 dakika (Polymarket fetch temposuyla hizali)
 
-# Fiyat poller: 2 gün sonrası marketler açıldığında 20 dk boyunca her dakika
-# fiyat çek, sonra tekrar 5 dk'ya dön.
+# Fiyat poller: 2 gün sonrası (yeni tarih) marketler açıldığında 30 dk boyunca
+# her dakika fiyat çek, sonra tekrar 5 dk'ya dön. Tarih üzerinden tetikleme:
+# açık marketlerin en güncel tarihi ilerlediğinde (örn. 20/7 -> 21/7) 1 kez tetiklenir.
 _FAST_PRICE_INTERVAL = 60     # 1 dakika
-_FAST_PRICE_WINDOW = 20 * 60  # 20 dakika
+_FAST_PRICE_WINDOW = 30 * 60  # 30 dakika
 
 # Watchdog thresholds (seconds)
 _WATCHDOG_WARNING = 900    # 15 dakika — warning
@@ -53,30 +54,58 @@ def _get_market_count() -> int:
         return db.query(WeatherMarket).filter(WeatherMarket.status == "open").count()
 
 
-def _get_two_day_ahead_market_ids() -> set:
-    """2 gün sonrası (±0.5g) vadeli, açık marketlerin ID kümesi.
+def _get_open_target_dates() -> set:
+    """Açık marketlerin hedef TARİH (takvim günü) kümesi.
 
-    Her döngü çağrılır; dönen küme bir önceki döngüde görülenlerle
-    karşılaştırılarak 2-gün marketler 'açılır açılmaz' (ilk görüldüğü
-    anda, gece yarısından saatler sonra bile) fiyat poller'ı hızlı
-    moda alınır.
+    2-gün-sonrası taraması TARİH üzerinden yapılır: scan loop, açık
+    marketlerin en güncel tarihinin ilerleyip ilerlemediğini takip eder.
+    Örn. açık tarihler 18-19-20/7 iken 21/7 belirirse (gece yarısından
+    saatler sonra bile) fiyat poller'ı 1 dakikaya alınır. Mevcut açık
+    tarih değişmezse (hala 18-19-20/7) 5 dk'da kalınır.
     """
-    ids: set = set()
+    dates: set = set()
     with get_session() as db:
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        lo = now + timedelta(days=1.5)
-        hi = now + timedelta(days=2.5)
         for row in (
+            db.query(WeatherMarket.target_date)
+            .filter(WeatherMarket.status == "open")
+            .all()
+        ):
+            td = row[0]
+            if td is not None:
+                dates.add(td.date())
+    return dates
+
+
+def _get_open_market_count_for_date(target_day: date) -> int:
+    """Belirli bir takvim gününde açık olan market sayısı (log/tetikleme için)."""
+    with get_session() as db:
+        lo = datetime(target_day.year, target_day.month, target_day.day, 0, 0, 0)
+        hi = lo + timedelta(days=1)
+        return (
             db.query(WeatherMarket.id)
             .filter(
                 WeatherMarket.status == "open",
                 WeatherMarket.target_date >= lo,
-                WeatherMarket.target_date <= hi,
+                WeatherMarket.target_date < hi,
             )
-            .all()
-        ):
-            ids.add(row[0])
-    return ids
+            .count()
+        )
+
+
+def _next_two_day_target(last_date: date | None, open_dates: set) -> tuple:
+    """2-gün-sonrası tetikleme kararı (saf fonksiyon, test edilebilir).
+
+    Açık marketlerin en güncel tarihi `last_date`'ten ileri taşınmışsa
+    (yeni bir tarih belirdiğinde) (yeni_tarih, True) döner — tetikle.
+    Aynı tarihte kalınıyorsa (yeni_tarih, False): zaten tetiklenmiş,
+    tekrar tetikleme (yalnızca 1 kez). Açık market yoksa (None, False).
+    """
+    if not open_dates:
+        return None, False
+    max_date = max(open_dates)
+    if last_date is None or max_date > last_date:
+        return max_date, True
+    return max_date, False
 
 
 def _is_midnight_window(now: datetime) -> bool:
@@ -166,13 +195,14 @@ async def scan_and_bet_loop(state):
     previous_market_count = 0
     fast_mode_until = None
     last_weather_fetch = None  # Son weather fetch zamanı
-    two_day_seen: set = set()  # Daha önce görülen 2-gün market ID'leri
+    last_two_day_date = None  # En son tetiklenen 2-gün (yeni tarih) açık market tarihi
 
     try:
         previous_market_count = _get_market_count()
         logger.info("Initial market count: %d", previous_market_count)
+        last_two_day_date = max(_get_open_target_dates(), default=None)
     except Exception as e:
-        logger.warning("Could not get initial market count: %s", e)
+        logger.warning("Could not get initial market state: %s", e)
 
     while state.is_running:
         try:  # ← TEK TRY — her şey içeride
@@ -236,22 +266,26 @@ async def scan_and_bet_loop(state):
             except Exception as e:
                 logger.warning("Market count check failed: %s", e)
 
-            # 2 gün sonrası marketler 'açılır açılmaz' fiyat poller'ını 20 dk
-            # boyunca her dakika çalıştır. Bu kontrol market sayısı artışına
-            # BAĞLI DEĞİL: 2-gün marketler gece yarısından 3-4 saat sonra
-            # açılsa bile, yeni ID görülür görülmez tetiklenir (sonra 5 dk).
+            # 2 gün sonrası (yeni tarih) marketler 'açılır açılmaz' fiyat poller'ını
+            # 30 dk boyunca her dakika çalıştır. TARİH üzerinden: açık marketlerin
+            # en güncel tarihi ilerlediğinde (örn. 20/7 -> 21/7) tetiklenir, yalnızca
+            # 1 kez (gece yarısından saatler sonra bile). Mevcut açık tarih değişmezse
+            # (hala 18-19-20/7) 5 dk'da kalır.
             try:
-                two_day_now = _get_two_day_ahead_market_ids()
-                new_two_day = two_day_now - two_day_seen
-                if new_two_day:
+                open_dates = _get_open_target_dates()
+                new_date, trigger = _next_two_day_target(last_two_day_date, open_dates)
+                if trigger:
+                    new_count = _get_open_market_count_for_date(new_date)
                     state.fast_price_until = (
                         datetime.now(timezone.utc) + timedelta(seconds=_FAST_PRICE_WINDOW)
                     ).replace(tzinfo=None)
                     logger.info(
-                        "2-day-ahead markets opened (%d new) — price poller FAST (1min) for %d min",
-                        len(new_two_day), _FAST_PRICE_WINDOW // 60,
+                        "2-day-ahead date %s opened (%d markets) — price poller FAST (1min) for %d min",
+                        new_date.isoformat(), new_count, _FAST_PRICE_WINDOW // 60,
                     )
-                two_day_seen |= two_day_now
+                    last_two_day_date = new_date
+                elif new_date is not None:
+                    last_two_day_date = new_date
             except Exception as e:
                 logger.warning("2-day-ahead detection failed: %s", e)
 
