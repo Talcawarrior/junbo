@@ -142,12 +142,24 @@ async def scan_and_bet_loop(state):
 
             if should_fetch_weather:
                 logger.info("Weather fetch triggered (last: %s)", last_weather_fetch)
-                parse_and_weather = await asyncio.gather(
+                parse_res, weather_res = await asyncio.gather(
                     asyncio.wait_for(asyncio.to_thread(run_parse_markets), timeout=_FETCH_TIMEOUT),
                     asyncio.wait_for(asyncio.to_thread(run_fetch_weather), timeout=_FETCH_TIMEOUT),
                     return_exceptions=True,
                 )
-                last_weather_fetch = datetime.now(timezone.utc).replace(tzinfo=None)
+                if isinstance(weather_res, Exception):
+                    # Don't advance last_weather_fetch — retry next cycle so a
+                    # transient failure can't silently starve markets of weather.
+                    logger.error(
+                        "Weather fetch FAILED: %s — will retry next cycle",
+                        weather_res,
+                        exc_info=weather_res,
+                    )
+                else:
+                    last_weather_fetch = datetime.now(timezone.utc).replace(tzinfo=None)
+                    logger.info("Weather fetch complete: %s", weather_res)
+                if isinstance(parse_res, Exception):
+                    logger.error("Parse step error: %s", parse_res)
             else:
                 # Sadece parse — weather cache'den geliyor
                 try:

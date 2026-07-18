@@ -413,6 +413,9 @@ class WeatherEngine:
         db_session=None,
         metric: str = "temperature_2m_max",
     ) -> dict | None:
+        # `_time` and `_RATE_LIMITED_UNTIL` are module-level globals; the
+        # 429 pause must mutate the global so it persists across calls.
+        global _RATE_LIMITED_UNTIL
         if not city_code or (latitude == 0 and longitude == 0):
             return None
         if target_date is None:
@@ -452,7 +455,6 @@ class WeatherEngine:
                     async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                         if resp.status == 429:
                             # Global rate-limit: tüm döngü boyunca API'yi engelle
-                            import time as _time
                             _RATE_LIMITED_UNTIL = _time.monotonic() + 300  # 5dk
                             logger.warning("Ensemble 429 — all API calls paused for 5min")
                             return None
@@ -555,8 +557,23 @@ class WeatherEngine:
             if db_session is not None and market_ids:
                 from database.models import WeatherForecast
 
+                # Dedup: skip (market, source) rows we already have for this
+                # date/metric so repeated hourly fetches don't append duplicates.
+                existing_keys = {
+                    (f.market_id, f.source)
+                    for f in db_session.query(WeatherForecast)
+                    .filter(
+                        WeatherForecast.market_id.in_(market_ids),
+                        WeatherForecast.source.in_(list(model_temps.keys())),
+                        WeatherForecast.target_date == target_date,
+                        WeatherForecast.metric == metric,
+                    )
+                }
+                now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
                 for mid in market_ids:
                     for mn, tmp in model_temps.items():
+                        if (mid, mn) in existing_keys:
+                            continue
                         db_session.add(
                             WeatherForecast(
                                 market_id=mid,
@@ -568,7 +585,7 @@ class WeatherEngine:
                                 source=mn,
                                 predicted_value=float(tmp),
                                 model_weight=self.model_weights.get(mn, 0.0),
-                                fetched_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                                fetched_at=now_utc,
                                 raw_data=str({"model": mn, "temp": tmp, "ensemble": True}),
                             )
                         )

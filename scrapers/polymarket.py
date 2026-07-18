@@ -503,29 +503,6 @@ class PolymarketScraper:
                 return icao_code
         return ""
 
-    def _extract_strike(self, question: str) -> float:
-        if not question:
-            return 0.0
-        patterns = [
-            r"(\d+)\s*\°\s*C",
-            r"(\d+)\s*\°\s*F",
-            r"(\d+)\s*degrees?\s*[CF]?",
-            r"above\s+(\d+)",
-            r"below\s+(\d+)",
-            r"be\s+(\d+)\s*\°?",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, question, re.IGNORECASE)
-            if match:
-                try:
-                    strike = float(match.group(1))
-                    if "F" in question.upper() or "FAHRENHEIT" in question.upper():
-                        strike = (strike - 32) * 5 / 9
-                    return round(strike, 1)
-                except ValueError:
-                    continue
-        return 0.0
-
     def _determine_market_type(self, question: str) -> str:
         question_lower = question.lower()
         if (
@@ -540,9 +517,4 @@ class PolymarketScraper:
             or "under" in question_lower
         ):
             return "LOW"
-        if "or below" in question_lower or "or higher" in question_lower:
-            if "or below" in question_lower:
-                return "LOW"
-            if "or higher" in question_lower:
-                return "HIGH"
         return "RANGE"

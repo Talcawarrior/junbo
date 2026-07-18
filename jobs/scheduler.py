@@ -200,7 +200,12 @@ def run_update_prices(session=None):
             else:
                 cash = (portfolio.initial_value or 1000.0) + float(realized_pnl_total)
             portfolio.total_value = portfolio_total_value(cash, float(open_exposure))
-            portfolio.current_value = portfolio.total_value  # Sync current_value
+            # current_value = mark-to-market: book value + unrealized (paper) PnL.
+            # Distinct from total_value (book value, excludes paper PnL) so the
+            # dashboard can show both the conservative book and the live value.
+            portfolio.current_value = round(
+                portfolio.total_value + float(total_unrealized), 2
+            )
             portfolio.last_updated = datetime.now(timezone.utc).replace(tzinfo=None)
             sess.add(portfolio)
 

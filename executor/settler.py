@@ -107,7 +107,18 @@ class SettlementEngine:
                     ) or 0.0
                     cash = float(portfolio.cash_balance or 0)
                     portfolio.total_value = portfolio_total_value(cash, float(open_exposure))
-                    portfolio.current_value = portfolio.total_value
+                    # current_value = mark-to-market: book value + unrealized
+                    # (paper) PnL on remaining open bets.
+                    open_unrealized = (
+                        sync_session.query(
+                            func.coalesce(func.sum(Bet.unrealized_pnl), 0.0)
+                        )
+                        .filter(Bet.status.in_(OPEN_BET_STATUSES))
+                        .scalar()
+                    ) or 0.0
+                    portfolio.current_value = round(
+                        portfolio.total_value + float(open_unrealized), 2
+                    )
                     portfolio.last_updated = datetime.now(timezone.utc).replace(tzinfo=None)  # pyright: ignore
                     sync_session.commit()
 

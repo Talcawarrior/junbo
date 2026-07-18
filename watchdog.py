@@ -23,6 +23,69 @@ TIMEOUT = 120  # 2 dakika yanıt yoksa restart
 
 IS_WINDOWS = platform.system() == "Windows"
 
+# PID of the bot process we started (used for a precise kill instead of
+# nuking every python.exe on the machine).
+BOT_PID = None
+
+
+def _find_bot_pids():
+    """Return PIDs of processes running the bot ('main.py bot'), excluding self."""
+    pids = []
+    self_pid = os.getpid()
+    if IS_WINDOWS:
+        try:
+            out = subprocess.run(
+                ["wmic", "process", "where", "name='python.exe'",
+                 "get", "ProcessId,CommandLine", "/format:csv"],
+                capture_output=True, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            ).stdout
+            for line in out.splitlines():
+                if "main.py" not in line or "watchdog" in line:
+                    continue
+                # CSV columns: Node,ProcessId,CommandLine — PID is the 2nd field.
+                cols = line.split(",")
+                if len(cols) < 3:
+                    continue
+                try:
+                    pid = int(cols[1].strip())
+                except ValueError:
+                    continue
+                if pid != self_pid and "bot" in cols[2]:
+                    pids.append(pid)
+        except Exception:
+            pass
+    else:
+        try:
+            out = subprocess.run(
+                ["pgrep", "-f", "main.py bot"], capture_output=True, text=True
+            ).stdout
+            for pid_s in out.split():
+                try:
+                    pid = int(pid_s)
+                except ValueError:
+                    continue
+                if pid != self_pid:
+                    pids.append(pid)
+        except Exception:
+            pass
+    return pids
+
+
+def _kill_pid(pid: int):
+    """Kill a single PID. Windows: taskkill /PID. Else: kill -9."""
+    try:
+        if IS_WINDOWS:
+            subprocess.run(
+                ["taskkill", "/F", "/PID", str(pid)],
+                capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        else:
+            subprocess.run(["kill", "-9", str(pid)], capture_output=True)
+        return True
+    except Exception:
+        return False
+
 
 def log(msg: str):
     """Log yaz."""
@@ -57,21 +120,25 @@ def start_bot():
         kwargs["start_new_session"] = True
 
     proc = subprocess.Popen(cmd, **kwargs)
+    global BOT_PID
+    BOT_PID = proc.pid
     log(f"Bot started (PID: {proc.pid})")
     return proc
 
 
 def stop_bot():
-    """Bot'u durdur."""
-    if IS_WINDOWS:
-        subprocess.run(
-            ["taskkill", "/F", "/IM", "python.exe"],
-            capture_output=True,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
-    else:
-        subprocess.run(["pkill", "-f", "main.py bot"], capture_output=True)
-    log("Bot stopped")
+    """Bot'u durdur — yalnızca 'main.py bot' prosesini, tüm python'ı değil."""
+    killed_any = False
+    # 1) Precisely tracked PID (if we started it).
+    global BOT_PID
+    if BOT_PID and _kill_pid(BOT_PID):
+        killed_any = True
+        BOT_PID = None
+    # 2) Any other 'main.py bot' proceslerini komut satırından bulup öldür.
+    for pid in _find_bot_pids():
+        if _kill_pid(pid):
+            killed_any = True
+    log("Bot stopped" if killed_any else "Bot not found running")
 
 
 def watchdog_loop():

@@ -66,6 +66,9 @@ _RATE_LIMITED_UNTIL = 0.0  # monotonic timestamp
 
 
 def _throttle(host: str) -> None:
+    """Sync per-host spacing. This is a blocking, synchronous function
+    (called from requests-based fetchers), so it must use time.sleep —
+    it must never try to drive an event loop."""
     while True:
         with _THROTTLE_LOCK:
             now = time.monotonic()
@@ -74,12 +77,62 @@ def _throttle(host: str) -> None:
             if wait <= 0:
                 _LAST_CALL_AT[host] = now
                 return
-        # Use asyncio.sleep if running in an event loop, else time.sleep
-        try:
-            loop = asyncio.get_running_loop()
-            loop.run_until_complete(asyncio.sleep(wait))
-        except RuntimeError:
-            time.sleep(wait)
+        time.sleep(wait)
+
+
+def _upsert_forecast(
+    session,
+    market_id: str,
+    city: str,
+    lat: float,
+    lon: float,
+    target_date: datetime,
+    metric: str,
+    source_name: str,
+    predicted_value: float,
+    raw_data,
+) -> bool:
+    """Insert a forecast row, or update the existing one for the same
+    (market_id, source, target_date, metric) instead of duplicating it.
+
+    Without this, every hourly fetch appends a new row per source, so the
+    weather_forecasts table grows unbounded and the calculator's
+    latest-by-source logic must wade through stale duplicates.
+    """
+    existing = (
+        session.query(WeatherForecast)
+        .filter(
+            WeatherForecast.market_id == market_id,
+            WeatherForecast.source == source_name,
+            WeatherForecast.target_date == target_date,
+            WeatherForecast.metric == metric,
+        )
+        .first()
+    )
+    now = datetime.now(UTC).replace(tzinfo=None)
+    if existing:
+        existing.predicted_value = predicted_value
+        existing.city = city
+        existing.lat = lat
+        existing.lon = lon
+        existing.fetched_at = now
+        existing.raw_data = str(raw_data)
+        return False
+    session.add(
+        WeatherForecast(
+            market_id=market_id,
+            city=city,
+            lat=lat,
+            lon=lon,
+            target_date=target_date,
+            metric=metric,
+            source=source_name,
+            predicted_value=predicted_value,
+            fetched_at=now,
+            raw_data=str(raw_data),
+        )
+    )
+    return True
 
 
 class MeteoFetcher:
@@ -232,19 +285,18 @@ class MeteoFetcher:
                     predicted_value = result[metric]
                     with get_session() as session:
                         for mid in market_ids:
-                            forecast = WeatherForecast(
-                                market_id=mid,
-                                city=city,
-                                lat=lat,
-                                lon=lon,
-                                target_date=target_date,
-                                metric=metric,
-                                source=source_name,
-                                predicted_value=predicted_value,
-                                fetched_at=datetime.now(UTC).replace(tzinfo=None),
-                                raw_data=str(result),
+                            _upsert_forecast(
+                                session,
+                                mid,
+                                city,
+                                lat,
+                                lon,
+                                target_date,
+                                metric,
+                                source_name,
+                                predicted_value,
+                                result,
                             )
-                            session.add(forecast)
                         session.commit()
                     total_saved += len(market_ids)
                     logger.info(
@@ -358,7 +410,7 @@ class MeteoFetcher:
                             else:
                                 # Son çare: tek model ile dene (8 model degil)
                                 count = self.fetch_for_markets(
-                                    mids[:3], city, target_date, metric  # max 3 market
+                                    mids, city, target_date, metric  # tüm marketler
                                 )
                                 total += count
 
