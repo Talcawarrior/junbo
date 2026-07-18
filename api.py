@@ -388,12 +388,30 @@ def get_status():
             else:
                 scan_health = "dead"
 
+        # Price poller sağlık kontrolü (her 5 dk'da bir çalışır)
+        price_poller_health = "unknown"
+        minutes_since_price_update = None
+        if state.last_price_update:
+            elapsed_pu = (datetime.now(timezone.utc).replace(tzinfo=None) - state.last_price_update).total_seconds()
+            minutes_since_price_update = round(elapsed_pu / 60)
+            if elapsed_pu < 600:
+                price_poller_health = "healthy"
+            elif elapsed_pu < 1200:
+                price_poller_health = "warning"
+            else:
+                price_poller_health = "stalled"
+        price_poller_running = bool(state.tasks.get("price_poller") and not state.tasks["price_poller"].done())
+
         return {
             "is_running": state.is_running,
             "locked": state.locked,
             "scan_health": scan_health,
             "last_scan": state.last_scan.isoformat() + "Z" if state.last_scan else None,
             "minutes_since_last_scan": minutes_since_scan,
+            "price_poller_health": price_poller_health,
+            "price_poller_running": price_poller_running,
+            "last_price_update": state.last_price_update.isoformat() + "Z" if state.last_price_update else None,
+            "minutes_since_last_price_update": minutes_since_price_update,
             "portfolio": {
                 "initial": initial_capital,
                 "current": portfolio_current_value(initial_capital, realized_pnl_db, unrealized_pnl_db),

@@ -25,7 +25,7 @@ from database.models import Analysis, Bet, Portfolio
 setup_logging()
 
 # Import app, state, and loop functions from split modules.
-from api import app, scan_and_bet_loop, settlement_loop, state  # noqa: E402
+from api import app, price_poller_loop, scan_and_bet_loop, settlement_loop, state  # noqa: E402
 
 logger = __import__("logging").getLogger(__name__)
 
@@ -185,7 +185,8 @@ def run_cli():
             state.locked = False
             state.tasks["scan_and_bet"] = asyncio.create_task(scan_and_bet_loop(state))
             state.tasks["settlement"] = asyncio.create_task(settlement_loop(state))
-            logger.info("Bot loops started (scan_and_bet + settlement)")
+            state.tasks["price_poller"] = asyncio.create_task(price_poller_loop(state))
+            logger.info("Bot loops started (scan_and_bet + settlement + price_poller)")
             yield
             # Shutdown
             logger.info("LIFESPAN SHUTDOWN - Stopping bot loops")

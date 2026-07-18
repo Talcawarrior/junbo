@@ -27,7 +27,13 @@ import win32service
 import win32serviceutil
 
 _BOT_DIR = os.path.dirname(os.path.abspath(__file__))
-_PYTHON = sys.executable
+# When running inside the Windows Service host (pythonservice.exe),
+# sys.executable resolves to pythonservice.exe — which is NOT a usable
+# Python interpreter for launching the bot. Use the real python.exe that
+# lives in the same directory as pythonservice.exe instead.
+_PYTHON = os.path.join(os.path.dirname(sys.executable), "python.exe")
+if not os.path.exists(_PYTHON):
+    _PYTHON = sys.executable  # fallback
 _PID_FILE = os.path.join(_BOT_DIR, "bot.pid")
 _LOG_DIR = os.path.join(_BOT_DIR, "logs")
 os.makedirs(_LOG_DIR, exist_ok=True)
@@ -68,11 +74,12 @@ class JunboService(win32serviceutil.ServiceFramework):
 
     def _start_bot(self) -> subprocess.Popen:
         """Launch main.py bot and write PID."""
+        _out_log = open(os.path.join(_LOG_DIR, "bot_out.log"), "wb")
         proc = subprocess.Popen(
             [_PYTHON, "main.py", "bot"],
             cwd=_BOT_DIR,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=_out_log,
+            stderr=subprocess.STDOUT,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         # Write PID file
@@ -92,6 +99,17 @@ class JunboService(win32serviceutil.ServiceFramework):
             ret = self._proc.poll()
             if ret is not None:
                 log.warning("Bot exited with code %d — restarting in 3s", ret)
+                # Dump tail of bot output for diagnosis
+                try:
+                    with open(os.path.join(_LOG_DIR, "bot_out.log"), "rb") as f:
+                        f.seek(0, 2)
+                        size = f.tell()
+                        f.seek(max(0, size - 4000))
+                        tail = f.read().decode("utf-8", "replace")
+                    for line in tail.splitlines()[-30:]:
+                        log.warning("BOT> %s", line)
+                except Exception:
+                    pass
                 self._proc = None
                 if self._stop_event.wait(3):
                     break
