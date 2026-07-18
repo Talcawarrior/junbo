@@ -98,6 +98,7 @@ class BotState:
         self.locked = False
         self.lock_reason = None
         self.last_scan = None
+        self.last_price_update = None  # datetime of last price poll (price_poller_loop)
         self.total_signals = 0
         self.total_bets = 0
         self.websocket_clients: list[WebSocket] = []
@@ -1161,6 +1162,7 @@ async def start_bot(_key: str = Depends(verify_api_key)):
         state.locked = False
         state.tasks["scan_and_bet"] = asyncio.create_task(scan_and_bet_loop(state))
         state.tasks["settlement"] = asyncio.create_task(settlement_loop(state))
+        state.tasks["price_poller"] = asyncio.create_task(price_poller_loop(state))
         return {"status": "started"}
 
 
@@ -1591,4 +1593,4 @@ async def websocket_endpoint(websocket: WebSocket, api_key: str = ""):
 
 # Re-export loop functions from bot_loop module so existing
 # callers (e.g. bot_lifespan in main.py) can import from here.
-from bot_loop import scan_and_bet_loop, settlement_loop  # noqa: E402, F401
+from bot_loop import price_poller_loop, scan_and_bet_loop, settlement_loop  # noqa: E402, F401

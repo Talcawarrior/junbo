@@ -8,6 +8,7 @@ Watchdog: settlement_loop monitors scan_loop health via state.last_scan.
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 
 from database.db import get_session
@@ -30,6 +31,12 @@ _WATCHDOG_WARNING = 900    # 15 dakika — warning
 _WATCHDOG_DEAD = 1800      # 30 dakika — dead
 _WATCHDOG_RESTART = 3600   # 1 saat — restart
 
+# Polymarket fiyat poll dongusu — PnL ve UI fiyatlarini canli tutar
+_PRICE_POLL_INTERVAL = 300  # 5 dakika
+
+# Meteo tahmin dongusu — Open-Meteo saatlik guncellenir
+_WEATHER_FETCH_INTERVAL = 3600  # 1 saat
+
 
 def _get_market_count() -> int:
     with get_session() as db:
@@ -51,6 +58,40 @@ def _get_scan_interval(now: datetime, fast_mode_until: datetime | None) -> int:
     return _NORMAL_SCAN_INTERVAL
 
 
+async def price_poller_loop(state):
+    """Polymarket fiyat poll dongusu — her 5 dakikada bir.
+
+   run_fetch_markets ile Polymarket fiyatlarini ceker (WeatherMarket
+    cache'i tazelenir) ve run_update_prices ile acik betlerin
+    current_price + unrealized_pnl degerlerini gunceller.
+    Boylece UI ve PnL tarama dongusunden bagimsiz olarak canli kalir.
+    """
+    from jobs.scheduler import run_fetch_markets, run_update_prices
+
+    logger.info("Price poller loop basladi (interval=%ds)", _PRICE_POLL_INTERVAL)
+    while state.is_running:
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(run_fetch_markets), timeout=_FETCH_TIMEOUT
+            )
+            await asyncio.wait_for(
+                asyncio.to_thread(run_update_prices), timeout=_FETCH_TIMEOUT
+            )
+            state.last_price_update = datetime.now(timezone.utc).replace(tzinfo=None)
+        except asyncio.CancelledError:
+            logger.info("Price poller cancelled")
+            break
+        except asyncio.TimeoutError:
+            logger.error("Price poll timed out — retry in 60s")
+            await asyncio.sleep(60)
+        except Exception as e:
+            logger.error("Price poll error: %s — retry in 60s", e)
+            await asyncio.sleep(60)
+        else:
+            await asyncio.sleep(_PRICE_POLL_INTERVAL)
+    logger.info("Price poller loop exited (is_running=%s)", state.is_running)
+
+
 async def scan_and_bet_loop(state):
     """Scan loop — akıllı tarama ile.
 
@@ -69,7 +110,6 @@ async def scan_and_bet_loop(state):
     previous_market_count = 0
     fast_mode_until = None
     last_weather_fetch = None  # Son weather fetch zamanı
-    _WEATHER_FETCH_INTERVAL = 3600  # Saatte 1 kez Open-Meteo'dan çek (saatlik güncelleniyor)
 
     try:
         previous_market_count = _get_market_count()
