@@ -281,7 +281,7 @@ def get_status():
                     "edge": float(bet.expected_value or 0) * 100,
                     "shares": float(bet.shares or 0),
                     "amount": float(bet.amount or 0),
-                    "opened_at": bet.placed_at.isoformat() if bet.placed_at else None,
+                    "opened_at": bet.placed_at.isoformat() + "Z" if bet.placed_at else None,
                     "market_id": bet.market_id,
                     "market_type": wm.market_type if wm else None,
                     "threshold": float(wm.threshold) if wm and wm.threshold else None,
@@ -374,7 +374,7 @@ def get_status():
             "is_running": state.is_running,
             "locked": state.locked,
             "scan_health": scan_health,
-            "last_scan": state.last_scan.isoformat() if state.last_scan else None,
+            "last_scan": state.last_scan.isoformat() + "Z" if state.last_scan else None,
             "minutes_since_last_scan": minutes_since_scan,
             "portfolio": {
                 "initial": initial_capital,
@@ -401,7 +401,7 @@ def get_status():
                 "win_count": win_count,
                 "loss_count": loss_count,
                 "total_closed": win_count + loss_count,
-                "last_scan": state.last_scan.isoformat() if state.last_scan else None,
+                "last_scan": state.last_scan.isoformat() + "Z" if state.last_scan else None,
             },
             "limits": {
                 "max_bet_pct": state.config.MAX_BET_PCT * 100,
@@ -1278,7 +1278,7 @@ def get_health_check():
                     "market_id": a.market_id,
                     "edge_pct": round((a.edge or 0) * 100, 2),
                     "reason": a.reason or "Bilinmeyen neden",
-                    "time": a.analyzed_at.isoformat() if a.analyzed_at else None,
+                    "time": a.analyzed_at.isoformat() + "Z" if a.analyzed_at else None,
                 }
             )
 

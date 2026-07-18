@@ -1126,7 +1126,7 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
               <div className="py-1 px-2 rounded" style={{ backgroundColor: `${TEAL_LIGHT}80` }}>
                 <p className="text-[10px]" style={{ color: TEXT_MUTED }}>Son Tarama</p>
                 <p className="text-xs font-mono tabular-nums" style={{ color: TEAL }}>
-                  {h.activity_24h.pass_reasons[0]?.time ? new Date(h.activity_24h.pass_reasons[0].time).toLocaleString("tr-TR", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "—"}
+                  {h.activity_24h.pass_reasons[0]?.time ? new Date(h.activity_24h.pass_reasons[0].time).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "—"}
                 </p>
               </div>
             )}
@@ -1388,7 +1388,7 @@ export default function DashboardPage() {
             )}
             {data.health?.activity_24h?.pass_reasons?.[0]?.time && (
               <span className="text-[10px] tabular-nums" style={{ color: TEAL }}>
-                Son Tarama: {new Date(data.health.activity_24h.pass_reasons[0].time).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                Son Tarama: {new Date(data.health.activity_24h.pass_reasons[0].time).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}
               </span>
             )}
             <button
