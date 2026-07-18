@@ -24,7 +24,17 @@ _CLEANUP_TIMEOUT = 60
 # Akıllı tarama ayarları
 _FAST_MODE_MINUTES = 30
 _FAST_SCAN_INTERVAL = 60
-_NORMAL_SCAN_INTERVAL = 900
+# Tarama (bet açma) döngüsü, Polymarket fiyat çekme temposuyla aynı: 5 dk.
+# Önceden 15 dk'ydı; o süre yalnızca Open-Meteo'nin saatlik rate-limit'ini
+# beklemek içindi. Artık meteo çekimi tarama döngüsünden ayrıldı (aşağıdaki
+# "decouple" adımı), böylece bahisler Polymarket verisinin tazelendiği 5 dk
+# temposunda açılabilir.
+_NORMAL_SCAN_INTERVAL = 300  # 5 dakika (Polymarket fetch temposuyla hizali)
+
+# Fiyat poller: 2 gün sonrası marketler açıldığında 20 dk boyunca her dakika
+# fiyat çek, sonra tekrar 5 dk'ya dön.
+_FAST_PRICE_INTERVAL = 60     # 1 dakika
+_FAST_PRICE_WINDOW = 20 * 60  # 20 dakika
 
 # Watchdog thresholds (seconds)
 _WATCHDOG_WARNING = 900    # 15 dakika — warning
@@ -41,6 +51,24 @@ _WEATHER_FETCH_INTERVAL = 3600  # 1 saat
 def _get_market_count() -> int:
     with get_session() as db:
         return db.query(WeatherMarket).filter(WeatherMarket.status == "open").count()
+
+
+def _has_two_day_ahead_markets() -> bool:
+    """2 gün sonrası (±0.5g) vadeli, açık bir market var mı?"""
+    with get_session() as db:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        lo = now + timedelta(days=1.5)
+        hi = now + timedelta(days=2.5)
+        return (
+            db.query(WeatherMarket)
+            .filter(
+                WeatherMarket.status == "open",
+                WeatherMarket.target_date >= lo,
+                WeatherMarket.target_date <= hi,
+            )
+            .first()
+            is not None
+        )
 
 
 def _is_midnight_window(now: datetime) -> bool:
@@ -84,7 +112,7 @@ async def price_poller_loop(state):
             # Risk yönetimini de fiyat poller'a bağla: stop-loss / take-profit /
             # trailing stop kontrolleri artık her 5 dakikada bir (fiyat
             # tazelemeyle aynı döngüde) çalışır. Böylece son dakikalarda hızla
-            # düşen, vadeye yakın bahisler 15 dakikalık tarama döngüsünden
+            # düşen, vadeye yakın bahisler tarama döngüsünden
             # kaçıp settlement'e gitmez.
             await asyncio.wait_for(
                 asyncio.to_thread(run_risk_management), timeout=_FETCH_TIMEOUT
@@ -100,7 +128,15 @@ async def price_poller_loop(state):
             logger.error("Price poll error: %s — retry in 60s", e)
             await asyncio.sleep(60)
         else:
-            await asyncio.sleep(_PRICE_POLL_INTERVAL)
+            # 2 gün sonrası bahisler açıldıysa 20 dk boyunca her dakika fiyat
+            # çek (state.fast_price_until), sonra tekrar 5 dk'ya dön.
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            interval = (
+                _FAST_PRICE_INTERVAL
+                if state.fast_price_until and now < state.fast_price_until
+                else _PRICE_POLL_INTERVAL
+            )
+            await asyncio.sleep(interval)
     logger.info("Price poller loop exited (is_running=%s)", state.is_running)
 
 
@@ -142,45 +178,40 @@ async def scan_and_bet_loop(state):
             if is_new_day:
                 logger.info("Midnight detected — running immediate scan")
 
-            # STEP 1: Fetch markets
+            # STEP 1: Fetch markets (Polymarket) — her döngü
             await asyncio.wait_for(asyncio.to_thread(run_fetch_markets), timeout=_FETCH_TIMEOUT)
 
-            # STEP 2: Parse PARALEL + Weather (sadece saatte 1 kez)
+            # STEP 2: Parse — her döngü (cache'lenmiş meteo verisiyle)
+            try:
+                await asyncio.wait_for(asyncio.to_thread(run_parse_markets), timeout=_FETCH_TIMEOUT)
+            except Exception as e:
+                logger.error("Parse step error: %s", e)
+
+            # STEP 3: Run cycle (analyze -> place bets). Meteo çekimini BEKLEMEDEN
+            # hemen cache'den açılır. Böylece bahisler Polymarket verisinin
+            # tazelendiği 5 dk temposunda açılır; meteo saatte 1 kez yenilenir
+            # ve bahis açılımını bloklamaz.
+            await asyncio.wait_for(asyncio.to_thread(run_cycle), timeout=_CYCLE_TIMEOUT)
+
+            # STEP 4: Meteo tazeleme — SADECE saatte 1 kez ve bahis açılımından
+            # SONRA (bet opening'ı bloklamaz). Önceki saatlik veri zaten cache'te,
+            # dolayısıyla meteo kaydı çekmekle vakit kaybedilmez.
             now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
             should_fetch_weather = (
                 last_weather_fetch is None
                 or (now_utc - last_weather_fetch).total_seconds() >= _WEATHER_FETCH_INTERVAL
             )
-
             if should_fetch_weather:
-                logger.info("Weather fetch triggered (last: %s)", last_weather_fetch)
-                parse_res, weather_res = await asyncio.gather(
-                    asyncio.wait_for(asyncio.to_thread(run_parse_markets), timeout=_FETCH_TIMEOUT),
-                    asyncio.wait_for(asyncio.to_thread(run_fetch_weather), timeout=_FETCH_TIMEOUT),
-                    return_exceptions=True,
-                )
-                if isinstance(weather_res, Exception):
-                    # Don't advance last_weather_fetch — retry next cycle so a
-                    # transient failure can't silently starve markets of weather.
-                    logger.error(
-                        "Weather fetch FAILED: %s — will retry next cycle",
-                        weather_res,
-                        exc_info=weather_res,
+                try:
+                    weather_res = await asyncio.wait_for(
+                        asyncio.to_thread(run_fetch_weather), timeout=_FETCH_TIMEOUT
                     )
-                else:
                     last_weather_fetch = datetime.now(timezone.utc).replace(tzinfo=None)
                     logger.info("Weather fetch complete: %s", weather_res)
-                if isinstance(parse_res, Exception):
-                    logger.error("Parse step error: %s", parse_res)
-            else:
-                # Sadece parse — weather cache'den geliyor
-                try:
-                    await asyncio.wait_for(asyncio.to_thread(run_parse_markets), timeout=_FETCH_TIMEOUT)
                 except Exception as e:
-                    logger.error("Parse step error: %s", e)
-
-            # STEP 3: Run cycle
-            await asyncio.wait_for(asyncio.to_thread(run_cycle), timeout=_CYCLE_TIMEOUT)
+                    # Don't advance last_weather_fetch — retry next cycle so a
+                    # transient failure can't silently starve markets of weather.
+                    logger.error("Weather fetch FAILED: %s — will retry next cycle", e, exc_info=e)
 
             # Yeni market algılama
             try:
@@ -192,6 +223,16 @@ async def scan_and_bet_loop(state):
                         "NEW MARKETS DETECTED: +%d (total: %d) — FAST MODE for %d min",
                         new_markets, current_count, _FAST_MODE_MINUTES
                     )
+                    # 2 gün sonrası marketler açıldıysa fiyat poller'ını 20 dk
+                    # boyunca her dakika çalıştır (sonra tekrar 5 dk'ya döner).
+                    if _has_two_day_ahead_markets():
+                        state.fast_price_until = (
+                            datetime.now(timezone.utc) + timedelta(seconds=_FAST_PRICE_WINDOW)
+                        ).replace(tzinfo=None)
+                        logger.info(
+                            "2-day-ahead markets detected — price poller FAST (1min) for %d min",
+                            _FAST_PRICE_WINDOW // 60,
+                        )
                 previous_market_count = current_count
             except Exception as e:
                 logger.warning("Market count check failed: %s", e)

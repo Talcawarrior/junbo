@@ -110,9 +110,18 @@ class BetPlacer:
                 d.log(logging.DEBUG)
                 return None
 
-            # Guard: skip resolved markets
+            # Guard: skip resolved markets AND bets too close to expiry.
+            # Vadesine 8 saatten az kalansa bahis açılmaz (ani kayıpları önlemek
+            # için — örn. aynı gün açılıp hemen loss yazan bahisler).
             _now = datetime.now(timezone.utc).replace(tzinfo=None)
-            date_ok = not (market.target_date and market.target_date <= _now)
+            MIN_HOURS_TO_EXPIRY = 8
+            date_ok = True
+            if market.target_date:
+                secs_left = (market.target_date - _now).total_seconds()
+                if secs_left <= 0:
+                    date_ok = False  # vadesi geçmiş
+                elif secs_left < MIN_HOURS_TO_EXPIRY * 3600:
+                    date_ok = False  # vadesine 8 saatten az kaldı
             d.check("target_date_ok", date_ok, target_date=str(market.target_date) if market.target_date else None)
             if not d.should_bet:
                 d.log(logging.DEBUG)

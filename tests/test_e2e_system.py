@@ -540,7 +540,7 @@ class TestStep13_SmartScan:
         # Normal mod (midnight değilse)
         if not is_midnight:
             interval = _get_scan_interval(now, None)
-            assert interval == 900  # 15 dakika
+            assert interval == 300  # 5 dakika (Polymarket fetch temposuyla hizali)
 
         # Hızlı mod
         fast_mode_until = now + timedelta(minutes=10)
@@ -551,7 +551,7 @@ class TestStep13_SmartScan:
         fast_mode_until = now - timedelta(minutes=5)
         interval = _get_scan_interval(now, fast_mode_until)
         if not is_midnight:
-            assert interval == 900  # Normal moda döndü
+            assert interval == 300  # 5 dakika (Normal moda döndü)
 
 
 if __name__ == "__main__":

@@ -99,6 +99,7 @@ class BotState:
         self.lock_reason = None
         self.last_scan = None
         self.last_price_update = None  # datetime of last price poll (price_poller_loop)
+        self.fast_price_until = None  # datetime: price poller runs 1-min until this (2-day-ahead bet open)
         self.total_signals = 0
         self.total_bets = 0
         self.websocket_clients: list[WebSocket] = []
