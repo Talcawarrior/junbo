@@ -46,6 +46,22 @@ from utils.weights_store import load_weights
 setup_logging()
 logger = logging.getLogger(__name__)
 
+# Turkish month name mapping for equity curve DD/MM display
+TR_MONTHS = {
+    1: "Oca",
+    2: "Sub",
+    3: "Mar",
+    4: "Nis",
+    5: "May",
+    6: "Haz",
+    7: "Tem",
+    8: "Agu",
+    9: "Eyl",
+    10: "Eki",
+    11: "Kas",
+    12: "Ara",
+}
+
 
 # ── API Key Authentication ──────────────────────────────────────────────────
 # Protects sensitive POST endpoints (reset, asi/*, start, stop, cleanup).
@@ -132,6 +148,7 @@ async def lifespan(_app: FastAPI):
     # Startup'ta DB backup al (API ile başlatılsa bile)
     try:
         from db_backup import create_backup
+
         create_backup("startup")
     except Exception as e:
         logger.warning("Startup backup warning: %s", e)
@@ -543,9 +560,7 @@ def get_markets():
             db.query(Analysis, WeatherMarket)
             .join(WeatherMarket, Analysis.market_id == WeatherMarket.id)
             .filter(Analysis.should_bet.is_(True))
-            .filter(
-                ~Analysis.market_id.in_(db.query(Bet.market_id).filter(Bet.status.in_(OPEN_BET_STATUSES)))
-            )
+            .filter(~Analysis.market_id.in_(db.query(Bet.market_id).filter(Bet.status.in_(OPEN_BET_STATUSES))))
             .order_by(Analysis.analyzed_at.desc())
             .all()
         )
@@ -704,6 +719,7 @@ def get_signals():
         latest_analysis_by_market = {}
         if market_ids:
             from sqlalchemy import func as sa_func
+
             latest_subq = (
                 db.query(
                     Analysis.market_id,
@@ -717,8 +733,7 @@ def get_signals():
                 db.query(Analysis)
                 .join(
                     latest_subq,
-                    (Analysis.market_id == latest_subq.c.market_id)
-                    & (Analysis.analyzed_at == latest_subq.c.max_ts),
+                    (Analysis.market_id == latest_subq.c.market_id) & (Analysis.analyzed_at == latest_subq.c.max_ts),
                 )
                 .all()
             ):
@@ -1003,7 +1018,7 @@ def get_equity_curve():
             running += pnl
             # Format: "24 Haz"
             d = datetime.strptime(day_str, "%Y-%m-%d")
-            label = f"{d.day} {d.strftime('%b')}"
+            label = f"{d.day} {TR_MONTHS[d.month]}"
             points.append(
                 {
                     "date": label,
@@ -1022,7 +1037,7 @@ def get_equity_curve():
         realized_now = running - initial  # all realized PnL accumulated
         today_val = initial + realized_now + float(unrealized)
         today = datetime.now(timezone.utc).replace(tzinfo=None)
-        label = f"{today.day} {today.strftime('%b')}"
+        label = f"{today.day} {TR_MONTHS[today.month]}"
         if points and points[-1]["date"] == label:
             points[-1]["value"] = round(today_val, 2)
         else:
@@ -1171,6 +1186,7 @@ async def reset_bot(_key: str = Depends(verify_api_key)):
     # Silmeden ÖNCE backup al — asla veri kaybı olmasın
     try:
         from db_backup import create_backup
+
         create_backup("pre_reset")
     except Exception as e:
         logger.warning("Pre-reset backup failed: %s", e)
@@ -1178,6 +1194,7 @@ async def reset_bot(_key: str = Depends(verify_api_key)):
     # Bets ve portfolio'yu parquet'a arşivle (reset sonrası kurtarma için)
     try:
         from database.db_cleanup import archive_bets_and_portfolio
+
         archive_bets_and_portfolio()
     except Exception as e:
         logger.warning("Pre-reset archive failed: %s", e)
