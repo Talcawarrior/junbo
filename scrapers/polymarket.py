@@ -17,6 +17,13 @@ from utils.retry import retry
 
 logger = logging.getLogger("SCRAPER_POLYMARKET")
 
+# Market statuses that mean the market is done (resolved/expired/closed).
+# The fetch upsert must never overwrite these back to "open" — doing so
+# would resurrect a settled market and let the bot re-bet / re-settle it.
+_TERMINAL_MARKET_STATUSES = frozenset(
+    {"expired", "settled_win", "settled_loss", "closed_early", "won", "lost"}
+)
+
 
 class PolymarketScraper:
     """Scrapes weather prediction markets from Polymarket Gamma API."""
@@ -52,10 +59,14 @@ class PolymarketScraper:
         today = datetime.now(UTC).replace(tzinfo=None)
         # Generate date strings in multiple formats to match Polymarket titles
         # which use "June 7" (no zero-pad), "June 07" (zero-pad), or "Jun 7".
+        # Cover a few days *back* as well: Polymarket keeps temperature markets
+        # open/tradable for a day or two after the target date, and we hold
+        # positions in them until settlement — so their prices must keep
+        # refreshing instead of freezing the moment the date rolls over.
         import calendar
 
         date_strs = []
-        for i in range(3):
+        for i in range(-2, 3):
             d = today + timedelta(days=i)
             month_name = calendar.month_name[d.month]  # "June"
             month_abbr = calendar.month_abbr[d.month]  # "Jun"
@@ -402,6 +413,11 @@ class PolymarketScraper:
                         existing.status = status
                         existing.threshold_low = parsed.get("threshold_low")
                         existing.threshold_high = parsed.get("threshold_high")
+                        # Never resurrect a settled/expired market: keep its
+                        # terminal status so the bot does not re-bet or
+                        # re-settle it. Open/no_coords markets keep tracking.
+                        if existing.status not in _TERMINAL_MARKET_STATUSES:
+                            existing.status = status
                     else:
                         market = WeatherMarket(
                             id=parsed["id"],

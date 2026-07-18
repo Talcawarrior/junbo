@@ -59,6 +59,23 @@ def test_cache_set_none_is_remembered_as_hit():
     assert val is None
 
 
+def test_cache_entry_expires_after_ttl(monkeypatch):
+    """Regression: a cached price must NOT live forever. Once the TTL
+    passes the entry must be reported as a miss so the next poll re-fetches
+    fresh data (otherwise open-position prices freeze at first fetch)."""
+    import scrapers.async_client as ac
+
+    from scrapers.async_client import _cache_get, _cache_key, _cache_set
+
+    # Force an already-expired entry.
+    monkeypatch.setattr(ac, "_CACHE_TTL_S", -1.0)
+    key = _cache_key("https://exp.example.com", {"a": 1})
+    _cache_set(key, {"ok": True})
+    hit, val = _cache_get(key)
+    assert hit is False
+    assert val is None
+
+
 def test_fetch_many_preserves_order():
     """Cache all entries so no network is hit; verify ordering."""
     c = AsyncHttpClient()
