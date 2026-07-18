@@ -12,4 +12,4 @@ async def test_meteo_fetcher_has_required_methods():
     """Smoke test: fetcher exposes the public methods the rest of the
     codebase calls."""
     fetcher = MeteoFetcher()
-    assert hasattr(fetcher, "fetch_weather_data")
+    assert hasattr(fetcher, "fetch_for_market")

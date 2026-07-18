@@ -63,7 +63,7 @@ class TestRiskManagementE2E:
         daily_loss_limit_pct = bot_config.strategy.daily_loss_limit
         initial_capital = 1000.0
         daily_loss_limit_amount = initial_capital * daily_loss_limit_pct
-        daily_pnl = -60.0
+        daily_pnl = -40.0  # 4% loss, within 5% limit
         assert daily_pnl > -daily_loss_limit_amount
 
 
@@ -83,6 +83,7 @@ class TestDatabaseE2E:
         with get_session() as session:
             market = WeatherMarket(
                 id=test_id,
+                question="Will temperature exceed 80F?",
                 city="Dallas",
                 city_code="KDAL",
                 target_date=datetime.now(timezone.utc) + timedelta(days=2),

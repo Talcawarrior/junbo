@@ -110,7 +110,7 @@ def test_config_tighter():
     assert s.min_edge == 0.05
     assert s.max_bet_amount == 3.0
     assert s.min_sources == 2
-    assert s.fee_drag == 0.02
+    assert s.fee_rate_weather == 0.05
     print("PASS: config tighter")
 
 

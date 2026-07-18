@@ -1,6 +1,6 @@
 """Time-to-close edge escalation tests (Tier 3 #13).
 
-Validates WeatherEngine._compute_effective_min_edge linear ramp:
+Validates ``compute_effective_min_edge`` from ``utils.probability``:
 - Above window: full min_edge (1x)
 - Boundary (==esc_h): full min_edge
 - Mid-window: 1x + (mult-1) * (1 - hours_left/esc_h) * min_edge
@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from config.settings import bot_config
-from engine.calculator import WeatherEngine
+from utils.probability import compute_effective_min_edge
 
 
 def _market(hours_from_now: float) -> SimpleNamespace:
@@ -25,12 +25,12 @@ def _market(hours_from_now: float) -> SimpleNamespace:
 
 def test_above_window_returns_min_edge():
     m = _market(hours_from_now=48)
-    assert WeatherEngine._compute_effective_min_edge(m) == bot_config.strategy.min_edge
+    assert compute_effective_min_edge(m) == bot_config.strategy.min_edge
 
 
 def test_boundary_returns_min_edge():
     m = _market(hours_from_now=bot_config.strategy.edge_escalation_hours)
-    assert WeatherEngine._compute_effective_min_edge(m) == bot_config.strategy.min_edge
+    assert compute_effective_min_edge(m) == bot_config.strategy.min_edge
 
 
 def test_midpoint_returns_linear_interp():
@@ -39,7 +39,7 @@ def test_midpoint_returns_linear_interp():
     expected = bot_config.strategy.min_edge * (
         1.0 + (bot_config.strategy.edge_escalation_multiplier - 1.0) * 0.5
     )
-    actual = WeatherEngine._compute_effective_min_edge(m)
+    actual = compute_effective_min_edge(m)
     assert abs(actual - expected) < 1e-6
 
 
@@ -48,7 +48,7 @@ def test_at_close_returns_max_multiplier():
     expected = (
         bot_config.strategy.min_edge * bot_config.strategy.edge_escalation_multiplier
     )
-    assert abs(WeatherEngine._compute_effective_min_edge(m) - expected) < 1e-9
+    assert abs(compute_effective_min_edge(m) - expected) < 1e-9
 
 
 def test_past_resolution_clamped_to_max():
@@ -56,19 +56,19 @@ def test_past_resolution_clamped_to_max():
     expected = (
         bot_config.strategy.min_edge * bot_config.strategy.edge_escalation_multiplier
     )
-    assert abs(WeatherEngine._compute_effective_min_edge(m) - expected) < 1e-9
+    assert abs(compute_effective_min_edge(m) - expected) < 1e-9
 
 
 def test_no_resolution_attribute_returns_min_edge():
     m = SimpleNamespace()  # no resolution_date / target_date
-    assert WeatherEngine._compute_effective_min_edge(m) == bot_config.strategy.min_edge
+    assert compute_effective_min_edge(m) == bot_config.strategy.min_edge
 
 
 def test_naive_datetime_treated_as_utc():
     m = SimpleNamespace(
         resolution_date=datetime.now(timezone.utc) + timedelta(hours=48)  # no tzinfo
     )
-    assert WeatherEngine._compute_effective_min_edge(m) == bot_config.strategy.min_edge
+    assert compute_effective_min_edge(m) == bot_config.strategy.min_edge
 
 
 def test_zero_escalation_hours_does_not_div_by_zero():
@@ -81,6 +81,6 @@ def test_zero_escalation_hours_does_not_div_by_zero():
         bot_config.strategy = s
         # 10h > 1h (clamped), so returns min_edge
         m = _market(hours_from_now=10)
-        assert WeatherEngine._compute_effective_min_edge(m) == s.min_edge
+        assert compute_effective_min_edge(m) == s.min_edge
     finally:
         bot_config.strategy = original

@@ -24,16 +24,6 @@ def test_strategy_config_min_edge_default():
     )
 
 
-def test_config_fee_drag_matches_strategy():
-    """Config.FEE_DRAG should equal the default StrategyConfig.fee_drag."""
-    from config.settings import StrategyConfig, config
-
-    s = StrategyConfig()
-    assert config.FEE_DRAG == s.fee_drag, (
-        f"FEE_DRAG={config.FEE_DRAG} != default strategy.fee_drag={s.fee_drag}"
-    )
-
-
 def test_config_kelly_fraction_matches_strategy():
     """Config.KELLY_FRACTION should equal the default StrategyConfig.kelly_fraction."""
     from config.settings import StrategyConfig, config
