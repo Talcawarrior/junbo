@@ -53,22 +53,30 @@ def _get_market_count() -> int:
         return db.query(WeatherMarket).filter(WeatherMarket.status == "open").count()
 
 
-def _has_two_day_ahead_markets() -> bool:
-    """2 gün sonrası (±0.5g) vadeli, açık bir market var mı?"""
+def _get_two_day_ahead_market_ids() -> set:
+    """2 gün sonrası (±0.5g) vadeli, açık marketlerin ID kümesi.
+
+    Her döngü çağrılır; dönen küme bir önceki döngüde görülenlerle
+    karşılaştırılarak 2-gün marketler 'açılır açılmaz' (ilk görüldüğü
+    anda, gece yarısından saatler sonra bile) fiyat poller'ı hızlı
+    moda alınır.
+    """
+    ids: set = set()
     with get_session() as db:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         lo = now + timedelta(days=1.5)
         hi = now + timedelta(days=2.5)
-        return (
-            db.query(WeatherMarket)
+        for row in (
+            db.query(WeatherMarket.id)
             .filter(
                 WeatherMarket.status == "open",
                 WeatherMarket.target_date >= lo,
                 WeatherMarket.target_date <= hi,
             )
-            .first()
-            is not None
-        )
+            .all()
+        ):
+            ids.add(row[0])
+    return ids
 
 
 def _is_midnight_window(now: datetime) -> bool:
@@ -158,6 +166,7 @@ async def scan_and_bet_loop(state):
     previous_market_count = 0
     fast_mode_until = None
     last_weather_fetch = None  # Son weather fetch zamanı
+    two_day_seen: set = set()  # Daha önce görülen 2-gün market ID'leri
 
     try:
         previous_market_count = _get_market_count()
@@ -213,7 +222,7 @@ async def scan_and_bet_loop(state):
                     # transient failure can't silently starve markets of weather.
                     logger.error("Weather fetch FAILED: %s — will retry next cycle", e, exc_info=e)
 
-            # Yeni market algılama
+            # Yeni market algılama (scan hızlı modu için)
             try:
                 current_count = _get_market_count()
                 if current_count > previous_market_count:
@@ -223,19 +232,28 @@ async def scan_and_bet_loop(state):
                         "NEW MARKETS DETECTED: +%d (total: %d) — FAST MODE for %d min",
                         new_markets, current_count, _FAST_MODE_MINUTES
                     )
-                    # 2 gün sonrası marketler açıldıysa fiyat poller'ını 20 dk
-                    # boyunca her dakika çalıştır (sonra tekrar 5 dk'ya döner).
-                    if _has_two_day_ahead_markets():
-                        state.fast_price_until = (
-                            datetime.now(timezone.utc) + timedelta(seconds=_FAST_PRICE_WINDOW)
-                        ).replace(tzinfo=None)
-                        logger.info(
-                            "2-day-ahead markets detected — price poller FAST (1min) for %d min",
-                            _FAST_PRICE_WINDOW // 60,
-                        )
                 previous_market_count = current_count
             except Exception as e:
                 logger.warning("Market count check failed: %s", e)
+
+            # 2 gün sonrası marketler 'açılır açılmaz' fiyat poller'ını 20 dk
+            # boyunca her dakika çalıştır. Bu kontrol market sayısı artışına
+            # BAĞLI DEĞİL: 2-gün marketler gece yarısından 3-4 saat sonra
+            # açılsa bile, yeni ID görülür görülmez tetiklenir (sonra 5 dk).
+            try:
+                two_day_now = _get_two_day_ahead_market_ids()
+                new_two_day = two_day_now - two_day_seen
+                if new_two_day:
+                    state.fast_price_until = (
+                        datetime.now(timezone.utc) + timedelta(seconds=_FAST_PRICE_WINDOW)
+                    ).replace(tzinfo=None)
+                    logger.info(
+                        "2-day-ahead markets opened (%d new) — price poller FAST (1min) for %d min",
+                        len(new_two_day), _FAST_PRICE_WINDOW // 60,
+                    )
+                two_day_seen |= two_day_now
+            except Exception as e:
+                logger.warning("2-day-ahead detection failed: %s", e)
 
             # Stale cleanup her 10 döngüde
             stale_check_counter += 1

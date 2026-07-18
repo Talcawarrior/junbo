@@ -135,6 +135,19 @@ def test_bet_placer_overrides_amount_when_flat_bet_set():
     )
 
 
+def test_two_day_ahead_market_ids_returns_set():
+    """_get_two_day_ahead_market_ids must return a set so the scan loop can
+    diff seen vs new IDs and trigger the 1-min price window the moment a
+    2-day-ahead market opens (even hours after midnight).
+    """
+    from bot_loop import _get_two_day_ahead_market_ids
+
+    result = _get_two_day_ahead_market_ids()
+    assert isinstance(result, set), (
+        "_get_two_day_ahead_market_ids must return a set for ID-diffing."
+    )
+
+
 def test_bet_placer_blocks_bets_within_8h_of_expiry():
     """place_bet must reject markets whose target_date is < 8h away.
 
