@@ -71,11 +71,11 @@ TR_MONTHS = {
 API_KEY = os.getenv("JUNBO_API_KEY", "")
 if not API_KEY:
     API_KEY = secrets.token_urlsafe(32)
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("WARNING: JUNBO_API_KEY not set. Generated random key:")
     print(f"  {API_KEY}")
     print(f"Add to .env: JUNBO_API_KEY={API_KEY}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
 
 async def verify_api_key(x_api_key: str = Header(default="")):
@@ -1507,13 +1507,22 @@ def get_health_check():
                 }
             )
 
-        # 6. Daily PnL Timeline — forward from today (17/07, 18/07, 19/07, ...)
-        # Shows 31 days: yesterday through 29 days ahead.
-        # Past days with data get real PnL bars; future days show $0.
-        from sqlalchemy import or_
+        # 6. Daily PnL Timeline — every day the bot has been running, up to today.
+        # Previously this only looked 1 day into the past (yesterday) plus 29
+        # days into the future, so any day older than yesterday (e.g. 16/07,
+        # 17/07) never appeared. Now it anchors at the first bet (with a 30-day
+        # floor) and stops at today, so the full history is shown with no $0
+        # future placeholders.
+        from sqlalchemy import func, or_
+
+        earliest = db.query(func.min(Bet.placed_at)).scalar()
+        if earliest:
+            days_back = max((now.date() - earliest.date()).days, 30)
+        else:
+            days_back = 30
 
         daily_pnl = []
-        for i in range(-1, 29):
+        for i in range(-days_back, 1):
             day_start = (now + timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0)
             day_end = (now + timedelta(days=i + 1)).replace(hour=0, minute=0, second=0, microsecond=0)
             day_bets = (
