@@ -3,7 +3,7 @@
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
@@ -57,12 +57,8 @@ class WeatherMarket(Base):
     metric = Column(String)  # "temperature_max"
     threshold = Column(Float)  # 95.0 (primary threshold, °C)
     threshold_unit = Column(String)  # "fahrenheit" or "celsius"
-    threshold_low = Column(
-        Float, nullable=True
-    )  # range lower bound (°C), e.g. "88-89°F" → 31.1
-    threshold_high = Column(
-        Float, nullable=True
-    )  # range upper bound (°C), e.g. "88-89°F" → 31.7
+    threshold_low = Column(Float, nullable=True)  # range lower bound (°C), e.g. "88-89°F" → 31.1
+    threshold_high = Column(Float, nullable=True)  # range upper bound (°C), e.g. "88-89°F" → 31.7
     target_date = Column(DateTime)  # 2025-07-04
     latitude = Column(Float)  # Latitude
     longitude = Column(Float)  # Longitude
@@ -92,6 +88,11 @@ class WeatherForecast(Base):
 
     __tablename__ = "weather_forecasts"
 
+    __table_args__ = (
+        Index("ix_weather_forecasts_market_id", "market_id"),
+        Index("ix_weather_forecasts_fetched_at", "fetched_at"),
+    )
+
     id = Column(Integer, primary_key=True, autoincrement=True)
     market_id = Column(String)  # Hangi market için
 
@@ -118,6 +119,8 @@ class Analysis(Base):
     """Analiz sonuçları."""
 
     __tablename__ = "analyses"
+
+    __table_args__ = (Index("ix_analyses_market_id", "market_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     market_id = Column(String)
@@ -155,6 +158,11 @@ class Bet(Base):
 
     __tablename__ = "bets"
 
+    __table_args__ = (
+        Index("ix_bets_market_id", "market_id"),
+        Index("ix_bets_status", "status"),
+    )
+
     id = Column(Integer, primary_key=True, autoincrement=True)
     market_id = Column(String, nullable=False)
     analysis_id = Column(Integer)
@@ -186,9 +194,7 @@ class Bet(Base):
     order_id = Column(String)
     tx_hash = Column(String)
     error_message = Column(String)  # Hata varsa
-    entry_fee = Column(
-        Float, default=0.0
-    )  # Polymarket taker fee at entry (feeRate × stake × (1-p))
+    entry_fee = Column(Float, default=0.0)  # Polymarket taker fee at entry (feeRate × stake × (1-p))
 
     placed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     settled_at = Column(DateTime)

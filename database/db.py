@@ -68,6 +68,13 @@ def init_db():
     # Migration: add entry_fee to bets (Polymarket taker fee at entry time)
     _migrate_add_column("bets", "entry_fee", "FLOAT")
 
+    # Migration: add hot-path indexes (avoids full table scans on lookups)
+    _migrate_add_index("ix_weather_forecasts_market_id", "weather_forecasts", "market_id")
+    _migrate_add_index("ix_weather_forecasts_fetched_at", "weather_forecasts", "fetched_at")
+    _migrate_add_index("ix_analyses_market_id", "analyses", "market_id")
+    _migrate_add_index("ix_bets_market_id", "bets", "market_id")
+    _migrate_add_index("ix_bets_status", "bets", "status")
+
     _DB_INITIALIZED = True
     logger.info("Database initialized at %s with WAL mode", DB_PATH)
 
@@ -87,6 +94,16 @@ def _migrate_add_column(table: str, column: str, col_type: str) -> None:
             conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
             conn.commit()
             logger.info("Migration: added column %s.%s (%s)", table, column, col_type)
+
+
+def _migrate_add_index(index: str, table: str, column: str) -> None:
+    """Idempotent CREATE INDEX IF NOT EXISTS for SQLite."""
+    with engine.connect() as conn:
+        existing = [r[0] for r in conn.execute(text("SELECT name FROM sqlite_master WHERE type='index'")).fetchall()]
+        if index not in existing:
+            conn.execute(text(f"CREATE INDEX IF NOT EXISTS {index} ON {table} ({column})"))
+            conn.commit()
+            logger.info("Migration: added index %s ON %s(%s)", index, table, column)
 
 
 @contextmanager

@@ -29,7 +29,6 @@ from datetime import date, datetime
 import pytest
 from sqlalchemy import text
 
-from database.db import engine, get_session
 from engine.calculator import Calculator
 from engine.strategy import BettingEngine, RiskManager
 from utils.kelly import kelly_bet_amount, kelly_fraction
@@ -86,6 +85,8 @@ ALLOWED_ROOT_MODULES = {
 
 def _explain_plan(sql: str) -> str:
     """Return the SQLite EXPLAIN QUERY PLAN detail for a literal SQL string."""
+    from database.db import engine
+
     with engine.connect() as conn:
         rows = conn.execute(text(f"EXPLAIN QUERY PLAN {sql}")).fetchall()
     return " | ".join(" ".join(str(c) for c in r) for r in rows)
@@ -191,6 +192,7 @@ def test_kelly_bet_amount_respects_cap():
 
 
 def test_database_tables_exist():
+    from database.db import engine
     from sqlalchemy import inspect
 
     inspector = inspect(engine)
@@ -220,6 +222,8 @@ def test_database_seed_and_filter_timing():
     from database import models
 
     n = 500
+    from database.db import get_session
+
     with get_session() as session:
         session.query(models.WeatherForecast).delete()
         session.commit()
