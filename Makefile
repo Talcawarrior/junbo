@@ -14,7 +14,7 @@ format:
 	ruff format .
 
 type:
-	mypy . --config-file=mypy.ini --exclude=scripts/
+	mypy . --config-file=mypy.ini
 
 test:
 	python -m pytest -q
