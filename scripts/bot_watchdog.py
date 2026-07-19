@@ -37,9 +37,7 @@ def log(msg: str) -> None:
 
 def _run(cmd):
     try:
-        return subprocess.run(
-            cmd, capture_output=True, text=True, timeout=30
-        ).returncode
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=30).returncode
     except Exception as e:  # noqa: BLE001
         log(f"ERR running {cmd}: {e}")
         return -1
@@ -47,9 +45,7 @@ def _run(cmd):
 
 def service_state() -> str:
     try:
-        out = subprocess.run(
-            ["sc", "query", SERVICE], capture_output=True, text=True, timeout=30
-        ).stdout
+        out = subprocess.run(["sc", "query", SERVICE], capture_output=True, text=True, timeout=30).stdout
     except Exception as e:  # noqa: BLE001
         return f"QUERY_FAILED {e}"
     for line in out.splitlines():
@@ -64,10 +60,7 @@ def ensure_running() -> None:
         if os.path.exists(BOT_LOG):
             age = time.time() - os.path.getmtime(BOT_LOG)
             if age > HEARTBEAT_TIMEOUT:
-                log(
-                    f"HEARTBEAT stale ({age:.0f}s > {HEARTBEAT_TIMEOUT}s) "
-                    f"- restarting frozen service"
-                )
+                log(f"HEARTBEAT stale ({age:.0f}s > {HEARTBEAT_TIMEOUT}s) - restarting frozen service")
                 _run(["net", "stop", SERVICE])
                 time.sleep(3)
                 _run(["sc", "config", SERVICE, "start=", "auto"])
