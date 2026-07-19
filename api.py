@@ -1510,16 +1510,16 @@ def get_health_check():
         # 6. Daily PnL Timeline — every day the bot has been running, up to today.
         # Previously this only looked 1 day into the past (yesterday) plus 29
         # days into the future, so any day older than yesterday (e.g. 16/07,
-        # 17/07) never appeared. Now it anchors at the first bet (with a 30-day
-        # floor) and stops at today, so the full history is shown with no $0
-        # future placeholders.
+        # 17/07) never appeared. Now it anchors at the first bet and stops at
+        # today, so the full history is shown with no $0 future placeholders and
+        # no empty padding before the first real betting day.
         from sqlalchemy import func, or_
 
         earliest = db.query(func.min(Bet.placed_at)).scalar()
         if earliest:
-            days_back = max((now.date() - earliest.date()).days, 30)
+            days_back = max((now.date() - earliest.date()).days, 1)
         else:
-            days_back = 30
+            days_back = 1
 
         daily_pnl = []
         for i in range(-days_back, 1):
