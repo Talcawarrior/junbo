@@ -2,12 +2,19 @@
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func
 
 from database.db import get_session, get_session_or
-from database.models import OPEN_BET_STATUSES, Analysis, Bet, Portfolio, WeatherMarket
+from database.models import (
+    OPEN_BET_STATUSES,
+    Analysis,
+    Bet,
+    Portfolio,
+    WeatherForecast,
+    WeatherMarket,
+)
 from utils.formulas import (
     polymarket_fee,
     portfolio_total_value,
@@ -15,6 +22,61 @@ from utils.formulas import (
 )
 
 logger = logging.getLogger("JOBS_SCHEDULER")
+
+
+# --- Re-analysis throttle ---------------------------------------------------
+# `analyze_market` is, for our purposes, a pure function of its inputs: the
+# cached hourly weather forecast, the live market price, slippage, the
+# time-to-close (days_ahead) and the number of forecast sources. If none of
+# those changed since the last analysis, the output (edge / should_bet /
+# side) is identical, so re-running it is pure wasted work.
+#
+# We therefore SKIP re-analyzing a market only when ALL of these hold:
+#   - it was analyzed recently (within MAX_ANALYSIS_AGE_MIN), AND
+#   - no new weather forecast has arrived since the last analysis, AND
+#   - its price has not moved more than PRICE_REANALYZE_DELTA.
+# Any of those being false forces a fresh analysis. This cannot drop bet
+# quality: an unchanged input set yields an unchanged decision, and every
+# path that could change the decision (new weather, a real price move, or
+# the time-to-close window opening) still triggers a re-analysis.
+PRICE_REANALYZE_DELTA = 0.005  # 0.5% price move forces re-analysis (well below min_edge 1%)
+MAX_ANALYSIS_AGE_MIN = 30  # never go longer than this without re-analyzing
+
+
+def _should_skip_analysis(sess, market, now):
+    """Return True if re-analyzing `market` this cycle is safe to skip.
+
+    Safe to skip only when the analysis inputs are unchanged since the last
+    analysis (see PRICE_REANALYZE_DELTA / MAX_ANALYSIS_AGE_MIN above).
+    """
+    last = sess.query(Analysis).filter(Analysis.market_id == market.id).order_by(Analysis.analyzed_at.desc()).first()
+    if last is None:
+        return False  # never analyzed yet -> must analyze
+    # Analysis.analyzed_at is stored tz-aware (UTC). `now` is tz-naive UTC,
+    # so strip tzinfo before subtracting to avoid a naive/aware TypeError.
+    last_at = last.analyzed_at
+    if last_at.tzinfo is not None:
+        last_at = last_at.replace(tzinfo=None)
+    if (now - last_at) >= timedelta(minutes=MAX_ANALYSIS_AGE_MIN):
+        return False  # too old -> refresh
+    # New weather since the last analysis?
+    new_weather = (
+        sess.query(WeatherForecast)
+        .filter(
+            WeatherForecast.market_id == market.id,
+            WeatherForecast.metric == market.metric,
+            WeatherForecast.fetched_at > last.analyzed_at,
+        )
+        .first()
+    )
+    if new_weather is not None:
+        return False  # fresh forecast -> re-analyze
+    # Price moved enough to matter?
+    last_price = last.market_implied_prob if last.market_implied_prob is not None else 0.5
+    cur_price = market.yes_price if market.yes_price is not None else 0.5
+    if abs(cur_price - last_price) >= PRICE_REANALYZE_DELTA:
+        return False  # price moved -> re-analyze
+    return True  # inputs unchanged -> safe to skip
 
 
 def run_fetch_markets():
@@ -57,16 +119,18 @@ def run_analyze(session=None):
     errors = 0
 
     with get_session_or(session) as sess:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         markets = (
             sess.query(WeatherMarket)
             .filter(
                 WeatherMarket.status == "open",
                 WeatherMarket.city.isnot(None),
-                WeatherMarket.target_date > datetime.now(timezone.utc).replace(tzinfo=None),
+                WeatherMarket.target_date > now,
             )
             .all()
         )
-        market_ids = [m.id for m in markets]
+        market_ids = [m.id for m in markets if not _should_skip_analysis(sess, m, now)]
+        skipped = len(markets) - len(market_ids)
 
     def analyze_single(mid):
         """Tek bir marketi analiz et (her thread kendi session'unu oluşturur)."""
@@ -79,7 +143,12 @@ def run_analyze(session=None):
 
     # Paralel analiz: 4 worker
     max_workers = min(4, len(market_ids)) if market_ids else 1
-    logger.info("Starting parallel analysis: %d markets, %d workers", len(market_ids), max_workers)
+    logger.info(
+        "Starting parallel analysis: %d to analyze, %d skipped (unchanged inputs), %d workers",
+        len(market_ids),
+        skipped,
+        max_workers,
+    )
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(analyze_single, mid): mid for mid in market_ids}
@@ -91,8 +160,14 @@ def run_analyze(session=None):
                 logger.error("Analysis error %s: %s", mid, error)
                 errors += 1
 
-    logger.info("Parallel analysis complete: %d analyzed, %d errors, %d total", analyzed, errors, len(market_ids))
-    return f"{analyzed} market analiz edildi ({len(market_ids)} toplam, {errors} hata)"
+    logger.info(
+        "Parallel analysis complete: %d analyzed, %d errors, %d skipped, %d total",
+        analyzed,
+        errors,
+        skipped,
+        len(markets),
+    )
+    return f"{analyzed} market analiz edildi ({len(market_ids)} analiz edilen, {skipped} atlandi, {errors} hata)"
 
 
 def run_place_bets():
@@ -203,9 +278,7 @@ def run_update_prices(session=None):
             # current_value = mark-to-market: book value + unrealized (paper) PnL.
             # Distinct from total_value (book value, excludes paper PnL) so the
             # dashboard can show both the conservative book and the live value.
-            portfolio.current_value = round(
-                portfolio.total_value + float(total_unrealized), 2
-            )
+            portfolio.current_value = round(portfolio.total_value + float(total_unrealized), 2)
             portfolio.last_updated = datetime.now(timezone.utc).replace(tzinfo=None)
             sess.add(portfolio)
 
@@ -298,13 +371,9 @@ def _partial_close_early(bet, sess, reason, current_price):
     portfolio = sess.query(Portfolio).filter(Portfolio.id == 1).first()
     if portfolio:
         open_exposure = (
-            sess.query(func.coalesce(func.sum(Bet.amount), 0.0))
-            .filter(Bet.status.in_(OPEN_BET_STATUSES))
-            .scalar()
+            sess.query(func.coalesce(func.sum(Bet.amount), 0.0)).filter(Bet.status.in_(OPEN_BET_STATUSES)).scalar()
         ) or 0.0
-        portfolio.total_value = portfolio_total_value(
-            float(portfolio.cash_balance or 0.0), float(open_exposure)
-        )
+        portfolio.total_value = portfolio_total_value(float(portfolio.cash_balance or 0.0), float(open_exposure))
         portfolio.total_realized_pnl = round((portfolio.total_realized_pnl or 0.0) + realized, 2)
         portfolio.total_won = (portfolio.total_won or 0) + (1 if realized > 0 else 0)
         portfolio.last_updated = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -314,7 +383,13 @@ def _partial_close_early(bet, sess, reason, current_price):
         sess.add(portfolio)
     logger.info(
         "Partial TP bet=%s market=%s sold %.2f/%.2f shares (%.1f%%) realized=$%.2f fee=$%.2f (stays open)",
-        bet.id, bet.market_id, sold_shares, original_shares, fraction_to_sell * 100, realized, fee,
+        bet.id,
+        bet.market_id,
+        sold_shares,
+        original_shares,
+        fraction_to_sell * 100,
+        realized,
+        fee,
     )
     return True
 
