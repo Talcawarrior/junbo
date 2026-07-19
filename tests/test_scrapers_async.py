@@ -133,7 +133,9 @@ def test_polymarket_scraper_uses_async_client(monkeypatch):
     assert called["n"] == 1
 
 
-@pytest.mark.skip(reason="fetch_for_market signature changed (market_id, city, target_date, metric) — needs market data to test")
+@pytest.mark.skip(
+    reason="fetch_for_market signature changed (market_id, city, target_date, metric) — needs market data to test"
+)  # noqa: E501
 def test_meteo_parallel_helper_returns_dict_with_both_sources():
     """Placeholder for meteo parallel fetch test."""
     pass

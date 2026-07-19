@@ -55,9 +55,7 @@ def _tiered_slippage(entry_price: float) -> float:
     return 0.005
 
 
-def _vwap_from_asks(
-    asks: list[dict], stake_usd: float, fallback_price: float
-) -> tuple[float, float]:
+def _vwap_from_asks(asks: list[dict], stake_usd: float, fallback_price: float) -> tuple[float, float]:
     """Walk orderbook ask levels, compute VWAP fill and total depth.
 
     Returns (fill_vwap, depth_usd).
@@ -112,9 +110,7 @@ def _orderbook_slippage(
 
         ob = ResolvedMarketsClient().get_live_orderbook(condition_id)
         if not ob or ("asks" not in ob and "bids" not in ob):
-            logger.warning(
-                "Orderbook empty for %s, falling back to tiered", condition_id
-            )
+            logger.warning("Orderbook empty for %s, falling back to tiered", condition_id)
             return _tiered_fallback(entry_price, "orderbook: empty_book")
 
         asks = ob.get("asks", [])
@@ -135,9 +131,7 @@ def _orderbook_slippage(
             model_used="orderbook",
         )
     except Exception as exc:
-        logger.warning(
-            "Orderbook slippage fetch failed, falling back to tiered: %s", exc
-        )
+        logger.warning("Orderbook slippage fetch failed, falling back to tiered: %s", exc)
         return _tiered_fallback(entry_price, f"orderbook_error: {exc}")
 
 
@@ -307,7 +301,7 @@ def check_orderbook_depth(
         from data_pipeline.resolvedmarkets_ingest import ResolvedMarketsClient
 
         client = ResolvedMarketsClient()
-        ob = client.fetch_historical_orderbook(condition_id)
+        ob = client.get_live_orderbook(condition_id)
         if not ob:
             return True, 0.0
 

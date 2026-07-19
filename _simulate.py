@@ -33,13 +33,13 @@ with get_session() as s:
     half_kelly = kelly * 0.5
     quarter_kelly = kelly * 0.25
 
-    print(f"\n{'='*72}")
+    print(f"\n{'=' * 72}")
     print("  KELLY CRITERION ANALYSIS")
-    print(f"{'='*72}")
-    print(f"  Win rate (p):          {p:.4f} ({p*100:.1f}%)")
-    print(f"  Loss rate (q):         {1-p:.4f} ({(1-p)*100:.1f}%)")
+    print(f"{'=' * 72}")
+    print(f"  Win rate (p):          {p:.4f} ({p * 100:.1f}%)")
+    print(f"  Loss rate (q):         {1 - p:.4f} ({(1 - p) * 100:.1f}%)")
     print(f"  Average odds (b):       {avg_odds:.4f}")
-    print(f"  Full Kelly (f*):       {kelly:.4f} ({kelly*100:.2f}%)")
-    print(f"  Half Kelly:            {half_kelly:.4f} ({half_kelly*100:.2f}%)")
-    print(f"  Quarter Kelly:         {quarter_kelly:.4f} ({quarter_kelly*100:.2f}%)")
-    print(f"  Current MAX_BET_PCT:   {Config.MAX_BET_PCT} ({Config.MAX_BET_PCT*100:.1f}%)")
+    print(f"  Full Kelly (f*):       {kelly:.4f} ({kelly * 100:.2f}%)")
+    print(f"  Half Kelly:            {half_kelly:.4f} ({half_kelly * 100:.2f}%)")
+    print(f"  Quarter Kelly:         {quarter_kelly:.4f} ({quarter_kelly * 100:.2f}%)")
+    print(f"  Current MAX_BET_PCT:   {Config.MAX_BET_PCT} ({Config.MAX_BET_PCT * 100:.1f}%)")

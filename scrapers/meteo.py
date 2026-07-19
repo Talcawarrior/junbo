@@ -61,7 +61,8 @@ _LAST_CALL_AT: dict[str, float] = {}
 _THROTTLE_LOCK = threading.Lock()
 
 # Global rate-limit flag — 429'da tüm API isteklerini durdur
-import time as _time
+import time as _time  # noqa: E402
+
 _RATE_LIMITED_UNTIL = 0.0  # monotonic timestamp
 
 
@@ -148,9 +149,7 @@ class MeteoFetcher:
             await client.aclose()
 
     @retry(max_attempts=3, delay=3, exceptions=(requests.RequestException,))
-    def _fetch_open_meteo(
-        self, lat: float, lon: float, target_date: str
-    ) -> dict | None:
+    def _fetch_open_meteo(self, lat: float, lon: float, target_date: str) -> dict | None:
         global _RATE_LIMITED_UNTIL
         """Open-Meteo API (Ã¼cretsiz, key gerekmez).
 
@@ -209,9 +208,7 @@ class MeteoFetcher:
         return None
 
     @retry(max_attempts=3, delay=3, exceptions=(requests.RequestException,))
-    def _fetch_weatherapi(
-        self, lat: float, lon: float, target_date: str
-    ) -> dict | None:
+    def _fetch_weatherapi(self, lat: float, lon: float, target_date: str) -> dict | None:
         """WeatherAPI.com."""
         if not bot_config.meteo.weatherapi_key:
             return None
@@ -251,9 +248,7 @@ class MeteoFetcher:
         _cache_set(cache_key, None)
         return None
 
-    def fetch_for_markets(
-        self, market_ids: list[str], city: str, target_date: datetime, metric: str
-    ) -> int:
+    def fetch_for_markets(self, market_ids: list[str], city: str, target_date: datetime, metric: str) -> int:
         """Fetch weather data for a group of markets sharing the same city/date/metric.
 
         Coordinate resolution: city name → CITY_ICAO_MAP → ICAO_COORDS.
@@ -311,7 +306,6 @@ class MeteoFetcher:
 
     def fetch_all_markets(self) -> int:
         """Fetch ensemble forecast for all open markets with deduplication."""
-        import asyncio
         from collections import defaultdict
 
         from engine.calculator import WeatherEngine
@@ -410,7 +404,10 @@ class MeteoFetcher:
                             else:
                                 # Son çare: tek model ile dene (8 model degil)
                                 count = self.fetch_for_markets(
-                                    mids, city, target_date, metric  # tüm marketler
+                                    mids,
+                                    city,
+                                    target_date,
+                                    metric,  # tüm marketler
                                 )
                                 total += count
 
@@ -422,9 +419,7 @@ class MeteoFetcher:
 
         return total
 
-    def fetch_for_market(
-        self, market_id: str, city: str, target_date: datetime, metric: str
-    ) -> int:
+    def fetch_for_market(self, market_id: str, city: str, target_date: datetime, metric: str) -> int:
         """Backward-compat shim: fetch weather for a single market.
 
         Delegates to :meth:`fetch_for_markets` with a single-element list.

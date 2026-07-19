@@ -22,6 +22,7 @@ from datetime import datetime, timezone, timedelta
 # 1. LOOK-AHEAD BIAS REGRESSION
 # ============================================================================
 
+
 class TestLookAheadBias:
     """Regression: Gelecek verilerini kullanma hatası."""
 
@@ -97,6 +98,7 @@ class TestLookAheadBias:
 # 2. SELL-SIDE FİYAT İNVERSİYONU REGRESSION
 # ============================================================================
 
+
 class TestSellSideInversion:
     """Regression: SELL-side fiyat hesaplama hataları."""
 
@@ -150,10 +152,10 @@ class TestSellSideInversion:
         # İkisi de negatif → bahis yok
 
         test_cases = [
-            (0.65, 0.60, "YES"),   # YES edge = +0.05
-            (0.45, 0.55, "NO"),    # NO edge = +0.10
-            (0.50, 0.50, None),    # Edge = 0
-            (0.55, 0.60, "NO"),    # NO edge = +0.05
+            (0.65, 0.60, "YES"),  # YES edge = +0.05
+            (0.45, 0.55, "NO"),  # NO edge = +0.10
+            (0.50, 0.50, None),  # Edge = 0
+            (0.55, 0.60, "NO"),  # NO edge = +0.05
         ]
 
         for yes_prob, yes_price, expected_side in test_cases:
@@ -176,6 +178,7 @@ class TestSellSideInversion:
 # ============================================================================
 # 3. WEIGHT LOADING ZAMANLAMASI REGRESSION
 # ============================================================================
+
 
 class TestWeightLoadingTiming:
     """Regression: Ağırlık yükleme zamanlaması hataları."""
@@ -229,6 +232,7 @@ class TestWeightLoadingTiming:
 # ============================================================================
 # 4. POLYMARKET FEE DİNAMİK ORAN REGRESSION
 # ============================================================================
+
 
 class TestPolymarketFeeDynamic:
     """Regression: Polymarket fee dinamik oran hataları."""
@@ -285,6 +289,7 @@ class TestPolymarketFeeDynamic:
 # 5. DATABASE LOCK REGRESSION
 # ============================================================================
 
+
 class TestDatabaseLock:
     """Regression: Database lock sorunları."""
 
@@ -310,6 +315,7 @@ class TestDatabaseLock:
 # ============================================================================
 # 6. SETTLEMENT PNL DOĞRULUĞU REGRESSION
 # ============================================================================
+
 
 class TestSettlementPnL:
     """Regression: Settlement PnL hesaplama hataları."""
@@ -378,6 +384,7 @@ class TestSettlementPnL:
 # 7. EXPOSURE CAP REGRESSION
 # ============================================================================
 
+
 class TestExposureCap:
     """Regression: Exposure limiti hataları."""
 
@@ -415,6 +422,7 @@ class TestExposureCap:
 # 8. NEGATIVE EDGE BET REGRESSION (abs() hatası)
 # ============================================================================
 
+
 class TestNegativeEdgeBet:
     """Regression: Negatif edge ile bahis açılmasını engelle.
 
@@ -431,19 +439,21 @@ class TestNegativeEdgeBet:
 
         test_cases = [
             # (net_edge, min_edge, expected_should_bet)
-            (-0.018, 0.01, False),   # -1.8% edge, %1 min_edge → False
-            (-0.05, 0.01, False),    # -5% edge → False
-            (-0.001, 0.01, False),   # -0.1% edge → False
-            (0.0, 0.01, False),      # 0% edge → False
-            (0.005, 0.01, False),    # 0.5% edge < 1% min_edge → False
-            (0.01, 0.01, True),      # 1% edge = 1% min_edge → True
-            (0.02, 0.01, True),      # 2% edge > 1% min_edge → True
+            (-0.018, 0.01, False),  # -1.8% edge, %1 min_edge → False
+            (-0.05, 0.01, False),  # -5% edge → False
+            (-0.001, 0.01, False),  # -0.1% edge → False
+            (0.0, 0.01, False),  # 0% edge → False
+            (0.005, 0.01, False),  # 0.5% edge < 1% min_edge → False
+            (0.01, 0.01, True),  # 1% edge = 1% min_edge → True
+            (0.02, 0.01, True),  # 2% edge > 1% min_edge → True
         ]
 
         for net_edge, min_edge, expected in test_cases:
             # should_bet mantığı (calculator.py'den)
             should_bet = net_edge >= min_edge
-            assert should_bet == expected, f"net_edge={net_edge}, min_edge={min_edge} → {should_bet} (expected {expected})"
+            assert should_bet == expected, (
+                f"net_edge={net_edge}, min_edge={min_edge} → {should_bet} (expected {expected})"
+            )  # noqa: E501
 
     def test_should_bet_rejects_slippage_negative_edge(self):
         """Regression: Slippage sonrası negatif edge ile bahis AÇILMAMALI."""
@@ -451,7 +461,7 @@ class TestNegativeEdgeBet:
         # Bu durumda bahis açılmamalı
 
         raw_edge = 0.0063  # %0.63 pozitif
-        slippage = 0.025   # %2.5 slippage (düşük fiyatlı bahis için yüksek)
+        slippage = 0.025  # %2.5 slippage (düşük fiyatlı bahis için yüksek)
         net_edge = raw_edge - slippage  # 0.0063 - 0.025 = -0.0187 (negatif!)
 
         min_edge = 0.01  # %1
@@ -474,14 +484,14 @@ class TestNegativeEdgeBet:
         # should_bet koşulunda abs() kullanılmamalı
         # "abs(net_edge)" should_bet satırında olmamalı
         # Ama inefficiency_min'de olabilir (kasıtlı)
-        lines = source.split('\n')
+        lines = source.split("\n")
         in_should_bet = False
         for line in lines:
-            if 'should_bet = (' in line:
+            if "should_bet = (" in line:
                 in_should_bet = True
-            if in_should_bet and 'abs(' in line:
+            if in_should_bet and "abs(" in line:
                 pytest.fail("should_bet koşulunda abs() kullanılıyor - DÜZELTİLMESİ GEREKEN HATA!")
-            if in_should_bet and ')' in line and 'and' not in line:
+            if in_should_bet and ")" in line and "and" not in line:
                 in_should_bet = False
 
 

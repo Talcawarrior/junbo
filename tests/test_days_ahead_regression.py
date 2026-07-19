@@ -76,9 +76,7 @@ def test_analyze_market_source_uses_inclusive_days_ahead_check():
         "today-resolving markets (days_ahead == 0) are not rejected."
     )
     # And explicitly reject the old buggy form
-    assert "0 < days_ahead" not in src, (
-        "Strict `0 < days_ahead` rejects today's markets (regression)."
-    )
+    assert "0 < days_ahead" not in src, "Strict `0 < days_ahead` rejects today's markets (regression)."
 
 
 def test_analyze_market_source_uses_min_liquidity_bypass():
@@ -94,12 +92,8 @@ def test_flat_bet_usd_default_is_disabled():
     """Config.FLAT_BET_USD defaults to 0.0 (Kelly sizing)."""
     from config.settings import Config
 
-    assert hasattr(Config, "FLAT_BET_USD"), (
-        "Config must expose FLAT_BET_USD so a flat-bet override can be set."
-    )
-    assert float(Config.FLAT_BET_USD) == 0.0, (
-        f"FLAT_BET_USD must default to 0.0, got {Config.FLAT_BET_USD}"
-    )
+    assert hasattr(Config, "FLAT_BET_USD"), "Config must expose FLAT_BET_USD so a flat-bet override can be set."
+    assert float(Config.FLAT_BET_USD) == 0.0, f"FLAT_BET_USD must default to 0.0, got {Config.FLAT_BET_USD}"
 
 
 def test_strategy_min_edge_is_lowered_to_one_percent():
@@ -111,9 +105,7 @@ def test_strategy_min_edge_is_lowered_to_one_percent():
     from config.settings import StrategyConfig
 
     me = float(StrategyConfig().min_edge)
-    assert 0.01 <= me <= 0.10, (
-        f"StrategyConfig.min_edge should be between 1%-10%, got {me}"
-    )
+    assert 0.01 <= me <= 0.10, f"StrategyConfig.min_edge should be between 1%-10%, got {me}"
 
 
 def test_bet_placer_overrides_amount_when_flat_bet_set():
@@ -143,9 +135,7 @@ def test_open_target_dates_returns_set():
     from bot_loop import _get_open_target_dates
 
     result = _get_open_target_dates()
-    assert isinstance(result, set), (
-        "_get_open_target_dates must return a set of dates for date-diffing."
-    )
+    assert isinstance(result, set), "_get_open_target_dates must return a set of dates for date-diffing."
 
 
 def test_next_two_day_target_fires_on_new_date_and_only_once():
@@ -160,10 +150,15 @@ def test_next_two_day_target_fires_on_new_date_and_only_once():
     assert _next_two_day_target(None, set()) == (None, False)
 
     # Current max 20/7, last seen 20/7 -> same date, no trigger.
-    assert _next_two_day_target(date(2026, 7, 20), {date(2026, 7, 18), date(2026, 7, 19), date(2026, 7, 20)}) == (date(2026, 7, 20), False)
+    assert _next_two_day_target(date(2026, 7, 20), {date(2026, 7, 18), date(2026, 7, 19), date(2026, 7, 20)}) == (
+        date(2026, 7, 20),
+        False,
+    )  # noqa: E501
 
     # New date 21/7 appears -> trigger (True), returns the new date.
-    new_date, trigger = _next_two_day_target(date(2026, 7, 20), {date(2026, 7, 18), date(2026, 7, 19), date(2026, 7, 20), date(2026, 7, 21)})
+    new_date, trigger = _next_two_day_target(
+        date(2026, 7, 20), {date(2026, 7, 18), date(2026, 7, 19), date(2026, 7, 20), date(2026, 7, 21)}
+    )  # noqa: E501
     assert trigger is True
     assert new_date == date(2026, 7, 21)
 
@@ -184,12 +179,9 @@ def test_bet_placer_blocks_bets_within_8h_of_expiry():
     import executor.bet_placer as bp
 
     src = inspect.getsource(bp.BetPlacer.place_bet)
-    assert "MIN_HOURS_TO_EXPIRY" in src, (
-        "place_bet must define MIN_HOURS_TO_EXPIRY (8h) guard."
-    )
+    assert "MIN_HOURS_TO_EXPIRY" in src, "place_bet must define MIN_HOURS_TO_EXPIRY (8h) guard."
     assert "MIN_HOURS_TO_EXPIRY * 3600" in src, (
-        "place_bet must reject markets with < 8h to expiry "
-        "(MIN_HOURS_TO_EXPIRY * 3600 seconds)."
+        "place_bet must reject markets with < 8h to expiry (MIN_HOURS_TO_EXPIRY * 3600 seconds)."
     )
 
 

@@ -1,6 +1,5 @@
 """Matematiksel olasılık, Kelly kriteri hesaplayıcısı ve WeatherEngine konsensüs birleşimi."""
 
-import asyncio
 import json
 import logging
 import math
@@ -25,7 +24,8 @@ from utils.slippage import (
 logger = logging.getLogger("ENGINE_CALCULATOR")
 
 # Global rate-limit flag: ilk 429'te 5dk boyunca tüm Open-Meteo isteklerini durdur
-import time as _time
+import time as _time  # noqa: E402
+
 _RATE_LIMITED_UNTIL = 0.0  # monotonic timestamp
 
 
@@ -561,8 +561,7 @@ class WeatherEngine:
                 # date/metric so repeated hourly fetches don't append duplicates.
                 existing_keys = {
                     (f.market_id, f.source)
-                    for f in db_session.query(WeatherForecast)
-                    .filter(
+                    for f in db_session.query(WeatherForecast).filter(
                         WeatherForecast.market_id.in_(market_ids),
                         WeatherForecast.source.in_(list(model_temps.keys())),
                         WeatherForecast.target_date == target_date,

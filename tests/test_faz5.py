@@ -2,7 +2,6 @@
 Faz 5 tests: end-to-end place bets pipeline (mock).
 """
 
-import json
 import os
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -47,9 +46,7 @@ def _clean():
 def _setup_market_and_forecasts():
     _clean()
     with get_session() as session:
-        pf = Portfolio(
-            id=1, cash_balance=1000.0, total_value=1000.0, current_value=1000.0
-        )
+        pf = Portfolio(id=1, cash_balance=1000.0, total_value=1000.0, current_value=1000.0)
         session.add(pf)
         market = WeatherMarket(
             id="test-faz5-nyc",
@@ -95,11 +92,7 @@ def test_analyze_creates_analysis():
         calc.analyze_market("test-faz5-nyc")
         # Re-query from DB to avoid DetachedInstanceError
         with get_session() as session:
-            analysis = (
-                session.query(Analysis)
-                .filter(Analysis.market_id == "test-faz5-nyc")
-                .first()
-            )
+            analysis = session.query(Analysis).filter(Analysis.market_id == "test-faz5-nyc").first()
             assert analysis is not None, "Analysis is NULL"
             assert analysis.should_bet, f"should_bet=False (edge={analysis.edge})"
             assert analysis.recommended_amount > 0, "recommended_amount=0"
@@ -122,11 +115,7 @@ def test_place_bets_creates_bet_row():
         calc.analyze_market("test-faz5-nyc")
         # Re-query from DB (analyze_market may return None due to session isolation)
         with get_session() as session:
-            analysis = (
-                session.query(Analysis)
-                .filter(Analysis.market_id == "test-faz5-nyc")
-                .first()
-            )
+            analysis = session.query(Analysis).filter(Analysis.market_id == "test-faz5-nyc").first()
             assert analysis is not None, "Analysis is NULL"
             assert analysis.should_bet, f"should_bet={analysis.should_bet}"
             assert analysis.recommended_amount > 0, f"amount={analysis.recommended_amount}"
@@ -144,11 +133,7 @@ def test_portfolio_cash_decreases_after_bet():
         calc = Calculator()
         calc.analyze_market("test-faz5-nyc")
         with get_session() as session:
-            analysis = (
-                session.query(Analysis)
-                .filter(Analysis.market_id == "test-faz5-nyc")
-                .first()
-            )
+            analysis = session.query(Analysis).filter(Analysis.market_id == "test-faz5-nyc").first()
             assert analysis is not None, "Analysis is NULL"
             assert analysis.edge is not None and analysis.edge > 0, f"edge={analysis.edge}"
             assert analysis.should_bet, f"should_bet={analysis.should_bet}"
@@ -168,11 +153,7 @@ def test_ladder_data_json():
         # A successfully created analysis with should_bet=True validates
         # the ladder logic indirectly (Calculator calls _compute_effective_min_edge)
         with get_session() as session:
-            analysis = (
-                session.query(Analysis)
-                .filter(Analysis.market_id == "test-faz5-nyc")
-                .first()
-            )
+            analysis = session.query(Analysis).filter(Analysis.market_id == "test-faz5-nyc").first()
             assert analysis is not None
             assert analysis.should_bet
     finally:

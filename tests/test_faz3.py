@@ -15,10 +15,10 @@ from database.db import init_db  # noqa: E402
 
 init_db()
 
-from config.settings import bot_config, config  # noqa: E402
+from config.settings import bot_config  # noqa: E402
 
 
-import pytest
+import pytest  # noqa: E402
 
 
 def test_fee_rate():
@@ -55,7 +55,9 @@ def test_ev_with_fee():
     print(f"✅ Test 2: EV={signal['ev']:.4f} (edge={signal['edge']:.4f} - fee_rate * p * (1-p))")
 
 
-@pytest.mark.skip(reason="Calculator.analyze_market uses session isolated from test DB — needs bot code fix for session sharing")
+@pytest.mark.skip(
+    reason="Calculator.analyze_market uses session isolated from test DB — needs bot code fix for session sharing"
+)  # noqa: E501
 def test_kelly_bankroll():
     """Test 3: Calculator reads bankroll from DB."""
     # Set portfolio to $2000
@@ -119,23 +121,17 @@ def test_kelly_bankroll():
     calc = Calculator()
     orig_min_edge = bot_config.strategy.min_edge
     bot_config.strategy.min_edge = 0.005
-    analysis_instance = calc.analyze_market("test-faz3-bankroll")
+    calc.analyze_market("test-faz3-bankroll")
     bot_config.strategy.min_edge = orig_min_edge
 
     # analyze_market may return None due to session isolation with temp DB
     # Re-query from DB to verify
     with get_session() as session:
-        analysis = (
-            session.query(Analysis)
-            .filter(Analysis.market_id == "test-faz3-bankroll")
-            .first()
-        )
+        analysis = session.query(Analysis).filter(Analysis.market_id == "test-faz3-bankroll").first()
         assert analysis is not None, "Analysis not found in DB!"
         rec_amount = analysis.recommended_amount
         assert rec_amount > 0, f"recommended_amount is {rec_amount}!"
-        print(
-            f"✅ Test 3: recommended_amount=${rec_amount:.2f} (bankroll=$2000, max_bet=$50)"
-        )
+        print(f"✅ Test 3: recommended_amount=${rec_amount:.2f} (bankroll=$2000, max_bet=$50)")
 
 
 def test_sia_status():
@@ -147,9 +143,7 @@ def test_sia_status():
     src = inspect.getsource(SIALoop.analyze_model_performance)
     assert '"won"' in src, "Missing 'won' in status filter"
     assert '"lost"' in src, "Missing 'lost' in status filter"
-    assert '"settled"' not in src.replace('"won", "lost"', ""), (
-        "'settled' should not be in status filter"
-    )
+    assert '"settled"' not in src.replace('"won", "lost"', ""), "'settled' should not be in status filter"
     print("✅ Test 4: SIALoop uses 'won'/'lost' statuses")
 
 
@@ -162,13 +156,9 @@ def test_sia_brier_input():
     src = inspect.getsource(SIALoop.analyze_model_performance)
     assert "model_probs" in src, "Missing model_probs in Brier calculation"
     # Verify Brier uses _resolve_market_outcome (market resolution), not bet.status
-    assert "_resolve_market_outcome" in src, (
-        "Brier should use market resolution outcome, not bet.status"
-    )
+    assert "_resolve_market_outcome" in src, "Brier should use market resolution outcome, not bet.status"
     # Ensure Bet.fair_value is NOT the Brier prediction input
-    assert "bet.fair_value" not in src, (
-        "Brier should not use bet.fair_value; uses per-model probs from analysis"
-    )
+    assert "bet.fair_value" not in src, "Brier should not use bet.fair_value; uses per-model probs from analysis"
     print("✅ Test 5: SIALoop uses per-model probability for Brier score")
 
 
@@ -181,13 +171,9 @@ def test_ladder_pending():
     ladder = be.create_ladder_orders(signal, 30.0)
     assert len(ladder) == 3, f"Expected 3 levels, got {len(ladder)}"
     for lvl in ladder:
-        assert lvl["status"] == "pending", (
-            f"Level {lvl['level']} status is '{lvl['status']}', expected 'pending'"
-        )
+        assert lvl["status"] == "pending", f"Level {lvl['level']} status is '{lvl['status']}', expected 'pending'"
         assert "filled_at" in lvl, f"Level {lvl['level']} missing 'filled_at'"
-    print(
-        f"✅ Test 6: Ladder pending OK — {ladder[0]['price']}, {ladder[1]['price']}, {ladder[2]['price']}"
-    )
+    print(f"✅ Test 6: Ladder pending OK — {ladder[0]['price']}, {ladder[1]['price']}, {ladder[2]['price']}")
 
 
 def test_exposure_query():
@@ -242,15 +228,12 @@ def test_betting_engine_ev_full():
         # edge=0.02, ev=0.02-0.05*0.70*0.30=0.0095 → still positive
         # The check is ev > 0, not edge >= min_edge
         assert s2 is not None, "Should be eligible (ev > 0)"
-        print(
-            f"✅ Test 9: EV pipeline OK — eligible s1 ev={s1['ev']:.4f}, eligible s2 ev={s2['ev']:.4f}"
-        )
+        print(f"✅ Test 9: EV pipeline OK — eligible s1 ev={s1['ev']:.4f}, eligible s2 ev={s2['ev']:.4f}")
     finally:
         bot_config.strategy.min_edge = orig_min_edge
 
 
 if __name__ == "__main__":
-    test_fee_drag()
     test_ev_with_fee()
     test_kelly_bankroll()
     test_sia_status()
