@@ -211,7 +211,7 @@ class Calculator:
                 }
             )
 
-            market_implied = market.yes_price or 0.5
+            market_implied = market.yes_price if market.yes_price is not None else 0.5
             raw_edge = estimated_prob - market_implied
 
             if raw_edge > 0:
