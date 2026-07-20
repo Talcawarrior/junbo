@@ -421,6 +421,7 @@ class WeatherEngine:
         if target_date is None:
             target_date = datetime.now(timezone.utc).replace(tzinfo=None)
 
+        global _RATE_LIMITED_UNTIL, _time
         # Global rate-limit kontrolü
         if _time.monotonic() < _RATE_LIMITED_UNTIL:
             logger.debug("Rate-limited, skipping API call for %s", city_code)
@@ -451,7 +452,7 @@ class WeatherEngine:
             }
 
             try:
-                async with aiohttp.ClientSession() as session:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
                     async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                         if resp.status == 429:
                             # Global rate-limit: tüm döngü boyunca API'yi engelle

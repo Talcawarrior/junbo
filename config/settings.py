@@ -12,6 +12,12 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 
+# Hard ceiling for max_bet_pct — no single bet may ever exceed this fraction
+# of the portfolio, regardless of strategy config. Guards against runaway
+# sizing (e.g. a misconfigured max_bet_pct=1.0 that would stake the whole book).
+MAX_BET_PCT_CEILING = 1.0
+
+
 def _resolve_path(path_value: str, default_relative: str) -> str:
     """Resolve relative paths to absolute from repo root."""
     raw = path_value or default_relative
@@ -56,7 +62,7 @@ class PolymarketConfig:
         # Initialize fee categories if not provided
         if self.fee_categories is None:
             self.fee_categories = {
-                "weather": 0.05,    # Weather markets: 5% fee
+                "weather": 0.05,  # Weather markets: 5% fee
             }
 
 

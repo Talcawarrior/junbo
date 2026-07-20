@@ -375,6 +375,8 @@ async def settlement_loop(state):
                 await asyncio.to_thread(state.sia_loop.run_optimization_cycle)
                 state.sia_last_run = datetime.now(timezone.utc).replace(tzinfo=None)
 
+            await _run_daily_maintenance()
+
         except asyncio.CancelledError:
             logger.info("Settlement loop cancelled")
             break
@@ -421,3 +423,20 @@ def _cleanup_stale_bets():
         if cancelled > 0:
             session.commit()
             logger.info("Stale cleanup: cancelled %d old bets", cancelled)
+
+
+async def _run_daily_maintenance() -> None:
+    """Daily self-evolution + verified DB backup, at most once per UTC day.
+
+    Both jobs use a persisted marker so restarts don't double-run them.
+    """
+    from jobs.evolution_job import run_evolution_cycle, should_run
+    from jobs.backup_job import run_backup_once
+
+    if should_run():
+        await asyncio.to_thread(run_evolution_cycle)
+
+    try:
+        await asyncio.to_thread(run_backup_once)
+    except Exception as e:
+        logger.error("Scheduled backup failed: %s", e)

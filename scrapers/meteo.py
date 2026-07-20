@@ -208,7 +208,66 @@ class MeteoFetcher:
         return None
 
     @retry(max_attempts=3, delay=3, exceptions=(requests.RequestException,))
+<<<<<<< Updated upstream
     def _fetch_weatherapi(self, lat: float, lon: float, target_date: str) -> dict | None:
+=======
+    def _fetch_open_meteo_model(
+        self, lat: float, lon: float, target_date: str, model: str
+    ) -> dict | None:
+        """Open-Meteo belirli bir model ile (ensemble için)."""
+        global _RATE_LIMITED_UNTIL
+        cache_key = (round(lat, 4), round(lon, 4), target_date, f"openmeteo_{model}")
+        cached = _cache_get(cache_key)
+        if cached is not None or cache_key in _FETCH_CACHE:
+            return cached
+
+        if _time.monotonic() < _RATE_LIMITED_UNTIL:
+            return None
+
+        _throttle("open-meteo.com")
+        try:
+            resp = requests.get(
+                bot_config.meteo.openmeteo_url,
+                params={
+                    "latitude": lat,
+                    "longitude": lon,
+                    "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum",
+                    "start_date": target_date,
+                    "end_date": target_date,
+                    "models": model,
+                    "temperature_unit": "celsius",
+                    "timezone": "auto",
+                },
+                timeout=15,
+            )
+            if resp.status_code == 429:
+                _RATE_LIMITED_UNTIL = _time.monotonic() + 300
+                logger.warning("Open-Meteo 429 — all requests paused for 5min")
+                return None
+            resp.raise_for_status()
+            data = resp.json()
+        except requests.RequestException:
+            _cache_set(cache_key, None)
+            raise
+
+        daily = data.get("daily", {})
+        if daily.get("temperature_2m_max") and daily["temperature_2m_max"][0] is not None:
+            result = {
+                "source": f"openmeteo_{model}",
+                "temperature_max": daily["temperature_2m_max"][0],
+                "temperature_min": daily["temperature_2m_min"][0],
+                "precipitation_mm": daily["precipitation_sum"][0],
+            }
+            _cache_set(cache_key, result)
+            return result
+        _cache_set(cache_key, None)
+        return None
+
+    @retry(max_attempts=3, delay=3, exceptions=(requests.RequestException,))
+    def _fetch_weatherapi(
+        self, lat: float, lon: float, target_date: str
+    ) -> dict | None:
+>>>>>>> Stashed changes
         """WeatherAPI.com."""
         if not bot_config.meteo.weatherapi_key:
             return None
@@ -273,6 +332,12 @@ class MeteoFetcher:
         ]
 
         total_saved = 0
+        # Open-Meteo'dan 8 farklı model çek (ensemble) — min_sources=2 için
+        openmeteo_models = [
+            "gfs_seamless", "ecmwf_ifs025", "gem_global", "icon_global",
+            "jma_seamless", "cma_grapes_global", "ukmo_seamless", "meteofrance_seamless"
+        ]
+
         for source_name, fetch_func in sources:
             try:
                 result = fetch_func(lat, lon, date_str)
@@ -301,6 +366,41 @@ class MeteoFetcher:
             except Exception as e:
                 logger.error(f"[{source_name}] group fetch error: {e}")
                 continue
+
+        # Open-Meteo ensemble — her modeli ayrı kaynak olarak çek
+        try:
+            from config.settings import bot_config
+            for model in openmeteo_models:
+                try:
+                    result = self._fetch_open_meteo_model(lat, lon, date_str, model)
+                    if result and metric in result:
+                        predicted_value = result[metric]
+                        with get_session() as session:
+                            for mid in market_ids:
+                                forecast = WeatherForecast(
+                                    market_id=mid,
+                                    city=city,
+                                    lat=lat,
+                                    lon=lon,
+                                    target_date=target_date,
+                                    metric=metric,
+                                    source=f"openmeteo_{model}",
+                                    predicted_value=predicted_value,
+                                    fetched_at=datetime.now(UTC).replace(tzinfo=None),
+                                    raw_data=str(result),
+                                )
+                                session.add(forecast)
+                            session.commit()
+                        total_saved += len(market_ids)
+                        logger.info(
+                            f"[openmeteo_{model}] Persisted for {len(market_ids)} markets: "
+                            f"{city} {date_str} {metric}={predicted_value}"
+                        )
+                except Exception as e:
+                    logger.error(f"[openmeteo_{model}] error: {e}")
+                    continue
+        except Exception as e:
+            logger.error(f"Ensemble fetch error: {e}")
 
         return total_saved
 
@@ -383,10 +483,18 @@ class MeteoFetcher:
                                 total += result["model_count"] * len(mids)
                                 continue
 
-                            # 2. Ensemble başarısız (429 veya其他) → DB fallback
-                            #    API fallback KALDIRILDI — 429'da 8x fazla istek yapıyordu
+<<<<<<< Updated upstream
+                            # Ensemble başarısız (429 veya diğer) → DB fallback
+                            # API fallback KALDIRILDI — 429'da 8x fazla istek yapıyordu
                             cached_count = 0
                             for mid in mids[:1]:
+=======
+                            # 2. Ensemble başarısız (429 veya başka) → DB fallback
+                            #    Tüm market_id'leri kontrol et, eksik olanlara cached forecast kopyala
+                            #    (sadece ilkini kontrol edip geçmek yerine)
+                            cached_forecasts = {}
+                            for mid in mids:
+>>>>>>> Stashed changes
                                 existing = (
                                     session.query(WeatherForecast)
                                     .filter(
@@ -397,19 +505,47 @@ class MeteoFetcher:
                                     .first()
                                 )
                                 if existing:
+<<<<<<< Updated upstream
                                     cached_count += 1
                             if cached_count > 0:
                                 total += cached_count
                                 logger.debug("DB fallback: cached forecast for %s", key)
+=======
+                                    cached_forecasts[mid] = existing
+                            if cached_forecasts:
+                                # Eksik market_id'lere cached forecast'leri kopyala
+                                template_mid = next(iter(cached_forecasts))
+                                template = cached_forecasts[template_mid]
+                                missing = [mid for mid in mids if mid not in cached_forecasts]
+                                if missing:
+                                    logger.info("DB fallback: copying forecasts to %d missing markets", len(missing))
+                                    for mid in missing:
+                                        for src_mid, src in cached_forecasts.items():
+                                            session.add(
+                                                WeatherForecast(
+                                                    market_id=mid,
+                                                    city=src.city,
+                                                    lat=src.lat,
+                                                    lon=src.lon,
+                                                    target_date=src.target_date,
+                                                    metric=src.metric,
+                                                    source=src.source,
+                                                    predicted_value=src.predicted_value,
+                                                    model_weight=src.model_weight or 0.0,
+                                                    fetched_at=datetime.now(UTC).replace(tzinfo=None),
+                                                    raw_data=src.raw_data,
+                                                )
+                                            )
+                                    session.commit()
+                                total += len(cached_forecasts)
+                                logger.debug("DB fallback: cached forecast for %s (%d markets)", key, len(cached_forecasts))
                             else:
                                 # Son çare: tek model ile dene (8 model degil)
                                 count = self.fetch_for_markets(
-                                    mids,
-                                    city,
-                                    target_date,
-                                    metric,  # tüm marketler
+                                    mids[:3], city, target_date, metric  # max 3 market
                                 )
                                 total += count
+>>>>>>> Stashed changes
 
                     except Exception as e:
                         logger.error("Group %s bucket error: %s", key, e)
@@ -418,10 +554,3 @@ class MeteoFetcher:
                 loop.close()
 
         return total
-
-    def fetch_for_market(self, market_id: str, city: str, target_date: datetime, metric: str) -> int:
-        """Backward-compat shim: fetch weather for a single market.
-
-        Delegates to :meth:`fetch_for_markets` with a single-element list.
-        """
-        return self.fetch_for_markets([market_id], city, target_date, metric)
