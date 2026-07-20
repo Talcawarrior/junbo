@@ -48,7 +48,10 @@ except Exception:  # pragma: no cover - fallback only when lib missing
 DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DB_PATH = os.path.join(DB_DIR, "bot.db")
 BACKUP_DIR = os.path.join(DB_DIR, "backups")
-MAX_BACKUPS = 10
+# Keep a small number of full-DB copies. The live DB is ~400 MB, so a high
+# limit multiplied by several labels (startup / pre_test / manual) can fill
+# many GB on disk. 5 per label is plenty for disaster recovery.
+MAX_BACKUPS = 5
 PBKDF2_ITERATIONS = 200_000
 
 
