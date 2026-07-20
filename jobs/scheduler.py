@@ -120,12 +120,28 @@ def run_analyze(session=None):
 
     with get_session_or(session) as sess:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
+        # Only analyze markets that actually have at least one matching-metric
+        # forecast. Newly fetched markets (or ones whose open-meteo forecast
+        # fetch timed out this cycle) have no forecasts written yet; analyzing
+        # them produces a misleading "Az kaynak: 0" PASS row in the health feed
+        # even though the data simply has not landed. Skipping them here means
+        # they wait for the next cycle, when the forecast arrives and the
+        # re-analysis gate (_should_skip_analysis -> new_weather) picks them up.
+        has_matching_forecast = (
+            sess.query(WeatherForecast.id)
+            .filter(
+                WeatherForecast.market_id == WeatherMarket.id,
+                WeatherForecast.metric == WeatherMarket.metric,
+            )
+            .exists()
+        )
         markets = (
             sess.query(WeatherMarket)
             .filter(
                 WeatherMarket.status == "open",
                 WeatherMarket.city.isnot(None),
                 WeatherMarket.target_date > now,
+                has_matching_forecast,
             )
             .all()
         )
