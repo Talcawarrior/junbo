@@ -216,28 +216,41 @@ class PolymarketScraper:
 
     def _parse_market(self, raw: dict) -> dict:
         """Ham marketi yapılandırılmış veriye çevir."""
-        # 1) YES/NO price — handle both /markets (tokens[]) and
-        #    /public-search (lastTradePrice / bestBid / bestAsk) formats.
+        # 1) outcomePrices — CANONICAL source (Gamma API v2 format).
+        #    Tokens[] often returns broken prices (e.g. both sides 0.75),
+        #    while outcomePrices reflects actual trade prices.
         yes_price = None
         no_price = None
-        for token in raw.get("tokens", []) or []:
-            outcome = (token.get("outcome", "") or "").upper()
+        op = raw.get("outcomePrices", "")
+        if op:
             try:
-                p = float(token.get("price", 0) or 0)
-            except (TypeError, ValueError):
-                p = None
-            if outcome == "YES" and p is not None:
-                yes_price = p
-            elif outcome == "NO" and p is not None:
-                no_price = p
-        # Fallback: public-search fields
+                parsed_op = json.loads(op) if isinstance(op, str) else op
+                if isinstance(parsed_op, list) and len(parsed_op) >= 2:
+                    yes_price = float(parsed_op[0]) if parsed_op[0] else None
+                    no_price = float(parsed_op[1]) if parsed_op[1] else None
+            except (json.JSONDecodeError, ValueError, TypeError):
+                pass
+
+        # 2) Tokens[] — supplement/fallback only if outcomePrices missing
+        if yes_price is None or no_price is None:
+            for token in raw.get("tokens", []) or []:
+                outcome = (token.get("outcome", "") or "").upper()
+                try:
+                    p = float(token.get("price", 0) or 0)
+                except (TypeError, ValueError):
+                    p = None
+                if outcome == "YES" and p is not None and yes_price is None:
+                    yes_price = p
+                elif outcome == "NO" and p is not None and no_price is None:
+                    no_price = p
+
+        # 3) Fallback: public-search fields
         if yes_price is None:
             for key in ("lastTradePrice", "bestBid", "yes_price", "yesPrice"):
                 v = raw.get(key)
                 if v is not None:
                     try:
                         p = float(v)
-                        # bestBid=0 means "no orderbook", not actual price
                         if p > 0:
                             yes_price = p
                             break
@@ -249,26 +262,27 @@ class PolymarketScraper:
                 if v is not None:
                     try:
                         p = float(v)
-                        # bestAsk=1 means "no orderbook", not actual price
                         if p < 1:
                             no_price = p
                             break
                     except (TypeError, ValueError):
                         pass
-        if no_price is None and yes_price is not None:
+
+        # 4) Binary invariant: no_price = 1 - yes_price
+        #    This is the fundamental invariant for binary YES/NO markets.
+        if yes_price is not None and no_price is None:
             no_price = max(0.0, min(1.0, 1.0 - yes_price))
-        # Fallback: outcomePrices (Gamma API v2 format — tokens empty)
-        if yes_price is None:
-            op = raw.get("outcomePrices", "")
-            if op:
-                try:
-                    parsed_op = json.loads(op) if isinstance(op, str) else op
-                    if isinstance(parsed_op, list) and len(parsed_op) >= 2:
-                        yes_price = float(parsed_op[0]) if parsed_op[0] else None
-                        if no_price is None:
-                            no_price = float(parsed_op[1]) if parsed_op[1] else None
-                except (json.JSONDecodeError, ValueError, TypeError):
-                    pass
+        elif no_price is not None and yes_price is None:
+            yes_price = max(0.0, min(1.0, 1.0 - no_price))
+
+        # 5) Enforce binary invariant: if sum deviates, trust the canonical side
+        #    (yes_price from outcomePrices) and recompute the other.
+        if yes_price is not None and no_price is not None:
+            total = yes_price + no_price
+            if abs(total - 1.0) > 0.02:
+                # Binary market invariant violated — recompute no from yes
+                no_price = max(0.0, min(1.0, 1.0 - yes_price))
+
         if yes_price is None:
             yes_price = 0.5
         if no_price is None:
