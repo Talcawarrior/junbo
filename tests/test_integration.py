@@ -11,12 +11,15 @@ class TestBotStartup:
     def test_bot_lifespan_startup(self):
         """Bot lifespan startup testi."""
         from config.settings import bot_config
+
         assert bot_config is not None
 
     def test_initial_portfolio_creation(self):
         """Initial portfolio mevcut mu kontrol et."""
-        from database.db import get_session
+        from database.db import ensure_initial_portfolio, get_session
         from database.models import Portfolio
+
+        ensure_initial_portfolio()
         with get_session() as session:
             p = session.query(Portfolio).filter(Portfolio.id == 1).first()
             assert p is not None
@@ -24,7 +27,8 @@ class TestBotStartup:
     def test_stop_bot(self):
         """Bot state nesnesi çalışıyor mu."""
         from api import state
-        assert hasattr(state, 'is_running')
+
+        assert hasattr(state, "is_running")
         assert isinstance(state.is_running, bool)
 
 
@@ -33,15 +37,13 @@ class TestDataPipeline:
 
     def test_fetch_markets(self):
         """Polymarket market fetch — mock."""
-        with patch('scrapers.polymarket.PolymarketScraper') as MockScraper:
+        with patch("scrapers.polymarket.PolymarketScraper") as MockScraper:
             mock_instance = Mock()
             MockScraper.return_value = mock_instance
             mock_instance.fetch_polymarket_events = AsyncMock(
                 return_value=[{"id": "123", "question": "Temperature test"}]
             )
-            markets = asyncio.get_event_loop().run_until_complete(
-                mock_instance.fetch_polymarket_events()
-            )
+            markets = asyncio.get_event_loop().run_until_complete(mock_instance.fetch_polymarket_events())
             assert len(markets) > 0
             assert markets[0]["id"] == "123"
 
@@ -61,6 +63,7 @@ class TestAPIEndpoints:
         """Health-check endpoint."""
         from fastapi.testclient import TestClient
         from api import app
+
         client = TestClient(app)
         response = client.get("/api/health-check")
         assert response.status_code == 200
@@ -71,6 +74,7 @@ class TestAPIEndpoints:
         """Status endpoint."""
         from fastapi.testclient import TestClient
         from api import app
+
         client = TestClient(app)
         response = client.get("/api/status")
         assert response.status_code == 200
@@ -81,6 +85,7 @@ class TestAPIEndpoints:
         """Markets endpoint."""
         from fastapi.testclient import TestClient
         from api import app
+
         client = TestClient(app)
         response = client.get("/api/markets")
         assert response.status_code == 200
@@ -92,6 +97,7 @@ class TestAPIEndpoints:
         """Signals endpoint."""
         from fastapi.testclient import TestClient
         from api import app
+
         client = TestClient(app)
         response = client.get("/api/signals")
         assert response.status_code == 200
@@ -102,6 +108,7 @@ class TestAPIEndpoints:
         """History endpoint."""
         from fastapi.testclient import TestClient
         from api import app
+
         client = TestClient(app)
         response = client.get("/api/history")
         assert response.status_code == 200
@@ -112,6 +119,7 @@ class TestAPIEndpoints:
         """Slippage endpoint."""
         from fastapi.testclient import TestClient
         from api import app
+
         client = TestClient(app)
         response = client.get("/api/slippage")
         assert response.status_code == 200
@@ -122,6 +130,7 @@ class TestAPIEndpoints:
         """Equity curve endpoint."""
         from fastapi.testclient import TestClient
         from api import app
+
         client = TestClient(app)
         response = client.get("/api/equity-curve")
         assert response.status_code == 200
@@ -137,6 +146,7 @@ class TestASIEvolveEndpoints:
         """ASI weights endpoint."""
         from fastapi.testclient import TestClient
         from api import app
+
         client = TestClient(app)
         response = client.get("/api/asi/weights")
         assert response.status_code == 200
@@ -148,6 +158,7 @@ class TestASIEvolveEndpoints:
         """ASI cognition endpoint."""
         from fastapi.testclient import TestClient
         from api import app
+
         client = TestClient(app)
         response = client.get("/api/asi/cognition")
         assert response.status_code == 200
@@ -159,6 +170,7 @@ class TestASIEvolveEndpoints:
         """ASI calibration endpoint."""
         from fastapi.testclient import TestClient
         from api import app
+
         client = TestClient(app)
         response = client.get("/api/asi/calibration")
         assert response.status_code == 200
@@ -188,6 +200,7 @@ class TestRiskManagement:
     def test_exposure_cap_validation(self):
         """Exposure cap validasyonu."""
         from utils.formulas import max_exposure_cap
+
         max_exposure = max_exposure_cap(1000.0, 50.0, 0.25)
         expected = 1050.0 * 0.25
         assert max_exposure == pytest.approx(expected, abs=0.1)

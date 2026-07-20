@@ -3,9 +3,8 @@
 Replaces the old Open-Meteo weather settlement tests (test_faz6.py).
 """
 
+import importlib
 import json
-import os
-import tempfile
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
@@ -13,22 +12,43 @@ import pytest
 
 import requests
 
-_db_fd, _db_path = tempfile.mkstemp(suffix=".db")
-os.close(_db_fd)
 
-from config.settings import config as _cfg  # noqa: E402
+# The database is redirected to a single temp file by tests/conftest.py
+# (session-scoped autouse fixture). However, pytest imports this module
+# (and therefore binds get_session) at COLLECTION time, BEFORE conftest
+# swaps DB_PATH to the temp file. Every reference to get_session then
+# points at the original engine, so settle_all() sees 0 markets.
+#
+# This autouse fixture reloads database.db + the production modules that
+# import get_session so they rebind to conftest's temp DB for each test.
+@pytest.fixture(autouse=True)
+def _rebind_to_temp_db():
+    import database.db as _db_mod
 
-_cfg.DB_PATH = _db_path
+    importlib.reload(_db_mod)
+    import executor.settler as _settler_mod
 
-import importlib  # noqa: E402
+    importlib.reload(_settler_mod)
+    import jobs.scheduler as _sched_mod
 
-import database.db  # noqa: E402
+    importlib.reload(_sched_mod)
+    from database.db import init_db
 
-importlib.reload(database.db)  # noqa: E402
+    init_db()
+    yield
 
-from database.db import get_session, init_db  # noqa: E402
 
-init_db()  # noqa: E402
+def get_session():
+    """Proxy to database.db.get_session.
+
+    Resolves the *current* engine (conftest-swapped / fixture-reloaded)
+    on every call so tests never bind to the engine captured at import
+    time. Lets all ``with get_session() as session:`` sites use the temp DB.
+    """
+    from database.db import get_session as _gs
+
+    return _gs()
+
 
 from database.models import Bet, Portfolio, WeatherMarket  # noqa: E402
 
@@ -122,15 +142,18 @@ def _setup_market_with_bets(
     return market, bet_yes, bet_no, pf
 
 
-def _gamma_mock(closed=True, status="resolved", outcome_prices=None):
-    """Build a MagicMock that mimics the Gamma API response for a resolved market."""
-    if outcome_prices is None:
-        outcome_prices = ["1", "0"]
+def _gamma_mock(closed=True, status="resolved", outcome_prices=None, end_date="2026-01-01T00:00:00Z"):
+    """Build a MagicMock that mimics the Gamma API response for a resolved market.
+
+    ``outcome_prices=None`` means the market has NO outcomePrices yet
+    (not-yet-resolved) — it is NOT silently replaced with a winner.
+    """
     mock = MagicMock()
     mock.json.return_value = {
         "closed": closed,
         "umaResolutionStatus": status,
         "outcomePrices": outcome_prices,
+        "endDate": end_date,
     }
     mock.raise_for_status = MagicMock()
     return mock
@@ -144,9 +167,7 @@ class TestSettlementPolymarket:
 
     def test_resolved_yes(self):
         """Gamma returns YES -> YES bet wins, NO bet loses."""
-        market, bet_yes, bet_no, pf = _setup_market_with_bets(
-            yes_price=0.35, stake=10.0
-        )
+        market, bet_yes, bet_no, pf = _setup_market_with_bets(yes_price=0.35, stake=10.0)
         try:
             with patch("executor.settler.requests.get") as mock_get:
                 mock_get.return_value = _gamma_mock(
@@ -161,16 +182,8 @@ class TestSettlementPolymarket:
                 assert results["pending"] == 0
 
             with get_session() as session:
-                b_yes = (
-                    session.query(Bet)
-                    .filter(Bet.market_id == "test-poly-001", Bet.side == "YES")
-                    .first()
-                )
-                b_no = (
-                    session.query(Bet)
-                    .filter(Bet.market_id == "test-poly-001", Bet.side == "NO")
-                    .first()
-                )
+                b_yes = session.query(Bet).filter(Bet.market_id == "test-poly-001", Bet.side == "YES").first()
+                b_no = session.query(Bet).filter(Bet.market_id == "test-poly-001", Bet.side == "NO").first()
 
                 # YES bet won
                 assert b_yes.status == "won"
@@ -186,11 +199,7 @@ class TestSettlementPolymarket:
                 # Lost bet: PnL = -(stake + entry_fee). entry_fee=0 for test bets.
                 assert b_no.realized_pnl == -10.0
 
-                mkt = (
-                    session.query(WeatherMarket)
-                    .filter(WeatherMarket.id == "test-poly-001")
-                    .first()
-                )
+                mkt = session.query(WeatherMarket).filter(WeatherMarket.id == "test-poly-001").first()
                 assert mkt.status == "settled_win"
                 rd = json.loads(mkt.raw_data)
                 assert rd["source"] == "polymarket"
@@ -208,9 +217,7 @@ class TestSettlementPolymarket:
 
     def test_resolved_no(self):
         """Gamma returns NO -> NO bet wins, YES bet loses."""
-        market, bet_yes, bet_no, pf = _setup_market_with_bets(
-            yes_price=0.35, stake=10.0
-        )
+        market, bet_yes, bet_no, pf = _setup_market_with_bets(yes_price=0.35, stake=10.0)
         try:
             with patch("executor.settler.requests.get") as mock_get:
                 mock_get.return_value = _gamma_mock(
@@ -225,16 +232,8 @@ class TestSettlementPolymarket:
                 assert results["pending"] == 0
 
             with get_session() as session:
-                b_yes = (
-                    session.query(Bet)
-                    .filter(Bet.market_id == "test-poly-001", Bet.side == "YES")
-                    .first()
-                )
-                b_no = (
-                    session.query(Bet)
-                    .filter(Bet.market_id == "test-poly-001", Bet.side == "NO")
-                    .first()
-                )
+                b_yes = session.query(Bet).filter(Bet.market_id == "test-poly-001", Bet.side == "YES").first()
+                b_no = session.query(Bet).filter(Bet.market_id == "test-poly-001", Bet.side == "NO").first()
 
                 assert b_yes.status == "lost"
                 assert b_yes.realized_pnl == -10.0  # -stake, entry_fee=0 for test bet
@@ -246,11 +245,7 @@ class TestSettlementPolymarket:
                 expected_pnl = round(expected_payout - 10.0, 2)
                 assert b_no.realized_pnl == expected_pnl
 
-                mkt = (
-                    session.query(WeatherMarket)
-                    .filter(WeatherMarket.id == "test-poly-001")
-                    .first()
-                )
+                mkt = session.query(WeatherMarket).filter(WeatherMarket.id == "test-poly-001").first()
                 assert mkt.status == "settled_loss"
 
                 pf_db = session.query(Portfolio).filter(Portfolio.id == 1).first()
@@ -265,11 +260,7 @@ class TestSettlementPolymarket:
         try:
             # Capture pre-settlement state
             with get_session() as session:
-                mkt_before = (
-                    session.query(WeatherMarket)
-                    .filter(WeatherMarket.id == "test-poly-001")
-                    .first()
-                )
+                mkt_before = session.query(WeatherMarket).filter(WeatherMarket.id == "test-poly-001").first()
                 assert mkt_before.status == "bet_placed"
 
             with patch("executor.settler.requests.get") as mock_get:
@@ -290,16 +281,10 @@ class TestSettlementPolymarket:
                 # Bet statuses unchanged
                 bets = session.query(Bet).filter(Bet.market_id == "test-poly-001").all()
                 for b in bets:
-                    assert b.status in ("placed",), (
-                        f"Bet {b.id} status changed: {b.status}"
-                    )
+                    assert b.status in ("placed",), f"Bet {b.id} status changed: {b.status}"
 
                 # Market status unchanged
-                mkt = (
-                    session.query(WeatherMarket)
-                    .filter(WeatherMarket.id == "test-poly-001")
-                    .first()
-                )
+                mkt = session.query(WeatherMarket).filter(WeatherMarket.id == "test-poly-001").first()
                 assert mkt.status == "bet_placed"
                 assert mkt.raw_data is None
 
@@ -317,6 +302,73 @@ class TestSettlementPolymarket:
             with patch("executor.settler.requests.get") as mock_get:
                 mock_get.return_value = _gamma_mock(
                     outcome_prices=["0.5", "0.5"],
+                )
+                from executor.settler import SettlementEngine
+
+                engine = SettlementEngine()
+                results = engine.settle_all()
+                assert results["pending"] == 1
+                assert results["win"] == 0
+                assert results["loss"] == 0
+
+            with get_session() as session:
+                bets = session.query(Bet).filter(Bet.market_id == "test-poly-001").all()
+                for b in bets:
+                    assert b.status == "placed"
+        finally:
+            _clean()
+
+    def test_price_based_settlement_without_resolution(self):
+        """Gamma NOT officially closed but outcomePrices show clear winner (>=0.98).
+
+        Mirrors the real Denver stuck-bet case: ``closed=false`` and
+        ``umaResolutionStatus`` not ``"resolved"`` yet, but the visible
+        outcomePrices are ["0.0005","0.9995"] (NO clearly won). The bot
+        must settle on the clear price instead of waiting for UMA.
+        """
+        market, bet_yes, bet_no, pf = _setup_market_with_bets(yes_price=0.35, stake=10.0)
+        try:
+            with patch("executor.settler.requests.get") as mock_get:
+                mock_get.return_value = _gamma_mock(
+                    closed=False,
+                    status="open",
+                    outcome_prices=["0.0005", "0.9995"],
+                    end_date="2026-07-19T12:00:00Z",
+                )
+                from executor.settler import SettlementEngine
+
+                engine = SettlementEngine()
+                results = engine.settle_all()
+                assert results["win"] == 1
+                assert results["loss"] == 1
+                assert results["pending"] == 0
+
+            with get_session() as session:
+                # NO bet won (NO price 0.9995 >= 0.98)
+                b_no = session.query(Bet).filter(Bet.market_id == "test-poly-001", Bet.side == "NO").first()
+                assert b_no.status == "won"
+                # YES bet lost
+                b_yes = session.query(Bet).filter(Bet.market_id == "test-poly-001", Bet.side == "YES").first()
+                assert b_yes.status == "lost"
+                mkt = session.query(WeatherMarket).filter(WeatherMarket.id == "test-poly-001").first()
+                assert mkt.status == "settled_loss"  # outcome = NO
+                rd = json.loads(mkt.raw_data)
+                assert rd["source"] == "polymarket_price"
+                assert rd["outcome"] == "NO"
+        finally:
+            _clean()
+
+    def test_price_based_blocked_before_enddate(self):
+        """Price >=0.98 is ignored while the market is still live (endDate future)."""
+        market, bet_yes, bet_no, pf = _setup_market_with_bets(yes_price=0.35, stake=10.0)
+        try:
+            with patch("executor.settler.requests.get") as mock_get:
+                mock_get.return_value = _gamma_mock(
+                    closed=False,
+                    status="open",
+                    outcome_prices=["0.0005", "0.9995"],
+                    # Market has not ended yet — should NOT settle on price alone.
+                    end_date="2099-12-31T23:59:59Z",
                 )
                 from executor.settler import SettlementEngine
 
@@ -351,20 +403,14 @@ class TestSettlementPolymarket:
                 bets = session.query(Bet).filter(Bet.market_id == "test-poly-001").all()
                 for b in bets:
                     assert b.status == "placed"
-                mkt = (
-                    session.query(WeatherMarket)
-                    .filter(WeatherMarket.id == "test-poly-001")
-                    .first()
-                )
+                mkt = session.query(WeatherMarket).filter(WeatherMarket.id == "test-poly-001").first()
                 assert mkt.status == "bet_placed"
         finally:
             _clean()
 
     def test_pnl_cash_reconciliation(self):
         """1 win + 1 loss: cash reflects win payout-fee only; total_realized_pnl sums both."""
-        market, bet_yes, bet_no, pf = _setup_market_with_bets(
-            yes_price=0.35, stake=10.0
-        )
+        market, bet_yes, bet_no, pf = _setup_market_with_bets(yes_price=0.35, stake=10.0)
         try:
             with patch("executor.settler.requests.get") as mock_get:
                 mock_get.return_value = _gamma_mock(
@@ -376,16 +422,8 @@ class TestSettlementPolymarket:
                 engine.settle_all()
 
             with get_session() as session:
-                b_yes = (
-                    session.query(Bet)
-                    .filter(Bet.market_id == "test-poly-001", Bet.side == "YES")
-                    .first()
-                )
-                b_no = (
-                    session.query(Bet)
-                    .filter(Bet.market_id == "test-poly-001", Bet.side == "NO")
-                    .first()
-                )
+                b_yes = session.query(Bet).filter(Bet.market_id == "test-poly-001", Bet.side == "YES").first()
+                b_no = session.query(Bet).filter(Bet.market_id == "test-poly-001", Bet.side == "NO").first()
                 pf_db = session.query(Portfolio).filter(Portfolio.id == 1).first()
 
                 # Win PnL (entry_fee=0 for test bets, settlement fee=0 mathematically)
@@ -402,11 +440,52 @@ class TestSettlementPolymarket:
                 )
 
                 expected_total = win_pnl + loss_pnl
-                assert pf_db.total_realized_pnl == pytest.approx(
-                    expected_total, rel=1e-3
-                ), f"total_realized_pnl={pf_db.total_realized_pnl} != {expected_total}"
+                assert pf_db.total_realized_pnl == pytest.approx(expected_total, rel=1e-3), (
+                    f"total_realized_pnl={pf_db.total_realized_pnl} != {expected_total}"
+                )
 
                 assert b_yes.realized_pnl == win_pnl
                 assert b_no.realized_pnl == loss_pnl
         finally:
             _clean()
+
+
+def test_refresh_open_prices_updates_stale_price():
+    """run_refresh_open_prices fixes the stale yes_price for held markets.
+
+    Reproduces the Denver bug: the bot holds a bet but the stored
+    yes_price is frozen at a mid-range value while Gamma's outcomePrices
+    have already moved to the resolved value. The refresh must pull the
+    live price from the direct Gamma endpoint and write it back, WITHOUT
+    touching market.status.
+    """
+    _setup_market_with_bets(
+        market_id="refresh-001",
+        yes_price=0.39,  # stale, frozen value
+        days_ago=1,
+    )
+    try:
+        from jobs.scheduler import run_refresh_open_prices
+
+        with patch("executor.settler.requests.get") as mock_get:
+            mock = MagicMock()
+            mock.json.return_value = {
+                "id": "refresh-001",
+                "outcomePrices": ["0.0005", "0.9995"],
+                "closed": False,
+            }
+            mock.raise_for_status = MagicMock()
+            mock_get.return_value = mock
+
+            result = run_refresh_open_prices()
+            assert "1 market" in result
+
+        with get_session() as session:
+            mkt = session.query(WeatherMarket).filter(WeatherMarket.id == "refresh-001").first()
+            # Stale price replaced by live Gamma outcomePrices.
+            assert mkt.yes_price == pytest.approx(0.0005, abs=1e-6)
+            assert mkt.no_price == pytest.approx(0.9995, abs=1e-6)
+            # Status must NOT be resurrected / changed.
+            assert mkt.status == "bet_placed"
+    finally:
+        _clean()

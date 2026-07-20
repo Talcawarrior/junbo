@@ -286,6 +286,61 @@ def run_update_prices(session=None):
     return f"{updated} açık bet güncellendi, total_unrealized={total_unrealized:.2f}"
 
 
+def run_refresh_open_prices():
+    """Refresh ``yes_price``/``no_price`` for markets we still hold open bets in.
+
+    The main market fetch (``run_fetch_markets``) goes through Polymarket's
+    relevance-ranked ``public-search``, which stops returning a market once it
+    ends/expires.  Markets we still hold positions in therefore freeze at their
+    last-fetched price even though the live ``outcomePrices`` have already moved
+    to the resolved value — so the dashboard and PnL keep showing a stale,
+    mid-range price instead of the clear ≥0.98 winner.
+
+    This refreshes exactly those markets from the direct Gamma ``/markets/{id}``
+    endpoint every poller cycle.  Only the price fields are touched — never
+    ``status`` — so settled markets cannot be resurrected.
+    """
+    from executor.settler import SettlementEngine
+
+    open_statuses = OPEN_BET_STATUSES
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    refreshed = 0
+    with get_session() as session:
+        market_ids = [
+            r[0]
+            for r in session.query(Bet.market_id)
+            .filter(Bet.status.in_(open_statuses), Bet.market_id.isnot(None))
+            .distinct()
+        ]
+        if not market_ids:
+            return "0 market fiyatı tazelendi (açık bet yok)"
+        markets = session.query(WeatherMarket).filter(WeatherMarket.id.in_(market_ids)).all()
+        engine = SettlementEngine()
+        for m in markets:
+            try:
+                data = engine._call_gamma_api(m)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Price refresh failed for %s: %s", m.id, e)
+                continue
+            if not data:
+                continue
+            raw = data.get("outcomePrices")
+            if not raw:
+                continue
+            try:
+                prices = json.loads(raw) if isinstance(raw, str) else raw
+                yes = float(prices[0])
+                no = float(prices[1])
+            except (TypeError, ValueError, json.JSONDecodeError, IndexError):
+                continue
+            m.yes_price = yes
+            m.no_price = no
+            m.last_updated = now
+            refreshed += 1
+            session.add(m)
+    return f"{refreshed} market fiyatı tazelendi"
+
+
 def run_settle():
     """Settle resolved bets against actual weather data."""
     from executor.settler import SettlementEngine

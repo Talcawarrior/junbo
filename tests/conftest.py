@@ -17,6 +17,7 @@ import pytest
 
 # ── Auto-backup before every test run ────────────────────────────────────
 
+
 def _pre_test_backup():
     try:
         db_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
@@ -26,86 +27,90 @@ def _pre_test_backup():
             os.makedirs(backup_dir, exist_ok=True)
             from datetime import datetime
             import shutil
+
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             shutil.copy2(db_path, os.path.join(backup_dir, f"bot_pre_test_{ts}.db"))
     except Exception:
         pass
 
+
 _pre_test_backup()
 
 
 # ── Production DB Protection ─────────────────────────────────────────────
+# CRITICAL FIX: the swap to a temp DB MUST run in pytest_configure, which
+# executes BEFORE pytest collects/imports the test modules. Many test files
+# do ``import database.db`` / ``from database.db import get_session`` at
+# module top level, so they bind get_session to whatever engine exists at
+# import time. The old session-scoped fixture swapped DB_PATH only AFTER
+# collection, so those modules had already bound to the REAL engine
+# (bot.db); any test calling ``session.query(...).delete()`` then wiped the
+# live production database. Swapping here guarantees every top-level import
+# lands on the temp engine.
+_TMP_DB_PATH = None
+
+
+def pytest_configure(config):
+    global _TMP_DB_PATH
+    if _TMP_DB_PATH is None:
+        _fd, _TMP_DB_PATH = tempfile.mkstemp(suffix=".db")
+        os.close(_fd)
+        import config.settings as cfg_mod
+
+        cfg_mod.config.DB_PATH = _TMP_DB_PATH
+        sys.modules.pop("database.db", None)
+        sys.modules.pop("database.models", None)
+        from database.db import init_db
+
+        init_db()
+
+
 # This fixture runs before EVERY test and redirects all database operations
 # to a temporary file. Production data is safe.
 
 
 @pytest.fixture(autouse=True, scope="session")
 def _protect_production_db_session():
-    """Session-scoped: swap DB_PATH to a temp file for the entire test run.
+    """Session-scoped: DB already redirected to a temp file by
+    pytest_configure (which runs BEFORE collection). This fixture just
+    (re)initialises the temp schema and removes the temp file at the end.
 
-    This is the PRIMARY defense against tests wiping production data.
-    Every database engine/session created during tests points here, not at
-    data/bot.db.
+    Production data (data/bot.db) is never touched.
     """
-    import config.settings as cfg_mod
-
-    # Save original
-    _orig_db_path = cfg_mod.config.DB_PATH
-
-    # Create temp DB
-    _fd, _tmp_path = tempfile.mkstemp(suffix=".db")
-    os.close(_fd)
-
-    cfg_mod.config.DB_PATH = _tmp_path
-
-    # Force-reimport database.db so it creates engine pointing at temp DB
-    if "database.db" in sys.modules:
-        del sys.modules["database.db"]
-    if "database.models" in sys.modules:
-        del sys.modules["database.models"]
-
-    # Initialize the temp DB
     from database.db import init_db
+
     init_db()
 
     yield
 
-    # Restore original path
-    cfg_mod.config.DB_PATH = _orig_db_path
-
-    # Clean up temp file
-    try:
-        os.unlink(_tmp_path)
-    except OSError:
-        pass
+    if _TMP_DB_PATH:
+        try:
+            os.unlink(_TMP_DB_PATH)
+        except OSError:
+            pass
 
 
 @pytest.fixture(autouse=True, scope="function")
 def _protect_production_db_function():
-    """Function-scoped: ensure DB engine points to temp DB for each test.
-
-    Even if a test somehow resets sys.modules, this fixture re-asserts
-    the temp DB path.
+    """Function-scoped safety net: if any engine still points at the real
+    bot.db (e.g. a test imported database.db before pytest_configure could
+    swap it), redirect it to a fresh temp DB before the test runs. With the
+    pytest_configure swap in place this should rarely trigger.
     """
     import config.settings as cfg_mod
+    import database.db as db_mod
 
-    _orig = cfg_mod.config.DB_PATH
+    if hasattr(db_mod, "engine") and str(db_mod.engine.url).endswith("bot.db"):
+        _fd, _p = tempfile.mkstemp(suffix=".db")
+        os.close(_fd)
+        cfg_mod.config.DB_PATH = _p
+        sys.modules.pop("database.db", None)
+        sys.modules.pop("database.models", None)
+        from database.db import init_db
 
-    # Re-read the temp path from the session fixture
-    # The session fixture already set config.DB_PATH to temp
-    # Just ensure database.db module uses the current config
-    if "database.db" in sys.modules:
-        import database.db as db_mod
-        # Rebuild engine if it points to production
-        if hasattr(db_mod, 'engine') and str(db_mod.engine.url).endswith('bot.db'):
-            sys.modules.pop("database.db", None)
-            sys.modules.pop("database.models", None)
-            from database.db import init_db
-            init_db()
+        init_db()
 
     yield
-
-    cfg_mod.config.DB_PATH = _orig
 
 
 # ── Strategy Params Reset ────────────────────────────────────────────────

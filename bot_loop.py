@@ -130,6 +130,7 @@ async def price_poller_loop(state):
     """
     from jobs.scheduler import (
         run_fetch_markets,
+        run_refresh_open_prices,
         run_risk_management,
         run_update_prices,
     )
@@ -138,6 +139,10 @@ async def price_poller_loop(state):
     while state.is_running:
         try:
             await asyncio.wait_for(asyncio.to_thread(run_fetch_markets), timeout=_FETCH_TIMEOUT)
+            # Refresh prices for markets we still hold (public-search stops
+            # returning ended markets, so their stored price freezes). This
+            # keeps the dashboard / PnL live through resolution.
+            await asyncio.wait_for(asyncio.to_thread(run_refresh_open_prices), timeout=_FETCH_TIMEOUT)
             await asyncio.wait_for(asyncio.to_thread(run_update_prices), timeout=_FETCH_TIMEOUT)
             # Risk yönetimini de fiyat poller'a bağla: stop-loss / take-profit /
             # trailing stop kontrolleri artık her 5 dakikada bir (fiyat

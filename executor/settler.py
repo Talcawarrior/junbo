@@ -20,6 +20,27 @@ logger = logging.getLogger("EXECUTOR_SETTLER")
 GAMMA_API_BASE = "https://gamma-api.polymarket.com"
 
 
+def _parse_gamma_dt(value: str | None) -> datetime | None:
+    """Parse a Gamma API ISO datetime to a NAIVE UTC ``datetime``.
+
+    Accepts ``"...Z"`` (treated as UTC) or a plain ``"2026-07-19"`` date.
+    The result is always tz-naive UTC so it compares cleanly against the
+    tz-naive ``now`` used elsewhere in this module.
+    """
+    if not value:
+        return None
+    text = value.strip().replace("Z", "+00:00")
+    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%d"):
+        try:
+            dt = datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+    return None
+
+
 class SettlementEngine:
     """Resolves open bets by reading Polymarket's official resolution data.
 
@@ -110,15 +131,11 @@ class SettlementEngine:
                     # current_value = mark-to-market: book value + unrealized
                     # (paper) PnL on remaining open bets.
                     open_unrealized = (
-                        sync_session.query(
-                            func.coalesce(func.sum(Bet.unrealized_pnl), 0.0)
-                        )
+                        sync_session.query(func.coalesce(func.sum(Bet.unrealized_pnl), 0.0))
                         .filter(Bet.status.in_(OPEN_BET_STATUSES))
                         .scalar()
                     ) or 0.0
-                    portfolio.current_value = round(
-                        portfolio.total_value + float(open_unrealized), 2
-                    )
+                    portfolio.current_value = round(portfolio.total_value + float(open_unrealized), 2)
                     portfolio.last_updated = datetime.now(timezone.utc).replace(tzinfo=None)  # pyright: ignore
                     sync_session.commit()
 
@@ -246,16 +263,31 @@ class SettlementEngine:
 
         Returns ``"YES"``, ``"NO"``, or ``None`` if not yet resolved.
 
-        When *force* is False (default), the market must be officially closed
-        with a resolved status.  When *force* is True, any outcomePrices with
-        a clear winner (≥0.98) is accepted — used as a 48h+ fallback.
+        A market is treated as resolved when EITHER:
+          * Polymarket has officially closed it (``closed == true`` and
+            ``umaResolutionStatus == "resolved"``), OR
+          * its ``outcomePrices`` show a clear winner (one side ≥0.98) and the
+            market's ``endDate`` has already passed.
+
+        The second path is the fix for weather markets where UMA's official
+        ``resolved`` flag lags hours/days behind the visible outcomePrices.
+        We settle promptly on the clear price instead of waiting.
+
+        *force* skips the ``endDate`` guard (used as a last-resort fallback
+        once the market is well past its target date).
         """
         data = self._call_gamma_api(market)
         if data is None:
             return None
 
-        if not force:
-            if not data.get("closed") or data.get("umaResolutionStatus") != "resolved":
+        # Price-based settlement is always available — it does not depend on
+        # the official closed/resolved flags. Only block it when the market is
+        # still live (endDate in the future) and we are not forcing, so we never
+        # settle a pre-resolution market that happens to trade near 1.0.
+        if not force and not data.get("closed"):
+            end_date = _parse_gamma_dt(data.get("endDate"))
+            now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+            if end_date is not None and end_date > now_utc:
                 return None
 
         prices = self._parse_outcome_prices(market, data.get("outcomePrices"))
@@ -285,12 +317,14 @@ class SettlementEngine:
             )
             return None
 
+        officially_resolved = bool(data.get("closed")) and data.get("umaResolutionStatus") == "resolved"
         market.raw_data = json.dumps(
             {
-                "source": "fallback_price" if force else "polymarket",
+                "source": "polymarket" if officially_resolved else "polymarket_price",
                 "outcome": outcome,
                 "outcomePrices": prices,
-                "umaResolutionStatus": data.get("umaResolutionStatus") if not force else None,
+                "umaResolutionStatus": data.get("umaResolutionStatus") if officially_resolved else None,
+                "closed": data.get("closed"),
                 "settled_at": datetime.now(timezone.utc).isoformat(),
             }
         )
