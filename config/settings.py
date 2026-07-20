@@ -38,8 +38,18 @@ class PolymarketConfig:
     api_passphrase: str = os.getenv("POLY_API_PASSPHRASE", "")
     weather_keywords: list = None  # type: ignore[assignment]
 
+    # Proxy for geo-blocked regions (Turkey, etc.)
+    # Format: "socks5h://user:pass@host:port" or "http://host:port"
+    proxy_url: str = os.getenv("POLY_PROXY", "")
+
     # Fee rates by category (dynamic, fetched from API)
     fee_categories: dict | None = None  # {"weather": 0.05, ...}
+
+    def get_proxies(self) -> dict | None:
+        """Return requests-compatible proxy dict, or None if no proxy configured."""
+        if not self.proxy_url:
+            return None
+        return {"http": self.proxy_url, "https": self.proxy_url}
 
     def __post_init__(self):
         self.weather_keywords = [
@@ -534,6 +544,12 @@ class _ConfigProxy:
 bot_config = BotConfig()
 Config = _ConfigProxy()
 config = Config  # alias used by older modules
+
+# Auto-set proxy env vars for ALL requests (covers ClobClient + direct calls)
+if bot_config.polymarket.proxy_url:
+    os.environ["HTTP_PROXY"] = bot_config.polymarket.proxy_url
+    os.environ["HTTPS_PROXY"] = bot_config.polymarket.proxy_url
+    os.environ["ALL_PROXY"] = bot_config.polymarket.proxy_url
 
 
 def apply_persisted_strategy_params() -> dict:

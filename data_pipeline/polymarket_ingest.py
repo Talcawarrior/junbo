@@ -81,6 +81,10 @@ class PolymarketIngest:
     def __init__(self, cfg: PolymarketIngestConfig | None = None):
         self.cfg = cfg or PolymarketIngestConfig()
         self._session = requests.Session()
+        from config.settings import bot_config
+        proxies = bot_config.polymarket.get_proxies()
+        if proxies:
+            self._session.proxies.update(proxies)
 
     # -- Low-level --------------------------------------------------------
 

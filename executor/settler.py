@@ -334,7 +334,8 @@ class SettlementEngine:
         """Make GET request to Gamma API and return parsed JSON."""
         try:
             url = f"{GAMMA_API_BASE}/markets/{market.id}"
-            resp = requests.get(url, timeout=15)
+            from config.settings import bot_config
+            resp = requests.get(url, timeout=15, proxies=bot_config.polymarket.get_proxies())
             resp.raise_for_status()
             return resp.json()
         except requests.RequestException as e:

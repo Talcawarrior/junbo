@@ -382,7 +382,9 @@ class PolyDataIngest:
             if cursor:
                 params["cursor"] = cursor
             try:
-                resp = requests.get(self.cfg.gamma_url, params=params, timeout=30.0)
+                from config.settings import bot_config
+                resp = requests.get(self.cfg.gamma_url, params=params, timeout=30.0,
+                                    proxies=bot_config.polymarket.get_proxies())
                 resp.raise_for_status()
                 payload = resp.json()
             except Exception as exc:
