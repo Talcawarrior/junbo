@@ -306,6 +306,15 @@ async def scan_and_bet_loop(state):
             except Exception as e:
                 logger.error("Range betting error: %s", e)
 
+            # STEP 5.5: Range PT / trail stop / settlement satis
+            try:
+                from executor.range_bet_placer import check_range_pt
+                pt_closed = await asyncio.wait_for(asyncio.to_thread(check_range_pt), timeout=30)
+                if pt_closed:
+                    logger.info("Range PT: %d positions closed", pt_closed)
+            except Exception as e:
+                logger.error("Range PT error: %s", e)
+
             # Stale cleanup her 10 döngüde
             stale_check_counter += 1
             if stale_check_counter >= 10:

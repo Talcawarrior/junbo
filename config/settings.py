@@ -171,7 +171,10 @@ class StrategyConfig:
     range_bet_enabled: bool = True
     range_bet_cities: list = None  # type: ignore[assignment]
     range_bet_amount: float = 10.0
-    range_bet_spread: int = 2  # T-2, T-1, T, T+1, T+2
+    range_bet_spread: int = 1  # 3 bet: T-1, T, T+1
+    range_bet_pt_take_rate: float = 1.0  # %100 kar olunca bu orani sat (1.0 = $30)
+    range_bet_trail_stop_pct: float = 0.30  # peak'ten %30 dususte sat
+    range_bet_pre_settlement_hours: float = 1.0  # settlementa 1 saat kala hepsini sat
 
 
 @dataclass
@@ -400,7 +403,7 @@ class BotConfig:
         self.risk = self.risk or RiskConfig()
 
         if self.strategy.range_bet_cities is None:
-            self.strategy.range_bet_cities = ["istanbul", "london", "newyork", "tokyo", "seoul"]
+            self.strategy.range_bet_cities = ["istanbul", "london", "newyork", "tokyo", "seoul", "paris", "miami", "chicago"]
 
         # ── Override from .env (single source: .env > dataclass defaults) ──
         self.initial_portfolio = float(os.getenv("INITIAL_PORTFOLIO", str(self.initial_portfolio)))
