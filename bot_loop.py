@@ -179,7 +179,6 @@ async def scan_and_bet_loop(state):
     TEK try/except ile tüm while body'si korunuyor.
     Hata durumunda loop çökmez, 60sn recovery ile devam eder.
     """
-    from config.settings import bot_config
     from jobs.scheduler import (
         run_cycle,
         run_fetch_markets,
@@ -292,9 +291,10 @@ async def scan_and_bet_loop(state):
             # STEP 5: Range betting (YES-only, $10, temperature range)
             # Sadece saat başı çalışır (her 60 dk'da 1 kez)
             try:
+                from config.settings import bot_config as _bc
                 range_interval = 3600
                 now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-                if bot_config.strategy.range_bet_enabled and (
+                if _bc.strategy.range_bet_enabled and (
                     state.last_range_bet is None or (now_utc - state.last_range_bet).total_seconds() >= range_interval
                 ):
                     from executor.range_bet_placer import place_range_bets

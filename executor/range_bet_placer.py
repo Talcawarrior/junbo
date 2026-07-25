@@ -13,12 +13,25 @@ _TARGET_DAY_OFFSET = 2
 
 
 def _get_forecast_temp(city: str, metric: str, target_date: datetime) -> float | None:
-    """Get latest temperature forecast for a city/metric/date."""
+    """Get latest temperature forecast for a city/metric/date.
+
+    WeatherForecast stores city as ICAO code (e.g. LTFM), but the
+    configured city names are plain (e.g. istanbul).  We resolve the
+    ICAO code via WeatherMarket.city_code first.
+    """
     with get_session() as s:
+        # Resolve city name → ICAO code via WeatherMarket
+        market = (
+            s.query(WeatherMarket.city_code)
+            .filter(WeatherMarket.city.ilike(city), WeatherMarket.city_code.isnot(None))
+            .first()
+        )
+        icao = market[0] if market else city
+
         forecasts = (
             s.query(WeatherForecast)
             .filter(
-                WeatherForecast.city.ilike(city),
+                WeatherForecast.city.ilike(icao),
                 WeatherForecast.metric == metric,
                 WeatherForecast.target_date == target_date,
                 WeatherForecast.source.isnot(None),
