@@ -88,7 +88,12 @@ def _city_open_count(city: str) -> int:
 
 
 def place_range_bets() -> list[str]:
-    """Place YES-only range bets for configured cities."""
+    """Place YES-only range bets for configured cities.
+
+    Kural: 5 threshold bet'in TAMAMININ yes_price'i 0.10'dan küçük veya eşit
+    OLMALI.  Eğer herhangi bir threshold'ta yes_price > 0.10 ise o şehir
+    için hiçbir bet açılmaz.
+    """
     cities = bot_config.strategy.range_bet_cities
     if not cities:
         logger.info("Range betting: no cities configured")
@@ -112,63 +117,45 @@ def place_range_bets() -> list[str]:
 
         base_temp = round(temp)
 
+        # Step 1: Collect all 5 candidate markets for this city
+        candidates = []
+        skip_city = False
         for offset in range(-spread, spread + 1):
             threshold = base_temp + offset
             market = _find_market(city, threshold, "temperature_max", target_date)
             if not market:
-                logger.info("Range: no market for %s %dC", city, threshold)
-                continue
+                logger.info("Range: %s %dC — market yok, tum sehir atlaniyor", city, threshold)
+                skip_city = True
+                break
             if _existing_bet(str(market.id)):
-                continue
+                logger.info("Range: %s %dC — zaten bet var, tum sehir atlaniyor", city, threshold)
+                skip_city = True
+                break
 
             # 8-hour pre-settlement guard
-            if market.target_date:
-                _res = market.target_date
-                if getattr(_res, "tzinfo", None) is None:
-                    _res = _res.replace(tzinfo=timezone.utc)
-                _hours_left = (_res - datetime.now(timezone.utc)).total_seconds() / 3600.0
-                if _hours_left <= 8:
-                    logger.info("Range: %s %.1fh to settlement — skipped", city, _hours_left)
-                    continue
+            _hours_left = _settlement_hours_left(market)
+            if _hours_left is not None and _hours_left <= 8:
+                logger.info("Range: %s %dC — settlement'a %.1fh kala, tum sehir atlaniyor", city, threshold, _hours_left)
+                skip_city = True
+                break
 
             yes_price = float(market.yes_price or 0.5)
-            entry_fee = round(bet_amount * bot_config.strategy.current_fee_rate * (1 - yes_price), 4)
-            shares = round(bet_amount / yes_price, 4) if yes_price > 0 else 0
+            if yes_price > 0.10:
+                logger.info("Range: %s %dC yes_price=%.2f > 0.10, tum sehir atlaniyor", city, threshold, yes_price)
+                skip_city = True
+                break
 
-            now_ts = int(datetime.now(timezone.utc).timestamp())
-            bet = Bet(
-                market_id=str(market.id),
-                city=market.city,
-                city_code=market.city_code or "",
-                side="YES",
-                amount=bet_amount,
-                stake_amount=bet_amount,
-                price=yes_price,
-                entry_price=yes_price,
-                shares=shares,
-                current_price=yes_price,
-                status="placed",
-                order_id=f"range_{market.id}_{now_ts}",
-                placed_at=datetime.now(timezone.utc).replace(tzinfo=None),
-                entry_fee=entry_fee,
-                ladder_data="[]",
-                potential_payout=bet_amount / yes_price if yes_price > 0 else 0,
-            )
+            candidates.append((market, yes_price, threshold))
 
-            with get_session() as s:
-                s.add(bet)
-                m = s.query(WeatherMarket).filter(WeatherMarket.id == market.id).first()
-                if m:
-                    m.status = "bet_placed"
-                pf = s.query(Portfolio).filter(Portfolio.id == 1).first()
-                if pf:
-                    open_exposure = s.query(Bet.amount).filter(Bet.status.in_(OPEN_BET_STATUSES)).all()
-                    total_open = sum(float(a[0] or 0) for a in open_exposure)
-                    pf.total_value = (pf.cash_balance or 0) + total_open
-                    pf.last_updated = datetime.now(timezone.utc).replace(tzinfo=None)
-                s.commit()
+        if skip_city or not candidates:
+            if not skip_city:
+                logger.info("Range: %s — hic uygun market bulunamadi", city)
+            continue
 
-            msg = f"{city} {threshold}C YES ${bet_amount:.0f}"
+        # Step 2: All 5 pass — place them all
+        for market, yes_price, threshold in candidates:
+            _place_one_range_bet(market, yes_price, bet_amount)
+            msg = f"{city} {threshold}C YES ${bet_amount:.0f} @ {yes_price:.3f}"
             logger.info("Range bet: %s", msg)
             results.append(msg)
 
@@ -177,3 +164,50 @@ def place_range_bets() -> list[str]:
     else:
         logger.info("Range betting: no bets placed")
     return results
+
+
+def _settlement_hours_left(market: WeatherMarket) -> float | None:
+    if not market.target_date:
+        return None
+    _res = market.target_date
+    if getattr(_res, "tzinfo", None) is None:
+        _res = _res.replace(tzinfo=timezone.utc)
+    return (_res - datetime.now(timezone.utc)).total_seconds() / 3600.0
+
+
+def _place_one_range_bet(market: WeatherMarket, yes_price: float, bet_amount: float) -> None:
+    entry_fee = round(bet_amount * bot_config.strategy.current_fee_rate * (1 - yes_price), 4)
+    shares = round(bet_amount / yes_price, 4) if yes_price > 0 else 0
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+
+    bet = Bet(
+        market_id=str(market.id),
+        city=market.city,
+        city_code=market.city_code or "",
+        side="YES",
+        amount=bet_amount,
+        stake_amount=bet_amount,
+        price=yes_price,
+        entry_price=yes_price,
+        shares=shares,
+        current_price=yes_price,
+        status="placed",
+        order_id=f"range_{market.id}_{now_ts}",
+        placed_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        entry_fee=entry_fee,
+        ladder_data="[]",
+        potential_payout=bet_amount / yes_price if yes_price > 0 else 0,
+    )
+
+    with get_session() as s:
+        s.add(bet)
+        m = s.query(WeatherMarket).filter(WeatherMarket.id == market.id).first()
+        if m:
+            m.status = "bet_placed"
+        pf = s.query(Portfolio).filter(Portfolio.id == 1).first()
+        if pf:
+            open_exposure = s.query(Bet.amount).filter(Bet.status.in_(OPEN_BET_STATUSES)).all()
+            total_open = sum(float(a[0] or 0) for a in open_exposure)
+            pf.total_value = (pf.cash_balance or 0) + total_open
+            pf.last_updated = datetime.now(timezone.utc).replace(tzinfo=None)
+        s.commit()
