@@ -97,6 +97,14 @@ class BetPlacer:
                 return None
             d.market_id = market.id
 
+            # YES-only guard: asla NO bahis acma
+            side = (analysis.recommended_side or "").upper()
+            d.check("yes_only", side == "YES", recommended_side=analysis.recommended_side)
+            if not d.should_bet:
+                logger.warning("YES-only guard: analysis %d recommends %s — rejected", analysis_id, analysis.recommended_side)
+                d.log(logging.WARNING)
+                return None
+
             # Guard: daily loss limit (circuit breaker)
             if self.risk_manager.is_bot_locked():
                 d.check("daily_loss_limit", False, daily_pnl=self.risk_manager.daily_pnl)
