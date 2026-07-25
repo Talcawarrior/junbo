@@ -260,18 +260,9 @@ class Calculator:
                 kelly_frac = self.kelly_criterion(estimated_prob, market_implied, bot_config.strategy.kelly_fraction)
                 recommended_side = "YES"
             else:
-                # NO tarafı
-                no_prob = 1 - estimated_prob
-                no_implied = market.no_price or (1 - market_implied)
-                no_edge = no_prob - no_implied
-
-                if no_edge > 0:
-                    kelly_frac = self.kelly_criterion(no_prob, no_implied, bot_config.strategy.kelly_fraction)
-                    recommended_side = "NO"
-                    raw_edge = no_edge
-                else:
-                    kelly_frac = 0
-                    recommended_side = None
+                # YES-only: model_prob <= market_implied ise bahis açılmaz
+                kelly_frac = 0
+                recommended_side = None
 
             # ── Slippage + fee adjusted edge ────────────────────────────
             # Net edge = raw edge − slippage − fee_drag.
@@ -344,16 +335,32 @@ class Calculator:
             else:
                 inefficiency_ok = True
 
+            # 8-hour pre-settlement guard
+            settlement_hours_left = None
+            try:
+                if market.target_date:
+                    _res = market.target_date
+                    if getattr(_res, "tzinfo", None) is None:
+                        _res = _res.replace(tzinfo=timezone.utc)
+                    settlement_hours_left = (_res - datetime.now(timezone.utc)).total_seconds() / 3600.0
+            except Exception:
+                pass
+            settlement_ok = settlement_hours_left is None or settlement_hours_left > 8
+
             should_bet = (
-                net_edge >= effective_min_edge  # Negatif edge ile bahis AÇILMAZ
+                recommended_side == "YES"  # YES-only: asla NO
+                and net_edge >= effective_min_edge
                 and inefficiency_ok
                 and len(forecast_values) >= bot_config.strategy.min_sources
                 and 0 <= days_ahead <= bot_config.strategy.max_days_ahead
                 and liquidity_ok
+                and settlement_ok
                 and recommended_amount > 1.0
             )
 
             reason_parts = []
+            if recommended_side != "YES":
+                reason_parts.append("YES-only mode: NO side rejected")
             if net_edge < effective_min_edge:
                 reason_parts.append(
                     f"Net edge düşük: {net_edge:.2%} (raw={raw_edge:.2%}, slip={slippage_est.slippage_pct:.2%})"
@@ -366,6 +373,8 @@ class Calculator:
                 reason_parts.append(f"Çok uzak: {days_ahead} gün")
             if (market.liquidity or 0) < bot_config.strategy.min_liquidity:
                 reason_parts.append(f"Düşük likidite: ${market.liquidity}")
+            if not settlement_ok:
+                reason_parts.append(f"Settlement'a {settlement_hours_left:.1f}s kaldı (8s min)")
 
             if not reason_parts:
                 reason = (

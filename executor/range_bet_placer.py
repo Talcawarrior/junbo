@@ -121,6 +121,16 @@ def place_range_bets() -> list[str]:
             if _existing_bet(str(market.id)):
                 continue
 
+            # 8-hour pre-settlement guard
+            if market.target_date:
+                _res = market.target_date
+                if getattr(_res, "tzinfo", None) is None:
+                    _res = _res.replace(tzinfo=timezone.utc)
+                _hours_left = (_res - datetime.now(timezone.utc)).total_seconds() / 3600.0
+                if _hours_left <= 8:
+                    logger.info("Range: %s %.1fh to settlement — skipped", city, _hours_left)
+                    continue
+
             yes_price = float(market.yes_price or 0.5)
             entry_fee = round(bet_amount * bot_config.strategy.current_fee_rate * (1 - yes_price), 4)
             shares = round(bet_amount / yes_price, 4) if yes_price > 0 else 0

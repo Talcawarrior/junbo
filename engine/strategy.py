@@ -697,7 +697,7 @@ class BettingEngine:
             yes_price = getattr(market_data, "yes_price", 0.5) or getattr(market_data, "current_yes_bid", 0.5)
 
         model_prob = 0.55
-        side = "YES"
+        side = "YES"  # YES-only: asla NO bahis açma
         if forecast:
             from utils.probability import estimate_probability as _ep
 
@@ -711,7 +711,7 @@ class BettingEngine:
                     days_ahead=0,
                     market_type=str(market_type),
                 )
-                side = "NO" if model_prob < 0.5 else "YES"
+                side = "YES"  # YES-only: model_prob ne olursa olsun sadece YES
             except Exception:
                 model_prob = 0.55
 
@@ -789,6 +789,27 @@ class BettingEngine:
                 if existing is not None:
                     logger.info("Duplicate bet refused for %s — returning existing bet #%s", market_id, existing.id)
                     return existing
+
+            # YES-only guard: asla NO bahis acma
+            if getattr(signal, "side", "YES").upper() == "NO" or getattr(signal, "outcome", "YES").upper() == "NO":
+                logger.info("NO bet refused for %s — YES-only mode", market_id)
+                return None
+
+            # 8-hour pre-settlement guard: settlement'a 8 saatten az kaldiysa bet acma
+            try:
+                from database.models import WeatherMarket as _WM
+                _market_row = self.db.query(_WM).filter(_WM.id == str(market_id)).first() if self.db else None
+                if _market_row and _market_row.target_date:
+                    _res = _market_row.target_date
+                    if getattr(_res, "tzinfo", None) is None:
+                        from datetime import timezone as _tz
+                        _res = _res.replace(tzinfo=_tz.utc)
+                    _hours_left = (_res - datetime.now(timezone.utc)).total_seconds() / 3600.0
+                    if _hours_left <= 8:
+                        logger.info("8h guard: %s has %.1fh left — bet refused", market_id, _hours_left)
+                        return None
+            except Exception:
+                pass
 
             bet = Bet(
                 market_id=str(market_id),
