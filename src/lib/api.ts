@@ -253,6 +253,43 @@ export interface ModelScore {
   sampleCount: number;
 }
 
+export interface CityBetInfo {
+  id: number;
+  market_id: string;
+  threshold: number;
+  metric: string;
+  side: string;
+  amount: number;
+  entry_price: number;
+  current_price: number;
+  pnl: number;
+  status: string;
+  placed_at: string | null;
+}
+
+export interface CityBetsCity {
+  city: string;
+  city_display: string;
+  forecast_temp: number | null;
+  target_date: string;
+  total_pnl: number;
+  total_stake: number;
+  bet_count: number;
+  bets: CityBetInfo[];
+}
+
+export interface CityBetsResponse {
+  portfolio_value: number;
+  portfolio_initial: number;
+  total_pnl: number;
+  total_stake: number;
+  total_bets: number;
+  bet_amount: number;
+  spread: number;
+  enabled: boolean;
+  cities: CityBetsCity[];
+}
+
 export type HealthVerdict = "healthy" | "degraded" | "critical" | "error";
 export type FlagSeverity = "critical" | "warning" | "info";
 export type SlippageEntry = {
@@ -736,6 +773,7 @@ export function useApiData() {
   const [weights, setWeights] = useState<Record<string, number | { weight: number; brier_score?: number | null; accuracy?: number | null; num_predictions?: number }>>({});
   const [slippageData, setSlippageData] = useState<SlippageEntry[]>([]);
   const [equityCurve, setEquityCurve] = useState<{ initial: number; points: Array<{ date: string; value: number; pnl: number; count: number }> } | null>(null);
+  const [cityBets, setCityBets] = useState<CityBetsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -762,13 +800,14 @@ export function useApiData() {
     abortRef.current = controller;
 
     try {
-      const [statusRes, signalsRes, historyRes, weightsRes, slippageRes, equityRes] = await Promise.allSettled([
+      const [statusRes, signalsRes, historyRes, weightsRes, slippageRes, equityRes, cityBetsRes] = await Promise.allSettled([
         fetchJson<StatusResponse>("/api/status", controller.signal),
         fetchJson<{ signals: Signal[]; count: number }>("/api/signals", controller.signal),
         fetchJson<{ history: HistoryEntry[]; stats: HistoryStats }>("/api/history", controller.signal),
         fetchJson<Record<string, number | { weight: number; brier_score?: number | null; accuracy?: number | null; num_predictions?: number }>>("/api/asi/weights", controller.signal),
         fetchJson<{ slippage: SlippageEntry[] }>("/api/slippage", controller.signal),
         fetchJson<{ initial: number; points: Array<{ date: string; value: number; pnl: number; count: number }> }>("/api/equity-curve", controller.signal),
+        fetchJson<CityBetsResponse>("/api/city-bets", controller.signal),
       ]);
 
       if (controller.signal.aborted) return;
@@ -782,6 +821,7 @@ export function useApiData() {
       if (weightsRes.status === "fulfilled") setWeights(weightsRes.value);
       if (slippageRes.status === "fulfilled") setSlippageData(slippageRes.value.slippage ?? []);
       if (equityRes.status === "fulfilled") setEquityCurve(equityRes.value);
+      if (cityBetsRes.status === "fulfilled") setCityBets(cityBetsRes.value);
 
       setError(null);
       setLastUpdated(new Date());
@@ -827,6 +867,7 @@ export function useApiData() {
     historyStats,
     health,
     weights,
+    cityBets,
     kpiData,
     portfolioData,
     openPositions,

@@ -45,6 +45,8 @@ import {
   type HealthResponse,
   type Signal,
   type HistoryEntry,
+  type CityBetsResponse,
+  type CityBetsCity,
 } from "@/lib/api";
 import {
   TrendingUp,
@@ -211,13 +213,14 @@ function MetricTooltip({ children, title, description, formula, example }: {
 // ==========================================
 // OVERVIEW TAB
 // ==========================================
-function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edgeDistribution, isLoading }: {
+function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edgeDistribution, isLoading, cityBets }: {
   kpiData: KpiData;
   portfolioData: PortfolioPoint[];
   openPositions: OpenPosition[];
   activityFeed: ActivityItem[];
   edgeDistribution: EdgeBucket[];
   isLoading?: boolean;
+  cityBets?: CityBetsResponse | null;
 }) {
   const winLossData = [
     { name: "Kazanan", value: kpiData.wins, color: TEAL },
@@ -1317,7 +1320,88 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
           )}
         </CardContent>
       </Card>
+
+      {/* ── City Bets Section ── */}
+      {cityBets != null && cityBets.enabled && cityBets.cities.length > 0 && (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold" style={{ color: TEXT_PRIMARY }}>Range Betting</h2>
+              <Badge variant="outline" className="text-[9px]">$10/bet</Badge>
+            </div>
+            <span className="text-xs" style={{ color: TEXT_MUTED }}>
+              {`Toplam stake: $${cityBets.total_stake.toFixed(2)} | PnL: `}
+              <span style={{ color: cityBets.total_pnl >= 0 ? "#16A34A" : RED }}>
+                {`$${cityBets.total_pnl.toFixed(2)}`}
+              </span>
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+            {cityBets.cities.map((cc) => (
+              <CityBetCard key={cc.city} data={cc} />
+            ))}
+          </div>
+        </section>
+      )}
+
     </div>
+  );
+};
+
+function CityBetCard({ data }: { data: CityBetsCity }) {
+  const borderColor = "#e5e7eb";
+  const textMuted = "#6b7280";
+  const textPrimary = "#111827";
+  const green = "#16A34A";
+  const red = "#DC2626";
+
+  return (
+    <Card className="shadow-sm" style={{ borderColor }}>
+      <CardHeader className="pb-2 pt-3 px-4">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-semibold" style={{ color: textPrimary }}>{data.city_display}</CardTitle>
+          <Badge variant={data.bet_count > 0 ? "default" : "secondary"} className="text-[9px]">
+            {data.bet_count} bet
+          </Badge>
+        </div>
+        <p className="text-[11px]" style={{ color: textMuted }}>
+          {data.forecast_temp != null
+            ? `Tahmin: ${data.forecast_temp}°C`
+            : "Tahmin yok"}
+          {" · "}
+          {new Date(data.target_date).toLocaleDateString("tr-TR", { day: "numeric", month: "short" })}
+        </p>
+      </CardHeader>
+      <CardContent className="px-4 pb-3 pt-0">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[11px]" style={{ color: textMuted }}>Stake</span>
+          <span className="text-xs font-semibold" style={{ color: textPrimary }}>${data.total_stake.toFixed(2)}</span>
+        </div>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[11px]" style={{ color: textMuted }}>PnL</span>
+          <span className="text-xs font-semibold" style={{ color: data.total_pnl >= 0 ? green : red }}>
+            {data.total_pnl >= 0 ? "+" : ""}${data.total_pnl.toFixed(2)}
+          </span>
+        </div>
+        {data.bets.length > 0 && (
+          <div className="space-y-1.5 mt-2 pt-2 border-t" style={{ borderColor }}>
+            {data.bets.map((bet) => (
+              <div key={bet.id} className="flex justify-between items-center">
+                <span className="text-[10px]" style={{ color: textMuted }}>
+                  {bet.threshold}°C
+                </span>
+                <span className="text-[10px]" style={{ color: textMuted }}>
+                  @{bet.entry_price.toFixed(3)}
+                </span>
+                <span className="text-[10px] font-medium" style={{ color: bet.pnl >= 0 ? green : red }}>
+                  ${bet.pnl.toFixed(2)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1437,6 +1521,7 @@ export default function DashboardPage() {
             openPositions={data.openPositions}
             activityFeed={data.activityFeed}
             edgeDistribution={data.edgeDistribution}
+            cityBets={data.cityBets}
           />
         )}
         {activeTab === "trades" && <TradesTab tradeHistory={data.tradeHistory} historyStats={data.historyStats} totalPnl={data.historyStats?.total_pnl ?? 0} />}
