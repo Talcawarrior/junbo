@@ -55,18 +55,18 @@ def _get_forecast_temp(city: str, icao: str, metric: str, target_date: datetime)
 
 
 def _find_market(city: str, threshold: int, target_date: datetime) -> WeatherMarket | None:
-    with get_session() as s:
-        return (
-            s.query(WeatherMarket)
-            .filter(
-                WeatherMarket.city.ilike(city),
-                WeatherMarket.metric == "temperature_max",
-                WeatherMarket.threshold == float(threshold),
-                WeatherMarket.target_date == target_date,
-                WeatherMarket.status == "open",
-            )
-            .first()
-        )
+    s = get_session().__enter__()
+    s.expire_on_commit = False
+    try:
+        return s.query(WeatherMarket).filter(
+            WeatherMarket.city.ilike(city),
+            WeatherMarket.metric == "temperature_max",
+            WeatherMarket.threshold == float(threshold),
+            WeatherMarket.target_date == target_date,
+            WeatherMarket.status == "open",
+        ).first()
+    finally:
+        s.close()
 
 
 def _existing_bet(market_id: str) -> bool:
@@ -98,7 +98,7 @@ def place_range_bets() -> list[str]:
     spread = s.range_bet_spread  # =1
     bet_amount = s.range_bet_amount  # =10
     target_date = (datetime.now(timezone.utc) + timedelta(days=_TARGET_DAY_OFFSET)).replace(
-        hour=23, minute=59, second=59
+        hour=23, minute=59, second=59, microsecond=0
     )
     # Also try midnight version
     alt_date = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
