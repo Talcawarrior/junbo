@@ -32,9 +32,7 @@ class CalibrationEngine:
 
         Computes MAE and MBE, saves them to a local JSON config, and returns it.
         """
-        logger.info(
-            "ASI Calibration: Calculating systematic model biases from backfilled dataset..."
-        )
+        logger.info("ASI Calibration: Calculating systematic model biases from backfilled dataset...")
 
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -52,9 +50,7 @@ class CalibrationEngine:
             cursor.execute(query)
             rows = cursor.fetchall()
         except sqlite3.OperationalError:
-            logger.warning(
-                "ASI Calibration: historical_calibrations table is empty. Backfill is required first."
-            )
+            logger.warning("ASI Calibration: historical_calibrations table is empty. Backfill is required first.")
             conn.close()
             return {}
 
@@ -67,9 +63,7 @@ class CalibrationEngine:
                 new_bias_map[city_code]["metrics"][metric] = {}
 
             new_bias_map[city_code]["metrics"][metric][model] = {
-                "mbe": round(
-                    mbe, 3
-                ),  # Mean Bias Error (Positive = Overpredicting, Negative = Underpredicting)
+                "mbe": round(mbe, 3),  # Mean Bias Error (Positive = Overpredicting, Negative = Underpredicting)
                 "mae": round(mae, 3),  # Mean Absolute Error
                 "sample_count": count,
             }
@@ -102,23 +96,43 @@ class CalibrationEngine:
                     len(self.bias_map),
                 )
             except Exception as e:
-                logger.warning(
-                    "ASI Calibration: Could not load calibration JSON: %s", e
-                )
+                logger.warning("ASI Calibration: Could not load calibration JSON: %s", e)
 
-    def get_calibrated_temperature(
-        self, city_code: str, metric: str, model: str, raw_temp: float
-    ) -> float:
+    def _city_metric_avg_mbe(self, city_code: str, metric: str) -> float:
+        """Fallback: average MBE for a city/metric across all known models.
+
+        Used when the live forecast source (e.g. ``"openmeteo"``) is not in the
+        per-model bias_map.  Returns 0.0 if no calibration data exists.
+        """
+        clean_metric = (
+            "temperature_max"
+            if "temperature_max" == metric.lower() or (metric.lower().startswith("temp") and "max" in metric.lower())
+            else "temperature_min"
+        )
+        if city_code not in self.bias_map:
+            return 0.0
+        metrics_map = self.bias_map[city_code].get("metrics", {})
+        if clean_metric not in metrics_map:
+            return 0.0
+        model_mbes = [v["mbe"] for v in metrics_map[clean_metric].values() if isinstance(v, dict) and "mbe" in v]
+        if not model_mbes:
+            return 0.0
+        return round(sum(model_mbes) / len(model_mbes), 3)
+
+    def get_calibrated_temperature(self, city_code: str, metric: str, model: str, raw_temp: float) -> float:
         """Apply dynamic temperature bias correction (fine-tuning).
 
         If a model has a systematic bias for this city (e.g. overpredicts by 1.5C),
         we subtract the Mean Bias Error (MBE) to get the true, fine-tuned value.
+
+        Falls back to the city/metric average MBE across all models when the
+        specific *model* string is not in the bias map (e.g. ``"openmeteo"``
+        blended forecasts).
         """
         # Strip internal suffix if any
         clean_metric = (
             "temperature_max"
-            if "temperature_max" == metric.lower()
-            or (metric.lower().startswith("temp") and "max" in metric.lower())
+            if "temperature_max" == metric.lower() or (metric.lower().startswith("temp") and "max" in metric.lower())
             else "temperature_min"
         )
 
@@ -126,19 +140,34 @@ class CalibrationEngine:
             metrics_map = self.bias_map[city_code].get("metrics", {})
             if clean_metric in metrics_map:
                 model_map = metrics_map[clean_metric].get(model, {})
-                mbe = model_map.get("mbe", 0.0)
+                if isinstance(model_map, dict) and "mbe" in model_map:
+                    mbe = model_map["mbe"]
 
-                # Apply Calibration: true_temp = raw_temp - MBE
-                calibrated = round(raw_temp - mbe, 2)
-                logger.debug(
-                    "ASI Calibration [%s - %s]: Corrected %s raw=%.2fC -> calibrated=%.2fC (MBE=%.2fC)",
-                    city_code,
-                    model,
-                    clean_metric,
-                    raw_temp,
-                    calibrated,
-                    mbe,
-                )
-                return calibrated
+                    # Apply Calibration: true_temp = raw_temp - MBE
+                    calibrated = round(raw_temp - mbe, 2)
+                    logger.debug(
+                        "ASI Calibration [%s - %s]: Corrected %s raw=%.2fC -> calibrated=%.2fC (MBE=%.2fC)",
+                        city_code,
+                        model,
+                        clean_metric,
+                        raw_temp,
+                        calibrated,
+                        mbe,
+                    )
+                    return calibrated
+
+        # Fallback: city/metric average MBE
+        mbe = self._city_metric_avg_mbe(city_code, metric)
+        if mbe != 0.0:
+            calibrated = round(raw_temp - mbe, 2)
+            logger.debug(
+                "ASI Calibration [%s - %s]: Fallback MBE=%.2fC raw=%.2fC -> calibrated=%.2fC",
+                city_code,
+                model or "?",
+                mbe,
+                raw_temp,
+                calibrated,
+            )
+            return calibrated
 
         return raw_temp

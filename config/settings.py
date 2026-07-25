@@ -15,7 +15,7 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 # Hard ceiling for max_bet_pct — no single bet may ever exceed this fraction
 # of the portfolio, regardless of strategy config. Guards against runaway
 # sizing (e.g. a misconfigured max_bet_pct=1.0 that would stake the whole book).
-MAX_BET_PCT_CEILING = 1.0
+MAX_BET_PCT_CEILING = 0.33  # max 33 % of portfolio on a single bet
 
 
 def _resolve_path(path_value: str, default_relative: str) -> str:
@@ -166,6 +166,12 @@ class StrategyConfig:
     # ── Flat bet override & Daily loss limit (synced from Config) ─────────
     flat_bet_usd: float = 0.0  # 0 = use Kelly sizing, >0 = fixed $ per bet
     daily_loss_limit: float = 0.05  # 5% daily max loss
+
+    # ── Range betting (YES-only, fixed $10, temperature range) ──────────
+    range_bet_enabled: bool = True
+    range_bet_cities: list = None  # type: ignore[assignment]
+    range_bet_amount: float = 10.0
+    range_bet_spread: int = 2  # T-2, T-1, T, T+1, T+2
 
 
 @dataclass
@@ -392,6 +398,9 @@ class BotConfig:
         self.meteo = self.meteo or MeteoConfig()
         self.strategy = self.strategy or StrategyConfig()
         self.risk = self.risk or RiskConfig()
+
+        if self.strategy.range_bet_cities is None:
+            self.strategy.range_bet_cities = ["istanbul", "london", "newyork", "tokyo", "seoul"]
 
         # ── Override from .env (single source: .env > dataclass defaults) ──
         self.initial_portfolio = float(os.getenv("INITIAL_PORTFOLIO", str(self.initial_portfolio)))

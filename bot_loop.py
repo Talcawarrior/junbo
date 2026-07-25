@@ -179,6 +179,7 @@ async def scan_and_bet_loop(state):
     TEK try/except ile tüm while body'si korunuyor.
     Hata durumunda loop çökmez, 60sn recovery ile devam eder.
     """
+    from config.settings import bot_config
     from jobs.scheduler import (
         run_cycle,
         run_fetch_markets,
@@ -287,6 +288,23 @@ async def scan_and_bet_loop(state):
                     last_two_day_date = new_date
             except Exception as e:
                 logger.warning("2-day-ahead detection failed: %s", e)
+
+            # STEP 5: Range betting (YES-only, $10, temperature range)
+            # Sadece saat başı çalışır (her 60 dk'da 1 kez)
+            try:
+                range_interval = 3600
+                now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+                if bot_config.strategy.range_bet_enabled and (
+                    state.last_range_bet is None or (now_utc - state.last_range_bet).total_seconds() >= range_interval
+                ):
+                    from executor.range_bet_placer import place_range_bets
+
+                    range_results = await asyncio.wait_for(asyncio.to_thread(place_range_bets), timeout=60)
+                    state.last_range_bet = datetime.now(timezone.utc).replace(tzinfo=None)
+                    if range_results:
+                        logger.info("Range betting placed: %s", "; ".join(range_results))
+            except Exception as e:
+                logger.error("Range betting error: %s", e)
 
             # Stale cleanup her 10 döngüde
             stale_check_counter += 1
@@ -435,6 +453,20 @@ async def _run_daily_maintenance() -> None:
 
     if should_run():
         await asyncio.to_thread(run_evolution_cycle)
+
+    # ── Pre-flight safety check (logs warnings if strategy params unsafe) ─
+    try:
+        from asi_engine.preflight import run_preflight_check
+
+        report = await asyncio.to_thread(run_preflight_check)
+        if not report.passed:
+            logger.warning("Preflight FAILED: %s", "; ".join(report.issues))
+        elif report.warnings:
+            logger.info("Preflight warnings: %s", "; ".join(report.warnings))
+        else:
+            logger.info("Preflight OK")
+    except Exception as e:
+        logger.warning("Preflight check errored: %s", e)
 
     try:
         await asyncio.to_thread(run_backup_once)

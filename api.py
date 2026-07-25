@@ -117,6 +117,7 @@ class BotState:
         self.sia_loop = None
         self.sia_last_run = None  # datetime of last SIA optimization
         self.sia_interval_hours = bot_config.sia_interval // 3600
+        self.last_range_bet = None  # Son range betting zamanı
 
         # ASI-Evolve engines
         self.orchestrator = None
@@ -819,6 +820,89 @@ def get_signals():
                 }
             )
         return {"signals": signals, "count": len(signals)}
+    finally:
+        db.close()
+
+
+@app.get("/api/city-bets")
+def get_city_bets():
+    """Range bets grouped by city — for first-page dashboard."""
+    from collections import defaultdict
+
+    db = get_db_session()
+    try:
+        from executor.range_bet_placer import _get_forecast_temp
+        from datetime import datetime, timezone, timedelta
+
+        target_date = (datetime.now(timezone.utc) + timedelta(days=2)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        pf = db.query(Portfolio).filter(Portfolio.id == 1).first()
+        portfolio_value = (pf.total_value or 0) if pf else 0
+        portfolio_initial = (pf.initial_value or 1000) if pf else 1000
+
+        active_bets = db.query(Bet).filter(Bet.status.in_(OPEN_BET_STATUSES)).order_by(Bet.placed_at.desc()).all()
+
+        by_city = defaultdict(list)
+        for b in active_bets:
+            if b.side and b.side.upper() == "YES":
+                city_key = (b.city or "").lower()
+                by_city[city_key].append(b)
+
+        cities_config = bot_config.strategy.range_bet_cities or []
+        cities_out = []
+        for city in cities_config:
+            city_key = city.lower()
+            bets = by_city.get(city_key, [])
+            total_pnl = sum(float(b.unrealized_pnl or 0) for b in bets)
+            total_stake = sum(float(b.amount or 0) for b in bets)
+            temp = _get_forecast_temp(city, "temperature_max", target_date)
+
+            bet_details = []
+            for b in bets:
+                market = db.query(WeatherMarket).filter(WeatherMarket.id == b.market_id).first()
+                threshold = int(market.threshold) if market and market.threshold else None
+                bet_details.append(
+                    {
+                        "id": b.id,
+                        "market_id": b.market_id,
+                        "threshold": threshold,
+                        "side": b.side,
+                        "amount": float(b.amount or 0),
+                        "entry_price": float(b.entry_price or b.price or 0),
+                        "current_price": float(b.current_price or b.price or 0),
+                        "pnl": float(b.unrealized_pnl or 0),
+                        "shares": float(b.shares or 0),
+                        "placed_at": b.placed_at.isoformat() if b.placed_at else None,
+                        "target_date": market.target_date.isoformat() if market and market.target_date else None,
+                    }
+                )
+
+            bet_details.sort(key=lambda x: x["threshold"] or 0)
+            cities_out.append(
+                {
+                    "city": city,
+                    "city_display": city.title().replace("newyork", "New York"),
+                    "forecast_temp": round(temp, 1) if temp else None,
+                    "target_date": target_date.isoformat(),
+                    "total_pnl": round(total_pnl, 2),
+                    "total_stake": round(total_stake, 2),
+                    "bet_count": len(bets),
+                    "bets": bet_details,
+                }
+            )
+
+        return {
+            "portfolio_value": round(portfolio_value, 2),
+            "portfolio_initial": portfolio_initial,
+            "total_pnl": round(sum(c["total_pnl"] for c in cities_out), 2),
+            "total_stake": round(sum(c["total_stake"] for c in cities_out), 2),
+            "total_bets": sum(c["bet_count"] for c in cities_out),
+            "bet_amount": bot_config.strategy.range_bet_amount,
+            "spread": bot_config.strategy.range_bet_spread,
+            "enabled": bot_config.strategy.range_bet_enabled,
+            "cities": cities_out,
+        }
     finally:
         db.close()
 

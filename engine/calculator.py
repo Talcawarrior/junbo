@@ -21,6 +21,28 @@ from utils.slippage import (
     estimate_slippage,
 )
 
+# Lazy-loaded CalibrationEngine for temperature bias correction (Option A).
+# Loaded once per process to avoid re-reading the JSON on every market analysis.
+from asi_engine.calibration_engine import CalibrationEngine  # noqa: E402
+
+_CALIBRATION_ENGINE: CalibrationEngine | None = None
+
+
+def _get_calibration() -> CalibrationEngine | None:
+    """Return the shared CalibrationEngine singleton, or None on import failure."""
+    global _CALIBRATION_ENGINE  # noqa: PLW0603
+    if _CALIBRATION_ENGINE is not None:
+        return _CALIBRATION_ENGINE
+    try:
+        ce = CalibrationEngine()
+        if ce.bias_map:
+            _CALIBRATION_ENGINE = ce
+        return _CALIBRATION_ENGINE
+    except Exception as exc:
+        logger.debug("Calibration unavailable (ASI bias map not yet built): %s", exc)
+        return None
+
+
 logger = logging.getLogger("ENGINE_CALCULATOR")
 
 # Global rate-limit flag: ilk 429'te 5dk boyunca tüm Open-Meteo isteklerini durdur
@@ -136,9 +158,28 @@ class Calculator:
             # Her kaynaktan en son tahmini al + ağırlıkları topla
             latest_by_source = {}
             source_weights = {}
+            cal_engine = _get_calibration()
             for f in forecasts:
                 if f.source not in latest_by_source:
-                    latest_by_source[f.source] = f.predicted_value
+                    raw_val = f.predicted_value
+                    # Apply ASI temperature bias correction (Option A)
+                    if cal_engine is not None and raw_val is not None:
+                        adjusted = cal_engine.get_calibrated_temperature(
+                            market.city_code or "",
+                            market.metric or "temperature_max",
+                            f.source,
+                            float(raw_val),
+                        )
+                        logger.debug(
+                            "Calibration [%s/%s]: %.2f -> %.2f",
+                            market.city or "?",
+                            f.source,
+                            raw_val,
+                            adjusted,
+                        )
+                        latest_by_source[f.source] = adjusted
+                    else:
+                        latest_by_source[f.source] = raw_val
                     source_weights[f.source] = f.model_weight or 0.0
 
             forecast_values = list(latest_by_source.values())

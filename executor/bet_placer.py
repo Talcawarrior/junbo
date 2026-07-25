@@ -572,7 +572,7 @@ class BetPlacer:
                 if target_date:
                     # Strip tzinfo from target_date if present to avoid
                     # "can't subtract offset-naive and offset-aware datetimes"
-                    td = target_date.replace(tzinfo=None) if getattr(target_date, 'tzinfo', None) else target_date
+                    td = target_date.replace(tzinfo=None) if getattr(target_date, "tzinfo", None) else target_date
                     days_left = max(0.0, (td - now).total_seconds() / 86400.0)
                 else:
                     days_left = 0.0
@@ -604,15 +604,54 @@ class BetPlacer:
                     markets_with_bets.add(mkt_id)
                     logger.info(
                         "Bet placed (priority=%.4f edge×days): analysis=%d market=%s",
-                        score, aid, mkt_id,
+                        score,
+                        aid,
+                        mkt_id,
                     )
                 else:
                     logger.debug(
                         "Bet rejected (priority=%.4f): analysis=%d market=%s",
-                        score, aid, mkt_id,
+                        score,
+                        aid,
+                        mkt_id,
                     )
             except Exception as e:
                 logger.error("Bet hatasi (analysis %d, priority=%.4f): %s", aid, score, e)
                 continue
 
         return placed
+
+    def exit_position(
+        self,
+        market: object,
+        side: str,
+        price: float,
+        size: float,
+        reason: str,
+    ) -> dict:
+        """Sell an existing position (paper or live).
+
+        In dry-run mode this books a paper sell; in live mode it submits a
+        real SELL order to the Polymarket CLOB client.
+        """
+        if Config.DRY_RUN or not self.ready:
+            import uuid
+
+            return {
+                "paper": True,
+                "orderID": f"paper_sell_{uuid.uuid4().hex[:12]}",
+                "side": side,
+                "size": size,
+                "price": price,
+                "reason": reason,
+            }
+
+        from py_clob_client.order_builder.constants import SELL
+
+        payload = {
+            "side": SELL,
+            "size": size,
+            "price": price,
+            "token_id": self._get_token_id(market, side),
+        }
+        return self.client.create_and_post_order(payload)

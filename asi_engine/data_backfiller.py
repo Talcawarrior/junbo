@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 import requests
 
-from config.settings import config
+from config.settings import _CITY_ICAO_MAP, _ICAO_COORDS
 from database.db import DB_PATH
 
 logger = logging.getLogger("ASI_BACKFILLER")
@@ -53,18 +53,14 @@ class DataBackfiller:
         Loops back through `past_days` for a subset of major cities, matches
         the predictions vs actuals, and saves them to the DB.
         """
-        logger.info(
-            "ASI Backfiller: Starting deep backfill for past %d days...", past_days
-        )
+        logger.info("ASI Backfiller: Starting deep backfill for past %d days...", past_days)
 
         # Select a representative set of cities from ICAO map
-        all_cities = list(config.CITY_ICAO_MAP.items())[:max_cities]
+        all_cities = list(_CITY_ICAO_MAP.items())[:max_cities]
 
         now = datetime.now(UTC)
         start_date_dt = now - timedelta(days=past_days + 1)
-        end_date_dt = now - timedelta(
-            days=2
-        )  # Archive is fully complete up to 2 days ago
+        end_date_dt = now - timedelta(days=2)  # Archive is fully complete up to 2 days ago
 
         start_str = start_date_dt.strftime("%Y-%m-%d")
         end_str = end_date_dt.strftime("%Y-%m-%d")
@@ -94,7 +90,7 @@ class DataBackfiller:
         cursor = conn.cursor()
 
         for city_name, icao_code in all_cities:
-            coords = config.ICAO_COORDS.get(icao_code)
+            coords = _ICAO_COORDS.get(icao_code)
             if not coords:
                 continue
 
@@ -159,11 +155,7 @@ class DataBackfiller:
                     for api_m, internal_m in model_names_mapping.items():
                         # Maximum temperature
                         pred_max_key = f"temperature_2m_max_{api_m}"
-                        pred_max = (
-                            f_data.get(pred_max_key, [])[idx]
-                            if pred_max_key in f_data
-                            else None
-                        )
+                        pred_max = f_data.get(pred_max_key, [])[idx] if pred_max_key in f_data else None
 
                         if pred_max is not None and act_max is not None:
                             bias_max = round(pred_max - act_max, 3)
@@ -188,11 +180,7 @@ class DataBackfiller:
 
                         # Minimum temperature
                         pred_min_key = f"temperature_2m_min_{api_m}"
-                        pred_min = (
-                            f_data.get(pred_min_key, [])[idx]
-                            if pred_min_key in f_data
-                            else None
-                        )
+                        pred_min = f_data.get(pred_min_key, [])[idx] if pred_min_key in f_data else None
 
                         if pred_min is not None and act_min is not None:
                             bias_min = round(pred_min - act_min, 3)
@@ -218,9 +206,7 @@ class DataBackfiller:
                 conn.commit()
 
             except Exception as e:
-                logger.error(
-                    "ASI Backfiller: Error backfilling city %s: %s", city_name, e
-                )
+                logger.error("ASI Backfiller: Error backfilling city %s: %s", city_name, e)
                 continue
 
         conn.close()
