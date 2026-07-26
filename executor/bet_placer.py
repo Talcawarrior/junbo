@@ -105,6 +105,13 @@ class BetPlacer:
                 d.log(logging.WARNING)
                 return None
 
+            # Price gate: yes_price > 0.10 ise bahis acma
+            _yp = float(market.yes_price or 0.5)
+            if _yp > 0.10:
+                logger.info("Price gate: %s yes_price=%.3f > 0.10 — bet refused", market.id, _yp)
+                d.log(logging.INFO)
+                return None
+
             # Guard: daily loss limit (circuit breaker)
             if self.risk_manager.is_bot_locked():
                 d.check("daily_loss_limit", False, daily_pnl=self.risk_manager.daily_pnl)

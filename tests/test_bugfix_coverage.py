@@ -358,7 +358,7 @@ class TestDefensiveCopy:
 # ── ISSUE 10: flush vs commit ─────────────────────────────────────────
 
 class TestExecuteSignalFlush:
-    """ISSUE 10: execute_signal should use flush() not commit()."""
+    """ISSUE 10: execute_signal uses flush() not commit()."""
 
     def test_execute_signal_uses_flush(self):
         """execute_signal should call db.flush() not db.commit()."""
@@ -408,6 +408,129 @@ class TestExecuteSignalFlush:
                     mock_flush.assert_called()
                     # commit should NOT be called by execute_signal (caller manages transaction)
                     mock_commit.assert_not_called()
+
+
+# ── Price Gate: yes_price > 0.10 ─────────────────────────────────────
+
+class TestPriceGate:
+    """New rule: all bets with yes_price > 0.10 must be refused."""
+
+    def test_execute_signal_refuses_high_price(self):
+        """execute_signal should refuse bets with yes_price > 0.10."""
+        import asyncio
+        from engine.strategy import BettingEngine
+        from database.db import get_session
+        from database.models import Portfolio, WeatherMarket
+
+        with get_session() as s:
+            _add_portfolio(s)
+            td = _td()
+            s.add(WeatherMarket(
+                id="price_gate_market", question="Q?", city="Testville",
+                city_code="TEST", metric="temperature_max", threshold=25.0,
+                target_date=td, yes_price=0.30, no_price=0.70,
+                status="open", latitude=41.0, longitude=29.0,
+            ))
+            s.commit()
+
+            engine = BettingEngine(db_session=s)
+            signal = MagicMock()
+            signal.edge = 0.05
+            signal.bet_size = 10.0
+            signal.city_code = "TEST"
+            signal.city = "Testville"
+            signal.market_id = "price_gate_market"
+            signal.entry_price = 0.30
+            signal.fair_value = 0.35
+            signal.probability = 0.35
+            signal.outcome = "YES"
+            signal.side = "YES"
+            signal.ladder_orders = []
+
+            market_data = {"market_id": "price_gate_market", "city_code": "TEST", "yes_price": 0.30}
+
+            result = asyncio.get_event_loop().run_until_complete(
+                engine.execute_signal(signal, market_data)
+            )
+            assert result is None, "Bet with yes_price=0.30 should be refused"
+
+    def test_execute_signal_allows_low_price(self):
+        """execute_signal should allow bets with yes_price ≤ 0.10."""
+        import asyncio
+        from engine.strategy import BettingEngine
+        from database.db import get_session
+        from database.models import Portfolio, WeatherMarket
+
+        with get_session() as s:
+            _add_portfolio(s)
+            td = _td()
+            s.add(WeatherMarket(
+                id="price_ok_market", question="Q?", city="Testville",
+                city_code="TEST", metric="temperature_max", threshold=25.0,
+                target_date=td, yes_price=0.05, no_price=0.95,
+                status="open", latitude=41.0, longitude=29.0,
+            ))
+            s.commit()
+
+            engine = BettingEngine(db_session=s)
+            signal = MagicMock()
+            signal.edge = 0.05
+            signal.bet_size = 10.0
+            signal.city_code = "TEST"
+            signal.city = "Testville"
+            signal.market_id = "price_ok_market"
+            signal.entry_price = 0.05
+            signal.fair_value = 0.10
+            signal.probability = 0.10
+            signal.outcome = "YES"
+            signal.side = "YES"
+            signal.ladder_orders = []
+
+            market_data = {"market_id": "price_ok_market", "city_code": "TEST", "yes_price": 0.05}
+
+            result = asyncio.get_event_loop().run_until_complete(
+                engine.execute_signal(signal, market_data)
+            )
+            assert result is not None, "Bet with yes_price=0.05 should be allowed"
+
+    def test_execute_signal_refuses_exactly_011(self):
+        """Edge case: yes_price=0.11 should be refused."""
+        import asyncio
+        from engine.strategy import BettingEngine
+        from database.db import get_session
+        from database.models import Portfolio, WeatherMarket
+
+        with get_session() as s:
+            _add_portfolio(s)
+            td = _td()
+            s.add(WeatherMarket(
+                id="price_edge_market", question="Q?", city="Testville",
+                city_code="TEST", metric="temperature_max", threshold=25.0,
+                target_date=td, yes_price=0.11, no_price=0.89,
+                status="open", latitude=41.0, longitude=29.0,
+            ))
+            s.commit()
+
+            engine = BettingEngine(db_session=s)
+            signal = MagicMock()
+            signal.edge = 0.05
+            signal.bet_size = 10.0
+            signal.city_code = "TEST"
+            signal.city = "Testville"
+            signal.market_id = "price_edge_market"
+            signal.entry_price = 0.11
+            signal.fair_value = 0.16
+            signal.probability = 0.16
+            signal.outcome = "YES"
+            signal.side = "YES"
+            signal.ladder_orders = []
+
+            market_data = {"market_id": "price_edge_market", "city_code": "TEST", "yes_price": 0.11}
+
+            result = asyncio.get_event_loop().run_until_complete(
+                engine.execute_signal(signal, market_data)
+            )
+            assert result is None, "Bet with yes_price=0.11 should be refused"
 
 
 if __name__ == "__main__":

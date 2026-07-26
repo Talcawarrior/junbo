@@ -795,6 +795,11 @@ class BettingEngine:
                 logger.info("NO bet refused for %s — YES-only mode", market_id)
                 return None
 
+            # Price gate: yes_price > 0.10 ise bahis acma
+            if yes_price > 0.10:
+                logger.info("Price gate: %s yes_price=%.3f > 0.10 — bet refused", market_id, yes_price)
+                return None
+
             # 8-hour pre-settlement guard: settlement'a 8 saatten az kaldiysa bet acma
             try:
                 from database.models import WeatherMarket as _WM
