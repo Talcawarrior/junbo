@@ -434,18 +434,22 @@ class RiskManager:
             if hold_seconds < 180:  # 3 dakika minimum hold
                 return False, "Hold (minimum hold period)"
 
-        # 1. Stop-loss
-        exit_bool, reason = self.check_stop_loss(bet, current_price, market)
-        if exit_bool:
-            return True, reason
+        # 1. Stop-loss (range betlerde devre disi)
+        order_id = getattr(bet, "order_id", "") or ""
+        is_range = isinstance(order_id, str) and order_id.startswith("range_")
+        if not is_range:
+            exit_bool, reason = self.check_stop_loss(bet, current_price, market)
+            if exit_bool:
+                return True, reason
 
         # 2. Take-profit
         exit_bool, reason = self.check_take_profit(bet, current_price, market)
         if exit_bool:
             return True, reason
 
-        # 3. Trailing stop
-        exit_bool, reason = self.check_trailing_stop(bet, current_price)
+        # 3. Trailing stop (range betlerde devre disi)
+        if not is_range:
+            exit_bool, reason = self.check_trailing_stop(bet, current_price)
         if exit_bool:
             return True, reason
 

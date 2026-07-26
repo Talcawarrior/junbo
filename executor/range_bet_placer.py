@@ -290,17 +290,17 @@ def check_range_pt() -> int:
                 except (json.JSONDecodeError, TypeError):
                     meta = {"peak_price": float(b.entry_price or 0), "pt_taken": True}
 
-                if meta.get("pt_taken"):
-                    # PT alindiktan sonra trail stop
+                if meta.get("pt_taken") and trail_pct > 0:
                     current = float(b.current_price or 0)
                     peak = meta.get("peak_price", current)
                     if current > peak:
                         meta["peak_price"] = current
                     elif current < peak * (1 - trail_pct):
-                        # Trail stop tetiklendi
                         _close_bet(b, session, "closed", f"trail_stop: peak={peak:.4f} cur={current:.4f}")
                         meta["closed_reason"] = "trail"
                         closed += 1
+                    b.ladder_data = json.dumps(meta)
+                elif meta.get("pt_taken"):
                     b.ladder_data = json.dumps(meta)
 
                 # Settlement kontrolu

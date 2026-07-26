@@ -173,7 +173,7 @@ class StrategyConfig:
     range_bet_amount: float = 10.0
     range_bet_spread: int = 2  # 5 bet: T-2, T-1, T, T+1, T+2
     range_bet_pt_take_rate: float = 1.0  # %100 kar olunca bu orani sat (1.0 = $30)
-    range_bet_trail_stop_pct: float = 0.20  # peak'ten %20 dususte sat
+    range_bet_trail_stop_pct: float = 0.0  # trail stop devre disi
     range_bet_pre_settlement_hours: float = 1.0  # settlementa 1 saat kala hepsini sat
 
 
