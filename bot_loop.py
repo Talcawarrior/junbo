@@ -227,7 +227,10 @@ async def scan_and_bet_loop(state):
             # hemen cache'den açılır. Böylece bahisler Polymarket verisinin
             # tazelendiği 5 dk temposunda açılır; meteo saatte 1 kez yenilenir
             # ve bahis açılımını bloklamaz.
-            await asyncio.wait_for(asyncio.to_thread(run_cycle), timeout=_CYCLE_TIMEOUT)
+            # Range betting aktifse regular place_bets atlanir (5-bet kurali)
+            from config.settings import bot_config as _bc
+            skip_bets = _bc.strategy.range_bet_enabled
+            await asyncio.wait_for(asyncio.to_thread(run_cycle, skip_place_bets=skip_bets), timeout=_CYCLE_TIMEOUT)
 
             # STEP 4: Meteo tazeleme — SADECE saatte 1 kez ve bahis açılımından
             # SONRA (bet opening'ı bloklamaz). Önceki saatlik veri zaten cache'te,

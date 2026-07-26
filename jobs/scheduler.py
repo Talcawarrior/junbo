@@ -607,7 +607,7 @@ def start_scheduler():
     logger.info("Scheduler initialized in background thread...")
 
 
-def run_cycle():
+def run_cycle(skip_place_bets: bool = False):
     """Run one full bot cycle with a SINGLE shared DB session.
 
     Combines analyze → place_bets → update_prices → risk_management
@@ -623,9 +623,10 @@ def run_cycle():
             results.append(f"analyze error: {e}")
 
         try:
-            # M5: run_place_bets intentionally manages its own DB session
-            # for bet placement atomicity — does NOT share the cycle session
-            results.append(run_place_bets())
+            if not skip_place_bets:
+                # M5: run_place_bets intentionally manages its own DB session
+                # for bet placement atomicity — does NOT share the cycle session
+                results.append(run_place_bets())
         except Exception as e:
             logger.error("Cycle place_bets error: %s", e)
             results.append(f"place_bets error: {e}")
