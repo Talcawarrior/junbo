@@ -52,7 +52,7 @@ def _add_market(session, mid=None, city="Testville", icao="TEST", thresh=25,
     td = target_date or _td()
     from database.models import WeatherMarket
     session.add(WeatherMarket(
-        id=mid, question=f"Test?", city=city, city_code=icao,
+        id=mid, question="Test?", city=city, city_code=icao,
         metric="temperature_max", threshold=float(thresh),
         target_date=td, yes_price=yes_price, no_price=no_price,
         status="open", latitude=41.0, longitude=29.0,

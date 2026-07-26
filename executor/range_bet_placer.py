@@ -55,9 +55,8 @@ def _get_forecast_temp(city: str, icao: str, metric: str, target_date: datetime)
 
 
 def _find_market(city: str, threshold: int, target_date: datetime) -> WeatherMarket | None:
-    s = get_session().__enter__()
-    s.expire_on_commit = False
-    try:
+    with get_session() as s:
+        s.expire_on_commit = False
         return s.query(WeatherMarket).filter(
             WeatherMarket.city.ilike(city),
             WeatherMarket.metric == "temperature_max",
@@ -65,8 +64,6 @@ def _find_market(city: str, threshold: int, target_date: datetime) -> WeatherMar
             WeatherMarket.target_date == target_date,
             WeatherMarket.status == "open",
         ).first()
-    finally:
-        s.close()
 
 
 def _existing_bet(market_id: str) -> bool:
@@ -211,14 +208,28 @@ def _place_one_bet(market: WeatherMarket, yes_price: float, bet_amount: float) -
     )
 
     with get_session() as s:
+        from utils.accounting import debit_stake
+        from utils.formulas import portfolio_total_value
+
         s.add(bet)
         m = s.query(WeatherMarket).filter(WeatherMarket.id == market.id).first()
         if m:
             m.status = "bet_placed"
+
+        # Deduct stake + entry fee from portfolio cash (central accounting)
+        try:
+            debit_stake(s, bet_amount, f"range_bet_open:{market.id}")
+            if entry_fee > 0:
+                debit_stake(s, entry_fee, f"range_bet_fee:{market.id}")
+        except ValueError as e:
+            logger.warning("Range bet debit failed for %s: %s", market.id, e)
+
+        # Update portfolio totals
         pf = s.query(Portfolio).filter(Portfolio.id == 1).first()
         if pf:
             open_amt = s.query(Bet.amount).filter(Bet.status.in_(OPEN_BET_STATUSES)).all()
-            pf.total_value = (pf.cash_balance or 0) + sum(float(a[0] or 0) for a in open_amt)
+            open_exposure = sum(float(a[0] or 0) for a in open_amt)
+            pf.total_value = portfolio_total_value(float(pf.cash_balance or 0), open_exposure)
             pf.last_updated = now
         s.commit()
 
@@ -233,7 +244,6 @@ def check_range_pt() -> int:
     closed = 0
     s = bot_config.strategy
     trail_pct = s.range_bet_trail_stop_pct        # 0.30
-    pt_rate = s.range_bet_pt_take_rate            # 1.0 (= $30 = %100 kar)
     pre_settle = s.range_bet_pre_settlement_hours # 1.0
 
     with get_session() as session:
@@ -248,8 +258,6 @@ def check_range_pt() -> int:
         )
         if not bets:
             return 0
-
-        now = datetime.now(timezone.utc)
 
         # Group by city
         cities: dict[str, list[Bet]] = {}
@@ -294,9 +302,14 @@ def check_range_pt() -> int:
                     b.ladder_data = json.dumps(meta)
 
                 # Settlement kontrolu
-                m = session.query(WeatherMarket).filter(WeatherMarket.id == b.market_id).first()
+                m = session.query(WeatherMarket).filter(
+                    WeatherMarket.id == b.market_id
+                ).first()
                 if m and m.target_date:
-                    hl = _hours_left(m.target_date.replace(tzinfo=timezone.utc) if getattr(m.target_date, 'tzinfo', None) is None else m.target_date)
+                    td = m.target_date
+                    if getattr(td, 'tzinfo', None) is None:
+                        td = td.replace(tzinfo=timezone.utc)
+                    hl = _hours_left(td)
                     if hl <= pre_settle:
                         cur = float(b.current_price or b.entry_price or 0)
                         _close_bet(b, session, "closed", f"pre_settlement: {hl:.1f}h left @{cur:.4f}")
@@ -343,6 +356,15 @@ def _execute_pt(bets: list[Bet], session) -> int:
         buy_cost = (shares * 0.5) * entry_price
         pt_pnl = sell_value - buy_cost
 
+        # Credit sold portion to portfolio (central accounting)
+        try:
+            from utils.accounting import credit_sale
+            proceeds = round(sell_value, 2)
+            if proceeds > 0:
+                credit_sale(session, proceeds, f"range_pt:{b.market_id}")
+        except Exception as e:
+            logger.warning("PT credit failed for %s: %s", b.market_id, e)
+
         # Kalan yariyi trail stop ile takip et
         meta["pt_taken"] = True
         meta["peak_price"] = cur
@@ -352,8 +374,25 @@ def _execute_pt(bets: list[Bet], session) -> int:
         b.shares = shares * 0.5  # kalan hisse
         b.amount = stake * 0.5
         b.ladder_data = json.dumps(meta)
-        logger.info("PT: %s %sC yari satis @%.4f pnl=%.2f", b.city, _threshold_from_market(b.market_id, session), cur, pt_pnl)
+        thr = _threshold_from_market(b.market_id, session)
+        logger.info(
+            "PT: %s %sC yari satis @%.4f pnl=%.2f",
+            b.city, thr, cur, pt_pnl,
+        )
         closed += 1
+
+    # Update portfolio totals after all PT sales
+    try:
+        from utils.formulas import portfolio_total_value
+        pf = session.query(Portfolio).filter(Portfolio.id == 1).first()
+        if pf:
+            open_amt = session.query(Bet.amount).filter(Bet.status.in_(OPEN_BET_STATUSES)).all()
+            open_exposure = sum(float(a[0] or 0) for a in open_amt)
+            pf.total_value = portfolio_total_value(float(pf.cash_balance or 0), open_exposure)
+            pf.last_updated = datetime.now(timezone.utc).replace(tzinfo=None)
+    except Exception as e:
+        logger.warning("PT portfolio update failed: %s", e)
+
     session.commit()
     return closed
 
@@ -365,7 +404,32 @@ def _close_bet(bet: Bet, session, status: str, reason: str) -> None:
     pnl = (cur - entry) * shares
     bet.realized_pnl = (bet.realized_pnl or 0) + pnl
     bet.status = status
-    bet.error_message = reason
+    bet.close_reason = reason
+    bet.closed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # Credit sale proceeds to portfolio (central accounting)
+    try:
+        from utils.accounting import credit_sale
+        from utils.formulas import portfolio_total_value
+        proceeds = round(shares * cur, 2)
+        if proceeds > 0:
+            credit_sale(session, proceeds, f"range_close:{bet.market_id}:{reason}")
+    except Exception as e:
+        logger.warning("Range close credit failed for %s: %s", bet.market_id, e)
+
+    # Update portfolio totals
+    pf = session.query(Portfolio).filter(Portfolio.id == 1).first()
+    if pf:
+        open_amt = session.query(Bet.amount).filter(Bet.status.in_(OPEN_BET_STATUSES)).all()
+        open_exposure = sum(float(a[0] or 0) for a in open_amt)
+        pf.total_value = portfolio_total_value(float(pf.cash_balance or 0), open_exposure)
+        pf.total_realized_pnl = round((pf.total_realized_pnl or 0) + pnl, 2)
+        if pnl > 0:
+            pf.total_won = (pf.total_won or 0) + 1
+        else:
+            pf.total_lost = (pf.total_lost or 0) + 1
+        pf.last_updated = datetime.now(timezone.utc).replace(tzinfo=None)
+
     logger.info("Close: %s %s pnl=%.2f reason=%s", bet.city, bet.market_id, pnl, reason)
 
 

@@ -246,7 +246,7 @@ class RiskManager:
                 self.portfolio_value = portfolio.total_value or portfolio.initial_value or self.portfolio_value
                 self.daily_pnl = portfolio.daily_pnl or 0.0
 
-            active = self.db.query(Bet).filter(Bet.status.in_(["active", "open"])).all()
+            active = self.db.query(Bet).filter(Bet.status.in_(OPEN_BET_STATUSES)).all()
             self.city_bet_counts = {}
             self.open_bets_count = len(active)
             for bet in active:
@@ -840,7 +840,7 @@ class BettingEngine:
             )
             if self.db:
                 self.db.add(bet)
-                self.db.commit()
+                self.db.flush()  # assign ID without committing (caller manages transaction)
                 self.db.refresh(bet)
                 if self.risk_manager and hasattr(self.risk_manager, "increment_city_bet"):
                     self.risk_manager.increment_city_bet(city_code)

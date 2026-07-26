@@ -192,6 +192,7 @@ async def scan_and_bet_loop(state):
     fast_mode_until = None
     last_weather_fetch = None  # Son weather fetch zamanı
     last_two_day_date = None  # En son tetiklenen 2-gün (yeni tarih) açık market tarihi
+    last_range_pt_check = None  # Son PT/trail kontrol zamanı
 
     try:
         previous_market_count = _get_market_count()
@@ -306,12 +307,16 @@ async def scan_and_bet_loop(state):
             except Exception as e:
                 logger.error("Range betting error: %s", e)
 
-            # STEP 5.5: Range PT / trail stop / settlement satis
+            # STEP 5.5: Range PT / trail stop / settlement satis (her 5 dk'da 1)
             try:
-                from executor.range_bet_placer import check_range_pt
-                pt_closed = await asyncio.wait_for(asyncio.to_thread(check_range_pt), timeout=30)
-                if pt_closed:
-                    logger.info("Range PT: %d positions closed", pt_closed)
+                _range_pt_interval = 300  # 5 dakika
+                now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+                if last_range_pt_check is None or (now_utc - last_range_pt_check).total_seconds() >= _range_pt_interval:
+                    from executor.range_bet_placer import check_range_pt
+                    pt_closed = await asyncio.wait_for(asyncio.to_thread(check_range_pt), timeout=30)
+                    last_range_pt_check = datetime.now(timezone.utc).replace(tzinfo=None)
+                    if pt_closed:
+                        logger.info("Range PT: %d positions closed", pt_closed)
             except Exception as e:
                 logger.error("Range PT error: %s", e)
 

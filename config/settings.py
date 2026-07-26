@@ -403,7 +403,10 @@ class BotConfig:
         self.risk = self.risk or RiskConfig()
 
         if self.strategy.range_bet_cities is None:
-            self.strategy.range_bet_cities = ["istanbul", "london", "newyork", "tokyo", "seoul", "paris", "miami", "chicago"]
+            self.strategy.range_bet_cities = list([
+                "istanbul", "london", "newyork", "tokyo",
+                "seoul", "paris", "miami", "chicago",
+            ])
 
         # ── Override from .env (single source: .env > dataclass defaults) ──
         self.initial_portfolio = float(os.getenv("INITIAL_PORTFOLIO", str(self.initial_portfolio)))
