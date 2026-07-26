@@ -501,6 +501,13 @@ ALLOWED_DEAD = {
     "price_poller_loop",
     "scan_and_bet_loop",
     "settlement_loop",
+    # Model blacklist utility (public API for debugging/inspection)
+    "get_blacklist_summary",
+    # 5-bet simulation script (analysis/educational, not wired into bot)
+    "simulate_weather_forecast",
+    "run_simulation",
+    "print_worst_case_analysis",
+    "print_profit_distribution",
 }
 
 

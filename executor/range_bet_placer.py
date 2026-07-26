@@ -119,7 +119,8 @@ def place_range_bets() -> list[str]:
             continue
 
         base = round(temp)
-        thresholds = [base - 1, base, base + 1]
+        spread = s.range_bet_spread  # 2 = T-2,T-1,T,T+1,T+2
+        thresholds = list(range(base - spread, base + spread + 1))
 
         candidates = []
         skip = False
@@ -147,10 +148,10 @@ def place_range_bets() -> list[str]:
                 break
             candidates.append((market, yp, t))
 
-        if skip or len(candidates) < 3:
+        if skip or len(candidates) < (spread * 2 + 1):
             continue
 
-        # 3 beti de ac
+        # Tum betleri ac
         for market, yp, threshold in candidates:
             _place_one_bet(market, yp, bet_amount)
             msg = f"{city} {threshold}C YES ${bet_amount:.0f} @ {yp:.3f}"
@@ -265,8 +266,9 @@ def check_range_pt() -> int:
             c = (b.city or "").lower()
             cities.setdefault(c, []).append(b)
 
+        expected_count = s.range_bet_spread * 2 + 1  # 5 bets for spread=2
         for city, city_bets in cities.items():
-            if len(city_bets) != 3:
+            if len(city_bets) != expected_count:
                 continue  # incomplete set
 
             # PT kontrolu: total hisse degeri
