@@ -287,6 +287,17 @@ async def scan_and_bet_loop(state):
                         _FAST_PRICE_WINDOW // 60,
                     )
                     last_two_day_date = new_date
+                    # Hemen range bet ac — 2 gun sonrasi piyasasi acildi
+                    try:
+                        from config.settings import bot_config as _bc2
+                        if _bc2.strategy.range_bet_enabled:
+                            from executor.range_bet_placer import place_range_bets
+                            r = await asyncio.wait_for(asyncio.to_thread(place_range_bets), timeout=60)
+                            if r:
+                                logger.info("Range betting (immediate): %s", "; ".join(r))
+                            state.last_range_bet = datetime.now(timezone.utc).replace(tzinfo=None)
+                    except Exception as e:
+                        logger.error("Immediate range bet error: %s", e)
                 elif new_date is not None:
                     last_two_day_date = new_date
             except Exception as e:
