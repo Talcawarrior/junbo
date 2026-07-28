@@ -355,16 +355,21 @@ class PolymarketScraper:
         }
 
     def fetch_and_save(self) -> int:
-        """Ana fonksiyon: Çek -> Filtrele -> Kaydet."""
+        """Ana fonksiyon: Cek -> Filtrele -> Kaydet."""
         try:
             raw_markets = self._fetch_raw_markets()
         except Exception as e:
-            raise Exception(f"Polymarket API hatası: {e}")
+            raise Exception(f"Polymarket API hatasi: {e}")
 
         weather_markets = [m for m in raw_markets if self._is_weather_market(m)]
         logger.info(f"{len(weather_markets)} hava durumu marketi bulundu")
 
         saved = 0
+        # Track (city, date_str, threshold) to prevent duplicates within
+        # this fetch cycle.  Different Polymarket events can track the
+        # same strike — we only keep the first one encountered.
+        _seen_strikes: set[tuple] = set()
+
         with get_session() as session:
             for raw in weather_markets:
                 try:
@@ -406,13 +411,18 @@ class PolymarketScraper:
                     status = "no_coords" if not has_coords else "open"
 
                     # --- Duplicate prevention ---
+                    # Build a strike key: (city, date_str, threshold)
+                    _td_str = parsed["target_date"].strftime("%Y-%m-%d") if hasattr(parsed["target_date"], "strftime") else str(parsed["target_date"])[:10]
+                    _strike_key = (parsed["city"], _td_str, parsed["threshold"])
+
                     # Check by Polymarket ID first (fast path)
                     existing = (
                         session.query(WeatherMarket).filter_by(id=parsed["id"]).first()
                     )
-                    # Also check by (city, target_date, threshold) to prevent
-                    # duplicate entries from different Polymarket events
-                    # tracking the same strike.
+                    # Also check in-memory set + DB for cross-event duplicates
+                    if not existing and _strike_key in _seen_strikes:
+                        # Already processed this strike in this cycle — skip
+                        continue
                     if not existing:
                         existing = (
                             session.query(WeatherMarket)
@@ -423,11 +433,10 @@ class PolymarketScraper:
                             )
                             .first()
                         )
-                        # Verify same date (string comparison)
+                        # Verify same date
                         if existing:
-                            td_str = parsed["target_date"].strftime("%Y-%m-%d") if hasattr(parsed["target_date"], "strftime") else str(parsed["target_date"])[:10]
                             ex_str = str(existing.target_date)[:10] if existing.target_date else ""
-                            if ex_str != td_str:
+                            if ex_str != _td_str:
                                 existing = None
 
                     if existing:
@@ -477,6 +486,7 @@ class PolymarketScraper:
                         )
                         session.add(market)
                     saved += 1
+                    _seen_strikes.add(_strike_key)
 
                 except Exception as e:
                     logger.error(f"Market parse hatası {raw.get('id')}: {e}")
