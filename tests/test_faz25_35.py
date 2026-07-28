@@ -104,7 +104,7 @@ def test_config_tighter():
 
     s = StrategyConfig()
     assert s.min_edge == 0.05
-    assert s.max_bet_amount == 3.0
+    assert s.max_bet_amount == 10.0
     assert s.min_sources == 2
     assert s.fee_rate_weather == 0.05
     print("PASS: config tighter")
@@ -216,7 +216,7 @@ def test_should_bet_rejects_small_amount():
 
     r = _analyze_and_get("test-small")
     print(f"  amount=, should_bet={r['should_bet']}")
-    # With $50 portfolio and MAX_BET_PCT=0.003, max bet = $0.15.
+    # With $50 portfolio and flat_bet_usd=$10, max bet = $10.
     # MIN_BET_SIZE=1.0 means Kelly < 1.0 → amount = 1.0 (floor).
     # So amount >= MIN_BET_SIZE is expected; should_bet may be True.
     print(f"PASS: small portfolio handled (amount={r['recommended_amount']:.2f})")

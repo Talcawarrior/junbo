@@ -221,10 +221,10 @@ class TestMaxBetCap:
     def test_max_bet_cap_calculation(self):
         """Max bet cap hesaplama."""
         portfolio = 1000.0
-        max_pct = 0.003  # 0.3%
+        max_pct = 0.01  # 1% = $10
         max_cap = max_bet_cap(portfolio, max_pct)
 
-        assert max_cap == pytest.approx(3.0)
+        assert max_cap == pytest.approx(10.0)
         assert max_cap <= portfolio  # Max bet % portfolio'dan küçük
 
     def test_max_bet_cap_zero_portfolio(self):

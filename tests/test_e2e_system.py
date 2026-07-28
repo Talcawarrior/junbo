@@ -265,9 +265,9 @@ class TestStep6_BetPlacement:
         from utils.formulas import max_bet_cap
 
         portfolio = 1000.0
-        max_pct = 0.003
+        max_pct = 0.01  # 1% = $10 on $1000
         cap = max_bet_cap(portfolio, max_pct)
-        assert cap == 3.0
+        assert cap == 10.0
 
     def test_kelly_bet_size(self):
         """Kelly bet boyutu max cap'i aşmaz."""
@@ -278,7 +278,7 @@ class TestStep6_BetPlacement:
         kelly = kelly_fraction(prob=0.65, price=0.55)
         # Kelly fraction uygula (varsayılan 0.15)
         bet_amount = kelly * 0.15 * portfolio
-        max_bet_cap(portfolio, 0.003)
+        max_bet_cap(portfolio, 0.01)
 
         # Kelly bet cap'i aşabilir (bu normal - risk yönetimi devreye girer)
         # Sadece pozitif olduğunu doğrula

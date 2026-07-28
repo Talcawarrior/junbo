@@ -125,6 +125,7 @@ def _reset_karpathy_strategy_params():
     original_strategy_ineff = bot_config.strategy.inefficiency_min
     original_strategy_min_edge = bot_config.strategy.min_edge
     original_strategy_kelly = bot_config.strategy.kelly_fraction
+    original_strategy_flat_bet = bot_config.strategy.flat_bet_usd
     original_config_kelly = Config.KELLY_FRACTION
     original_config_max_bet_pct = Config.MAX_BET_PCT
     original_config_min_entry = Config.MIN_ENTRY_PRICE
@@ -133,8 +134,9 @@ def _reset_karpathy_strategy_params():
     bot_config.strategy.inefficiency_min = -1.0
     bot_config.strategy.kelly_fraction = 0.15
     bot_config.strategy.min_edge = 0.05
+    bot_config.strategy.flat_bet_usd = 0.0
     Config.KELLY_FRACTION = 0.15
-    Config.MAX_BET_PCT = 0.03
+    Config.MAX_BET_PCT = 1.0
     Config.MIN_ENTRY_PRICE = 0.01
 
     yield
@@ -143,6 +145,7 @@ def _reset_karpathy_strategy_params():
     bot_config.strategy.inefficiency_min = original_strategy_ineff
     bot_config.strategy.min_edge = original_strategy_min_edge
     bot_config.strategy.kelly_fraction = original_strategy_kelly
+    bot_config.strategy.flat_bet_usd = original_strategy_flat_bet
     Config.KELLY_FRACTION = original_config_kelly
     Config.MAX_BET_PCT = original_config_max_bet_pct
     Config.MIN_ENTRY_PRICE = original_config_min_entry

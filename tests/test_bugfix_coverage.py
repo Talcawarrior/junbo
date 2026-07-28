@@ -482,7 +482,7 @@ class TestExecuteSignalFlush:
                     # execute_signal should use flush, not commit
                     loop = asyncio.new_event_loop()
                     try:
-                        result = loop.run_until_complete(engine.execute_signal(signal, market_data))
+                        loop.run_until_complete(engine.execute_signal(signal, market_data))
                     finally:
                         loop.close()
 

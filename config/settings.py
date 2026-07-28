@@ -12,9 +12,9 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 
-# Hard ceiling for max_bet_pct — no single bet may ever exceed this fraction
+# Hard ceiling for max bet — no single bet may ever exceed this fraction
 # of the portfolio, regardless of strategy config. Guards against runaway
-# sizing (e.g. a misconfigured max_bet_pct=1.0 that would stake the whole book).
+# sizing (e.g. a misconfigured value that would stake the whole book).
 MAX_BET_PCT_CEILING = 0.33  # max 33 % of portfolio on a single bet
 
 
@@ -95,8 +95,8 @@ class StrategyConfig:
     # vig + a thin profit margin in paper mode.  Can be lowered once a
     # private weather feed (e.g. ECMWF-direct) gives a structural edge.
     min_edge: float = 0.05  # 5% edge minimum (must exceed 2% fee_drag + margin)
-    max_bet_amount: float = 3.0  # Maximum $3 per bet (binde 3 of $1,000)
-    max_bet_pct: float = 0.003  # Max bet as % of portfolio (single source of truth)
+    max_bet_amount: float = 10.0  # Maximum $10 per bet (flat)
+    max_bet_pct: float = 1.0  # Safety ceiling (flat_bet_usd overrides Kelly sizing)
     min_bet_size: float = 1.0  # Minimum bet size in USD
     total_exposure_pct: float = 0.25  # Max total exposure as % of portfolio
     min_liquidity: float = 0.0  # Liquidity check disabled: Polymarket public-search
@@ -164,7 +164,7 @@ class StrategyConfig:
     gas_cost_usd: float = 0.10  # Polygon gas per round-trip
 
     # ── Flat bet override & Daily loss limit (synced from Config) ─────────
-    flat_bet_usd: float = 0.0  # 0 = use Kelly sizing, >0 = fixed $ per bet
+    flat_bet_usd: float = 10.0  # Fixed $10 per bet (overrides Kelly sizing)
     daily_loss_limit: float = 0.05  # 5% daily max loss
 
     # ── Range betting (YES-only, fixed $10, temperature range) ──────────
@@ -465,7 +465,6 @@ class _ConfigProxy:
     """Backward-compatible proxy. Delegates all attribute access to bot_config.
 
     Usage: ``Config.MAX_BET_PCT`` reads ``bot_config.strategy.max_bet_pct``.
-    Assignment: ``Config.MAX_BET_PCT = 0.01`` writes back to ``bot_config``.
     """
 
     _MAP: dict[str, tuple[str, str]] = {
@@ -597,9 +596,6 @@ def apply_persisted_strategy_params() -> dict:
             applied["kelly_fraction"] = s.kelly_fraction
         except (TypeError, ValueError):
             pass
-    # NOTE: max_bet_pct is intentionally NOT loaded from strategy_params.json.
-    # It MUST come ONLY from .env so that calculator.py, bet_placer.py, and
-    # utils/kelly.py all use the same cap via max_bet_cap().
     if "min_entry_price" in persisted:
         try:
             s.min_entry_price = float(persisted["min_entry_price"])

@@ -328,7 +328,7 @@ def _any_pt_taken(bets: list[Bet]) -> bool:
     for b in bets:
         if b.ladder_data:
             try:
-                meta = json.loads(b.ladder_data)
+                meta = json.loads(str(b.ladder_data))  # type: ignore[arg-type]
                 if meta.get("pt_taken"):
                     return True
             except (json.JSONDecodeError, TypeError):
@@ -343,7 +343,7 @@ def _execute_pt(bets: list[Bet], session) -> int:
         if b.ladder_data is None:
             continue
         try:
-            meta = json.loads(b.ladder_data)
+            meta = json.loads(str(b.ladder_data))  # type: ignore[arg-type]
         except (json.JSONDecodeError, TypeError):
             meta = {}
 
@@ -372,11 +372,11 @@ def _execute_pt(bets: list[Bet], session) -> int:
         meta["peak_price"] = cur
         meta["pt_pnl"] = meta.get("pt_pnl", 0) + pt_pnl
 
-        b.realized_pnl = (b.realized_pnl or 0) + pt_pnl
-        b.shares = shares * 0.5  # kalan hisse
-        b.amount = stake * 0.5
-        b.ladder_data = json.dumps(meta)
-        thr = _threshold_from_market(b.market_id, session)
+        b.realized_pnl = (b.realized_pnl or 0) + pt_pnl  # type: ignore[assignment]
+        b.shares = shares * 0.5  # kalan hisse  # type: ignore[assignment]
+        b.amount = stake * 0.5  # type: ignore[assignment]
+        b.ladder_data = json.dumps(meta)  # type: ignore[assignment]
+        thr = _threshold_from_market(str(b.market_id), session)  # type: ignore[arg-type]
         logger.info(
             "PT: %s %sC yari satis @%.4f pnl=%.2f",
             b.city, thr, cur, pt_pnl,
@@ -404,10 +404,10 @@ def _close_bet(bet: Bet, session, status: str, reason: str) -> None:
     shares = float(bet.shares or 0)
     entry = float(bet.entry_price or 0)
     pnl = (cur - entry) * shares
-    bet.realized_pnl = (bet.realized_pnl or 0) + pnl
-    bet.status = status
-    bet.close_reason = reason
-    bet.closed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    bet.realized_pnl = (bet.realized_pnl or 0) + pnl  # type: ignore[assignment]
+    bet.status = status  # type: ignore[assignment]
+    bet.close_reason = reason  # type: ignore[assignment]
+    bet.closed_at = datetime.now(timezone.utc).replace(tzinfo=None)  # type: ignore[assignment]
 
     # Credit sale proceeds to portfolio (central accounting)
     try:

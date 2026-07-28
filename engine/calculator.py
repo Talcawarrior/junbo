@@ -20,6 +20,7 @@ from utils.slippage import (
     adjust_kelly_for_slippage,
     estimate_slippage,
 )
+from utils.model_blacklist import get_blacklisted_models
 
 # Lazy-loaded CalibrationEngine for temperature bias correction (Option A).
 # Loaded once per process to avoid re-reading the JSON on every market analysis.
@@ -181,6 +182,26 @@ class Calculator:
                     else:
                         latest_by_source[f.source] = raw_val
                     source_weights[f.source] = f.model_weight or 0.0
+
+            # ── Model blacklist filter ────────────────────────────────────
+            # Remove unreliable model-city pairs identified by backtest.
+            blacklisted = get_blacklisted_models(
+                market.city_code or "", market.metric or "temperature_max"
+            )
+            if blacklisted:
+                removed = []
+                for bl_model in blacklisted:
+                    if bl_model in latest_by_source:
+                        removed.append(bl_model)
+                        del latest_by_source[bl_model]
+                        source_weights.pop(bl_model, None)
+                if removed:
+                    logger.info(
+                        "Blacklist [%s]: removed %s (%d models remain)",
+                        market.city_code,
+                        ", ".join(removed),
+                        len(latest_by_source),
+                    )
 
             forecast_values = list(latest_by_source.values())
 

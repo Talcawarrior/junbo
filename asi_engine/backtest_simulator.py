@@ -128,8 +128,8 @@ class BacktestSimulator:
         winning_pnls: list[float] = []
         losing_pnls: list[float] = []
 
-        # Use config max_bet_pct (single source of truth)
-        cfg_max_bet_pct = bot_config.strategy.max_bet_pct
+        # Use flat bet from config (single source of truth)
+        flat_bet = bot_config.strategy.flat_bet_usd
 
         with get_session() as session:
             # Query all settled bets with their analysis & market details
@@ -204,15 +204,15 @@ class BacktestSimulator:
                     # Yes, would place a bet!
                     total_bets_opened += 1
 
-                    # Kelly size it (use config max_bet_pct, not hardcoded)
+                    # Use flat bet from config (overrides Kelly sizing)
                     prob_win = recalculated_prob if sim_side == "YES" else (1.0 - recalculated_prob)
-                    bet_size = kelly_bet_amount(
+                    bet_size = flat_bet if flat_bet > 0 else kelly_bet_amount(
                         bankroll,
                         prob_win,
                         entry_price,
                         fraction=kelly_fraction,
                         min_bet=1.0,
-                        max_bet_pct=cfg_max_bet_pct,
+                        max_bet=10.0,
                     )
 
                     # Evaluate bet outcome
@@ -462,13 +462,13 @@ class BacktestSimulator:
             if sim_edge >= min_edge and ev > 0:
                 total_trades += 1
                 prob_win = prob if sim_side == "YES" else (1.0 - prob)
-                bet_size = kelly_bet_amount(
+                bet_size = flat_bet if flat_bet > 0 else kelly_bet_amount(
                     bankroll,
                     prob_win,
                     entry_price,
                     fraction=kelly_fraction,
                     min_bet=1.0,
-                    max_bet_pct=cfg_max_bet_pct,
+                    max_bet=10.0,
                 )
 
                 won = (sim_side == "YES" and outcome_yes) or (sim_side == "NO" and not outcome_yes)

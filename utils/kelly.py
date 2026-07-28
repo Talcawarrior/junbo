@@ -24,9 +24,9 @@ both shapes via two pure functions:
                      price, *,
                      fraction=0.15,
                      min_bet=1.0,
-                     max_bet_pct=0.03) -> float dollars
+                     max_bet=10.0) -> float dollars
         The strategy helper: portfolio_value * kelly_fraction,
-        floored at min_bet, capped at max_bet_pct * portfolio_value.
+        floored at min_bet, capped at max_bet.
 
 Both functions are pure (no DB, no logging) and are safe to call from
 either sync (calculator.analyze_market) or async (risk manager) paths.
@@ -78,6 +78,7 @@ def kelly_bet_amount(
     *,
     fraction: float = 0.15,
     min_bet: float = 1.0,
+    max_bet: float = 10.0,
     max_bet_pct: float | None = None,
 ) -> float:
     """Compute a Kelly-sized dollar bet for the given portfolio.
@@ -90,17 +91,20 @@ def kelly_bet_amount(
     ----------
     portfolio_value : float
         Current total portfolio value (cash + unrealized PnL) in dollars.
-    prob, price, fraction, min_bet, max_bet_pct
+    prob, price, fraction, min_bet
         See :func:`kelly_fraction` plus the per-bet floor and cap.
-        max_bet_pct: defaults to bot_config.strategy.max_bet_pct (0.003).
+    max_bet : float
+        Hard dollar cap per bet (default $10).
+    max_bet_pct : float | None
+        DEPRECATED. Kept for backward compat. If set, overrides max_bet
+        as portfolio_value * max_bet_pct.
     """
     if portfolio_value <= 0:
         return 0.0
 
-    # Tek kaynak: bot_config.strategy.max_bet_pct
-    if max_bet_pct is None:
-        from config.settings import bot_config
-        max_bet_pct = bot_config.strategy.max_bet_pct
+    # Backward compat: if someone still passes max_bet_pct
+    if max_bet_pct is not None:
+        max_bet = portfolio_value * max_bet_pct
 
     f_star = kelly_fraction(prob, price)
     if f_star <= 0:
@@ -111,9 +115,8 @@ def kelly_bet_amount(
         return 0.0
 
     amount = portfolio_value * fractional
-    max_amount = portfolio_value * max_bet_pct
-    amount = min(amount, max_amount)
+    amount = min(amount, max_bet)
     amount = max(amount, min_bet) if amount > 0 else 0
-    if min_bet > max_amount:
+    if min_bet > max_bet:
         return 0.0
     return round(amount, 2)
