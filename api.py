@@ -621,12 +621,33 @@ def get_markets():
             .all()
         )
 
+        # Batch-load forecasts for all open markets (one query, no N+1)
+        market_ids = [m.id for m in markets]
+        forecasts = (
+            db.query(WeatherForecast)
+            .filter(WeatherForecast.market_id.in_(market_ids))
+            .order_by(WeatherForecast.market_id, WeatherForecast.fetched_at.desc())
+            .all()
+        )
+        # Group forecasts by market_id (limit 8 per market)
+        forecast_map: dict[str, list[WeatherForecast]] = {}
+        for f in forecasts:
+            if f.market_id not in forecast_map:
+                forecast_map[f.market_id] = []
+            if len(forecast_map[f.market_id]) < 8:
+                forecast_map[f.market_id].append(f)
+
+        calc = Calculator()
         for m in markets:
             if m.yes_price is None or m.threshold is None:
                 continue
             current_price = float(m.yes_price)
-            # Use yes_price as model_prob baseline (fast, no forecast query)
             model_prob = current_price
+            m_forecasts = forecast_map.get(m.id, [])
+            if m_forecasts:
+                latest_vals = [f.predicted_value for f in m_forecasts]
+                days_ahead = max((m.target_date - now).days, 1)
+                model_prob = calc.estimate_probability(latest_vals, float(m.threshold), days_ahead)
 
             market_list.append(
                 {
@@ -639,7 +660,7 @@ def get_markets():
                     "current_yes_bid": current_price,
                     "current_no_bid": m.no_price or (1 - current_price),
                     "model_prob": model_prob,
-                    "edge": 0.0,
+                    "edge": model_prob - current_price,
                     "ev": safe_ev(model_prob, current_price),
                     "status": "OPEN",
                 }
