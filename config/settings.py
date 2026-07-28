@@ -410,7 +410,9 @@ class BotConfig:
             self.strategy.range_bet_cities = list([
                 "istanbul", "london", "tokyo", "seoul",
                 "paris", "munich", "hong kong", "sao paulo",
-                "shanghai",
+                "shanghai", "amsterdam", "ankara", "beijing",
+                "buenos aires", "cape town", "madrid", "mexico city",
+                "moscow", "singapore", "taipei", "tel aviv", "toronto",
             ])
 
         # ── Override from .env (single source: .env > dataclass defaults) ──
