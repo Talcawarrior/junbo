@@ -17,8 +17,9 @@ from utils.formulas import polymarket_fee
 from utils.kelly import kelly_bet_amount
 from utils.probability import estimate_probability
 
-# Weather category fee rate (Polymarket official: fee = C × feeRate × p × (1-p))
+# Weather category fee rate (Polymarket official: fee = C × feeRate × p × (1-p)^exp)
 WEATHER_FEE_RATE = 0.05
+WEATHER_FEE_EXPONENT = 0.5  # Weather category uses flatter curve
 
 logger = logging.getLogger("ASI_BACKTESTER")
 

@@ -508,6 +508,9 @@ ALLOWED_DEAD = {
     "run_simulation",
     "print_worst_case_analysis",
     "print_profit_distribution",
+    # Model run detector (public API for latency arbitrage)
+    "get_active_model_windows",
+    "detect_forecast_delta",
 }
 
 

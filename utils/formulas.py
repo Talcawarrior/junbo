@@ -162,27 +162,33 @@ def polymarket_fee(shares: float, price: float, fee_rate: float | None = None) -
     """Polymarket taker fee at trade match time.
 
     Official formula (per docs.polymarket.com):
-      fee = C × feeRate × p × (1-p)
+      fee = C × feeRate × p × (1-p)^exponent
 
     Where:
       C        = number of shares traded
       feeRate  = fetched from Polymarket API (default: 0.05 for weather)
       p        = trade price (0.01–0.99)
+      exponent = category-specific (0.5 for weather — flatter curve)
 
     Fee is collected at order match time, NOT at market settlement.
-    Settlement fee is always zero (p→1 ⇒ p(1-p)→0).
+    Settlement fee is always zero (p→1 ⇒ p(1-p)^exp→0).
     """
     if fee_rate is None:
         fee_rate = bot_config.strategy.current_fee_rate
 
-    return shares * fee_rate * price * (1.0 - price)
+    # Weather category uses exponent=0.5 (flatter fee curve).
+    # Other categories use exponent=1.0 (standard quadratic).
+    from config.settings import bot_config as _bc
+    exponent = getattr(_bc.strategy, "fee_exponent", 1.0)
+
+    return shares * fee_rate * price * ((1.0 - price) ** exponent)
 
 
 def polymarket_fee_from_stake(stake: float, price: float, fee_rate: float | None = None) -> float:
     """Stake-based shortcut for polymarket_fee.
 
     Since shares = stake / price, the fee formula simplifies to:
-      fee = (stake / price) × feeRate × p × (1-p) = stake × feeRate × (1-p)
+      fee = (stake / price) × feeRate × p × (1-p)^exp = stake × feeRate × (1-p)^exp
 
     Fee rate is fetched from Polymarket API (default: 0.05 for weather).
     """
@@ -192,7 +198,10 @@ def polymarket_fee_from_stake(stake: float, price: float, fee_rate: float | None
     if fee_rate is None:
         fee_rate = bot_config.strategy.current_fee_rate
 
-    return stake * fee_rate * (1.0 - price)
+    from config.settings import bot_config as _bc
+    exponent = getattr(_bc.strategy, "fee_exponent", 1.0)
+
+    return stake * fee_rate * ((1.0 - price) ** exponent)
 
 
 # ---------------------------------------------------------------------------

@@ -127,6 +127,9 @@ class StrategyConfig:
     # If API fails, fallback to this default.
     fee_rate_weather: float = 0.05
     current_fee_rate: float = 0.05  # Updated dynamically from API
+    # Weather category exponent (0.5 = flatter fee curve per Polymarket docs).
+    # Other categories use 1.0 (standard quadratic).
+    fee_exponent: float = 0.5
 
     # Bot scope: today + 1 + 2 days ahead (0..2 inclusive).
     # Tightened from 14 to 2 so the bot only trades near-term markets
@@ -352,6 +355,7 @@ class BotConfig:
     max_exposure_pct: float = 0.25
     city_cap: int = 5
     weather_fee_rate: float = 0.05
+    fee_exponent: float = 0.5  # Weather category: 0.5 (flatter curve)
 
     # ── Intervals ──────────────────────────────────────────────────
     scan_interval: int = 900  # 15 dakika (Open-Meteo rate limit için)
@@ -431,15 +435,17 @@ class BotConfig:
 
         # ── Constants (large dicts) ───────────────────────────────
         if self.model_weights is None:
+            # ECMWF-first allocation: research shows ECMWF HRES outperforms
+            # GFS at all lead times. GFS weight reduced from 0.30 to 0.15.
             self.model_weights = {
-                "gfs_seamless": 0.30,
-                "ecmwf_ifs025": 0.25,
-                "gem_global": 0.15,
-                "icon_global": 0.10,
-                "jma_seamless": 0.08,
-                "cma_grapes_global": 0.05,
-                "ukmo_seamless": 0.04,
-                "meteofrance_seamless": 0.03,
+                "ecmwf_ifs025": 0.35,
+                "gfs_seamless": 0.15,
+                "gem_global": 0.12,
+                "icon_global": 0.12,
+                "jma_seamless": 0.10,
+                "cma_grapes_global": 0.06,
+                "ukmo_seamless": 0.05,
+                "meteofrance_seamless": 0.05,
             }
         if self.icao_coords is None:
             self.icao_coords = _ICAO_COORDS
@@ -473,6 +479,7 @@ class _ConfigProxy:
         "MAX_EXPOSURE_PCT": ("root", "max_exposure_pct"),
         "CITY_CAP": ("root", "city_cap"),
         "WEATHER_FEE_RATE": ("root", "weather_fee_rate"),
+        "FEE_EXPONENT": ("root", "fee_exponent"),
         "SCAN_INTERVAL": ("root", "scan_interval"),
         "SETTLEMENT_INTERVAL": ("root", "settlement_interval"),
         "SIA_INTERVAL": ("root", "sia_interval"),

@@ -279,52 +279,52 @@ class TestPolymarketFee:
     """Polymarket fee hesaplama testleri."""
 
     def test_polymarket_fee_high_price(self):
-        """Yüksek fiyatda fee."""
+        """Yüksek fiyatda fee (weather exponent=0.5)."""
         shares = 100.0
         price = 0.75  # Close to 1.0
         fee_rate = 0.05
 
         fee = polymarket_fee(shares, price, fee_rate)
 
-        # fee = shares * rate * p * (1-p)
-        # p=0.75 -> p*(1-p) = 0.75*0.25 = 0.1875
-        expected = shares * fee_rate * 0.75 * (1 - 0.75)
+        # fee = shares * rate * p * (1-p)^0.5
+        # p=0.75 -> (1-p)^0.5 = 0.25^0.5 = 0.5
+        expected = shares * fee_rate * 0.75 * (1 - 0.75) ** 0.5
         assert fee == pytest.approx(expected, abs=0.01)
 
     def test_polymarket_fee_mid_price(self):
-        """Orta fiyatda fee."""
+        """Orta fiyatda fee (weather exponent=0.5)."""
         shares = 100.0
         price = 0.50  # Midpoint
         fee_rate = 0.05
 
         fee = polymarket_fee(shares, price, fee_rate)
 
-        # p*(1-p) = 0.5*0.5 = 0.25
-        expected = shares * fee_rate * 0.25
+        # (1-p)^0.5 = 0.5^0.5 = 0.7071
+        expected = shares * fee_rate * 0.50 * (1 - 0.50) ** 0.5
         assert fee == pytest.approx(expected, abs=0.01)
 
     def test_polymarket_fee_low_price(self):
-        """Düşük fiyatda fee."""
+        """Düşük fiyatda fee (weather exponent=0.5)."""
         shares = 100.0
         price = 0.10  # Low price
         fee_rate = 0.05
 
         fee = polymarket_fee(shares, price, fee_rate)
 
-        # p*(1-p) = 0.10*0.90 = 0.09
-        expected = shares * fee_rate * 0.09
+        # (1-p)^0.5 = 0.9^0.5 = 0.9487
+        expected = shares * fee_rate * 0.10 * (1 - 0.10) ** 0.5
         assert fee == pytest.approx(expected, abs=0.01)
 
     def test_polymarket_fee_from_stake(self):
-        """Stake-based fee shortcut."""
+        """Stake-based fee shortcut (weather exponent=0.5)."""
         stake = 100.0
         price = 0.60
         fee_rate = 0.05
 
         fee = polymarket_fee_from_stake(stake, price, fee_rate)
 
-        # fee = stake * rate * (1-p)
-        expected = stake * fee_rate * (1 - price)
+        # fee = stake * rate * (1-p)^0.5
+        expected = stake * fee_rate * (1 - price) ** 0.5
         assert fee == pytest.approx(expected, abs=0.01)
 
 

@@ -210,6 +210,33 @@ class Calculator:
                     f"Market {market_id}: Yetersiz kaynak ({len(forecast_values)}/{bot_config.strategy.min_sources})"
                 )
 
+            # days_ahead: use calendar days (>=0) and treat "today" as 1 day
+            # so that (target_date=23:59:59, now=04:21) -> 0 still means "today".
+            days_ahead = (market.target_date - datetime.now(timezone.utc).replace(tzinfo=None)).days
+
+            # ── Lead-time based dynamic weighting ───────────────────────
+            # Research shows ECMWF HRES outperforms GFS at all lead times,
+            # but the advantage is most pronounced at short lead times.
+            # 0-48h:  ECMWF 1.3x boost, GFS 0.7x penalty
+            # 48-120h: ECMWF 1.1x boost, GFS 0.9x penalty
+            # 120h+:  No adjustment (both degrade similarly)
+            ECMWF_MODELS = {"ecmwf_ifs025", "ecmwf_ifs04"}
+            GFS_MODELS = {"gfs_seamless"}
+            if days_ahead <= 2:
+                # Short lead time: ECMWF boost, GFS penalty
+                for s in source_weights:
+                    if s in ECMWF_MODELS:
+                        source_weights[s] *= 1.3
+                    elif s in GFS_MODELS:
+                        source_weights[s] *= 0.7
+            elif days_ahead <= 5:
+                # Medium lead time: mild ECMWF boost
+                for s in source_weights:
+                    if s in ECMWF_MODELS:
+                        source_weights[s] *= 1.1
+                    elif s in GFS_MODELS:
+                        source_weights[s] *= 0.9
+
             # Compute weighted std early — needed for both consensus and per-model probs
             total_weight = sum(source_weights.get(s, 0.0) for s in latest_by_source)
             if forecast_values and len(forecast_values) > 1:
@@ -229,9 +256,6 @@ class Calculator:
                 avg = forecast_values[0] if forecast_values else 0.5
                 std_val = None
 
-            # days_ahead: use calendar days (>=0) and treat "today" as 1 day
-            # so that (target_date=23:59:59, now=04:21) -> 0 still means "today".
-            days_ahead = (market.target_date - datetime.now(timezone.utc).replace(tzinfo=None)).days
             days_ahead_for_check = max(days_ahead, 1)
 
             # Olasılık hesapla — weighted mean/std ile (market_type-aware)

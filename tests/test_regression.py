@@ -212,11 +212,11 @@ class TestWeightLoadingTiming:
         # Varsayılanlarla aynı olmalı (optimize edilmemişse)
         weights = bot_config.model_weights
 
-        # GFS en yüksek ağırlığa sahip olmalı (30%)
-        assert weights.get("gfs_seamless", 0) >= 0.25
+        # ECMWF en yüksek ağırlığa sahip olmalı (35%) — research-backed
+        assert weights.get("ecmwf_ifs025", 0) >= 0.25
 
-        # ECMWF ikinci en yüksek olmalı (25%)
-        assert weights.get("ecmwf_ifs025", 0) >= 0.20
+        # GFS ikinci en yüksek olmalı (15%) — reduced from 30%
+        assert weights.get("gfs_seamless", 0) >= 0.10
 
     def test_weight_normalization(self):
         """Regression: Ağırlıklar normalize edilmiş olmalı."""

@@ -1059,7 +1059,16 @@ class SIALoop:
             frozen_total = sum(frozen_models.values())
             remaining_budget = 1.0 - frozen_total
 
-            inverse_scores = {model: max(0.01, 1.0 - data["brier_score"]) for model, data in optimizable.items()}
+            # ECMWF boost: research shows ECMWF HRES outperforms GFS at all
+            # lead times (RMSE 1.5-2.0°C vs 2.0-2.8°C for 0-48h).
+            # Boost ECMWF inverse scores by 1.3x to shift weight allocation.
+            ECMWF_MODELS = {"ecmwf_ifs025", "ecmwf_ifs04"}
+            inverse_scores = {}
+            for model, data in optimizable.items():
+                base_score = max(0.01, 1.0 - data["brier_score"])
+                if model in ECMWF_MODELS:
+                    base_score *= 1.3  # 30% boost for ECMWF models
+                inverse_scores[model] = base_score
             total_inv = sum(inverse_scores.values())
 
             if total_inv > 0:

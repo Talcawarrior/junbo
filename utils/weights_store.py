@@ -51,6 +51,10 @@ _STRATEGY_PATH = os.path.abspath(
 # optimum, so we enforce minimal participation from all 8 ensemble models.
 MIN_MODEL_WEIGHT = 0.05
 
+# ECMWF models get a higher floor (15%) because research shows they
+# consistently outperform GFS at all lead times.
+ECMWF_FLOOR = 0.15
+
 # All 8 ensemble models — if any are missing from the saved weights,
 # they are re-added at the floor weight so the ensemble never collapses
 # to a 2-model solution after karpathy_search or optimize_weights.
@@ -111,10 +115,13 @@ def _apply_floor(
 ) -> dict[str, float]:
     """Apply a per-model minimum weight floor via water-filling.
 
+    ECMWF models (ecmwf_ifs025, ecmwf_ifs04) get a higher floor
+    (ECMWF_FLOOR = 15%) because research shows they outperform GFS
+    at all lead times.
+
     This is the single source of truth for the diversification guarantee.
     Every writer (SIA loop, LLM loop deploy, karpathy_search) calls
-    save_weights(), which calls this internally. No caller needs to
-    remember to apply the floor — it just happens.
+    save_weights(), which calls this internally.
 
     Algorithm (water-filling):
       1. Identify all models below `floor`.
@@ -151,33 +158,36 @@ def _apply_floor(
 
     items = {k: float(v) for k, v in weights.items()}
 
+    # Per-model floor: ECMWF models get ECMWF_FLOOR (15%), others get floor (5%)
+    def _model_floor(model: str) -> float:
+        if model.startswith("ecmwf"):
+            return ECMWF_FLOOR
+        return floor
+
     # Iterate water-filling until stable (typically converges in 1-2 rounds).
     for _ in range(n + 1):  # safety bound — converges in <= n iterations
-        # Pinned = models at or below floor (they consume `floor` each
-        # of the 1.0 budget, whether they were originally below or at).
-        pinned = [k for k, v in items.items() if v <= floor]
-        free = [k for k, v in items.items() if v > floor]
+        # Pinned = models at or below their per-model floor
+        pinned = [k for k, v in items.items() if v <= _model_floor(k)]
+        free = [k for k, v in items.items() if v > _model_floor(k)]
 
         if not pinned:
             break  # all above floor — done
 
-        k_count = len(pinned)
-        remaining_budget = 1.0 - floor * k_count
+        # Compute total floor budget consumed by pinned models
+        floor_budget = sum(_model_floor(k) for k in pinned)
+        remaining_budget = 1.0 - floor_budget
         if remaining_budget <= 0:
-            # floor * k_count == 1.0 — all pinned at floor exactly.
             uniform = round(1.0 / n, 4)
             return {k: uniform for k in weights}
 
-        # Pin all pinned models at floor (idempotent for those already there)
+        # Pin all pinned models at their per-model floor
         for k in pinned:
-            items[k] = floor
+            items[k] = _model_floor(k)
 
         # Redistribute remaining_budget among free models
-        # proportionally to their current values.
         free_vals = {k: items[k] for k in free}
         total_free = sum(free_vals.values())
         if total_free <= 0 or not free:
-            # No free models left — uniform fallback
             uniform = round(1.0 / n, 4)
             return {k: uniform for k in weights}
         for k in free:

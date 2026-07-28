@@ -113,6 +113,11 @@ def _is_midnight_window(now: datetime) -> bool:
 def _get_scan_interval(now: datetime, fast_mode_until: datetime | None) -> int:
     if fast_mode_until and now < fast_mode_until:
         return _FAST_SCAN_INTERVAL
+    # Forecast Latency Arbitrage: scan faster during model run data windows
+    from utils.model_run_detector import get_model_run_fast_interval
+    model_interval = get_model_run_fast_interval(now)
+    if model_interval is not None:
+        return model_interval
     from config.settings import bot_config
 
     if _is_midnight_window(now):
@@ -193,6 +198,7 @@ async def scan_and_bet_loop(state):
     last_weather_fetch = None  # Son weather fetch zamanı
     last_two_day_date = None  # En son tetiklenen 2-gün (yeni tarih) açık market tarihi
     last_range_pt_check = None  # Son PT/trail kontrol zamanı
+    model_run_fast_until: datetime | None = None  # Model run fast mode end time
 
     try:
         previous_market_count = _get_market_count()
@@ -248,6 +254,30 @@ async def scan_and_bet_loop(state):
                     # Don't advance last_weather_fetch — retry next cycle so a
                     # transient failure can't silently starve markets of weather.
                     logger.error("Weather fetch FAILED: %s — will retry next cycle", e, exc_info=e)
+
+            # Forecast Latency Arbitrage: detect model run windows & fast scan
+            try:
+                from utils.model_run_detector import (
+                    is_in_model_run_window,
+                    log_model_run_status,
+                    MODEL_RUN_FAST_WINDOW,
+                )
+                now_utc_arb = datetime.now(timezone.utc).replace(tzinfo=None)
+                if is_in_model_run_window(now_utc_arb):
+                    # Activate fast mode for model run window
+                    if model_run_fast_until is None or now_utc_arb >= model_run_fast_until:
+                        model_run_fast_until = (
+                            now_utc_arb + timedelta(seconds=MODEL_RUN_FAST_WINDOW)
+                        )
+                        log_model_run_status(now_utc_arb)
+                        logger.info(
+                            "MODEL RUN WINDOW — FAST MODE for %d min",
+                            MODEL_RUN_FAST_WINDOW // 60,
+                        )
+                else:
+                    model_run_fast_until = None
+            except Exception as e:
+                logger.debug("Model run detection error: %s", e)
 
             # Yeni market algılama (scan hızlı modu için)
             try:
@@ -347,7 +377,12 @@ async def scan_and_bet_loop(state):
             scan_duration = (datetime.now(timezone.utc) - scan_start).total_seconds()
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             interval = _get_scan_interval(now, fast_mode_until)
-            mode = "FAST" if fast_mode_until and now < fast_mode_until else "NORMAL"
+            # Also check model run fast mode
+            if model_run_fast_until and now < model_run_fast_until:
+                interval = min(interval, _FAST_SCAN_INTERVAL)
+            mode = "FAST" if (fast_mode_until and now < fast_mode_until) or (
+                model_run_fast_until and now < model_run_fast_until
+            ) else "NORMAL"
             logger.info("Scan completed in %.1fs [%s mode], next in %ds", scan_duration, mode, interval)
 
             await asyncio.sleep(interval)

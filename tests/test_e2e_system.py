@@ -555,14 +555,18 @@ class TestStep13_SmartScan:
     def test_scan_interval_selection(self):
         """Doğru scan interval seçilmeli."""
         from bot_loop import _get_scan_interval
+        from utils.model_run_detector import is_in_model_run_window
 
         now = datetime.now(timezone.utc)
 
         # Midnight window kontrolü - şu an aktif olabilir
         is_midnight = now.hour == 0 and now.minute < 60
 
-        # Normal mod (midnight değilse)
-        if not is_midnight:
+        # Model run window kontrolü - şu an aktif olabilir
+        in_model_window = is_in_model_run_window(now)
+
+        # Normal mod (midnight değilse ve model run window'da değilse)
+        if not is_midnight and not in_model_window:
             interval = _get_scan_interval(now, None)
             assert interval == 300  # 5 dakika (Polymarket fetch temposuyla hizali)
 
@@ -574,7 +578,7 @@ class TestStep13_SmartScan:
         # Hızlı mod süresi doldu
         fast_mode_until = now - timedelta(minutes=5)
         interval = _get_scan_interval(now, fast_mode_until)
-        if not is_midnight:
+        if not is_midnight and not in_model_window:
             assert interval == 300  # 5 dakika (Normal moda döndü)
 
 

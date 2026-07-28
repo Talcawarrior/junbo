@@ -101,14 +101,14 @@ class TestFeeCalculationSnapshot:
     """Fee hesaplama snapshot testleri."""
 
     @pytest.mark.parametrize("shares,price,fee_rate,expected_fee", [
-        (100, 0.50, 0.05, 1.25),
-        (100, 0.25, 0.05, 0.9375),
-        (100, 0.75, 0.05, 0.9375),
-        (100, 0.10, 0.05, 0.45),
-        (100, 0.90, 0.05, 0.45),
-        (50, 0.50, 0.05, 0.625),
-        (200, 0.50, 0.05, 2.5),
-        (100, 0.50, 0.07, 1.75),
+        (100, 0.50, 0.05, 1.768),   # (1-p)^0.5 = 0.7071
+        (100, 0.25, 0.05, 1.083),   # (1-p)^0.5 = 0.866
+        (100, 0.75, 0.05, 1.875),   # (1-p)^0.5 = 0.5
+        (100, 0.10, 0.05, 0.474),   # (1-p)^0.5 = 0.949
+        (100, 0.90, 0.05, 1.423),   # (1-p)^0.5 = 0.316
+        (50, 0.50, 0.05, 0.884),    # half shares
+        (200, 0.50, 0.05, 3.536),   # double shares
+        (100, 0.50, 0.07, 2.475),   # higher fee_rate
     ])
     def test_fee_values_snapshot(self, shares, price, fee_rate, expected_fee):
         """Fee değerleri snapshot'ı - refactor sonrası değişmemeli."""
