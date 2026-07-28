@@ -164,10 +164,6 @@ def place_range_bets() -> list[str]:
                 skip = True
                 break
             yp = float(market.yes_price or 0.5)
-            if yp > 0.10:
-                logger.info("Range: %s %dC yes_price=%.3f > 0.10, atlaniyor", city, t, yp)
-                skip = True
-                break
             candidates.append((market, yp, t))
 
         if skip or len(candidates) < (spread * 2 + 1):
