@@ -87,23 +87,41 @@ class PolymarketScraper:
             "temperature",
             "weather temperature",
         ]
-        # Also add 5 city-specific queries to broaden coverage beyond
-        # the public-search top results.
+        # City-specific queries to cover ALL Polymarket weather cities
         queries += [
-            # Top US markets (highest volume on Polymarket)
-            "dallas temperature",
-            "miami temperature",
-            "new york temperature",
-            "chicago temperature",
-            "houston temperature",
-            "los angeles temperature",
-            "phoenix temperature",
-            # International (frequent on Polymarket)
-            "london temperature",
-            "paris temperature",
-            "tokyo temperature",
-            "seoul temperature",
-            "istanbul temperature",
+            # US cities
+            "dallas temperature", "miami temperature", "new york temperature",
+            "chicago temperature", "houston temperature", "los angeles temperature",
+            "phoenix temperature", "denver temperature", "seattle temperature",
+            "atlanta temperature", "boston temperature", "san francisco temperature",
+            "washington temperature", "philadelphia temperature", "detroit temperature",
+            "minneapolis temperature", "portland temperature", "las vegas temperature",
+            "nashville temperature", "austin temperature", "charlotte temperature",
+            "indianapolis temperature", "columbus temperature", "san diego temperature",
+            "tampa temperature", "orlando temperature", "sacramento temperature",
+            "pittsburgh temperature", "st louis temperature", "baltimore temperature",
+            "milwaukee temperature", "kansas city temperature", "salt lake city temperature",
+            # International cities
+            "london temperature", "paris temperature", "tokyo temperature",
+            "seoul temperature", "istanbul temperature", "moscow temperature",
+            "berlin temperature", "madrid temperature", "rome temperature",
+            "barcelona temperature", "amsterdam temperature", "vienna temperature",
+            "prague temperature", "warsaw temperature", "budapest temperature",
+            "lisbon temperature", "copenhagen temperature", "stockholm temperature",
+            "oslo temperature", "helsinki temperature", "dublin temperature",
+            "zurich temperature", "brussels temperature", "munich temperature",
+            "milan temperature", "toronto temperature", "vancouver temperature",
+            "sydney temperature", "melbourne temperature", "bangkok temperature",
+            "singapore temperature", "hong kong temperature", "taipei temperature",
+            "shanghai temperature", "beijing temperature", "mumbai temperature",
+            "delhi temperature", "dubai temperature", "abu dhabi temperature",
+            "johannesburg temperature", "cape town temperature", "cairo temperature",
+            "nairobi temperature", "lagos temperature", "buenos aires temperature",
+            "sao paulo temperature", "rio de janeiro temperature", "mexico city temperature",
+            "bogota temperature", "lima temperature", "santiago temperature",
+            "ankara temperature", "tel aviv temperature", "riyadh temperature",
+            "karachi temperature", "dhaka temperature", "jakarta temperature",
+            "manila temperature", "hanoi temperature", "kuala lumpur temperature",
         ]
 
         gamma_host = urlparse(self.gamma_url).netloc
@@ -112,7 +130,7 @@ class PolymarketScraper:
         items = [
             (
                 f"{self.gamma_url}/public-search",
-                {"q": q, "limit_per_type": 50},
+                {"q": q, "limit_per_type": 100},
                 gamma_host,
             )
             for q in queries
@@ -430,6 +448,8 @@ class PolymarketScraper:
                                 WeatherMarket.city == parsed["city"],
                                 WeatherMarket.threshold == parsed["threshold"],
                                 WeatherMarket.target_date.isnot(None),
+                                # Filter by same date (string comparison in DB)
+                                WeatherMarket.target_date.like(f"{_td_str}%"),
                             )
                             .first()
                         )
