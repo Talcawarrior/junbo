@@ -7,6 +7,7 @@ BUG 6: STEP 5.5 PT throttling (5-minute interval)
 ISSUE 9: range_bet_cities defensive copy
 ISSUE 10: execute_signal uses flush() not commit()
 """
+
 import json
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, MagicMock
@@ -28,11 +29,13 @@ def _unique_id(prefix="m"):
 def _clean_db():
     from database.db import get_session
     from database.models import WeatherMarket, WeatherForecast, Bet, Portfolio
+
     with get_session() as s:
         for tbl in [Bet, WeatherForecast, WeatherMarket, Portfolio]:
             s.query(tbl).delete()
         s.commit()
     from config.settings import bot_config
+
     bot_config.strategy.range_bet_cities = list(TEST_CITIES)
     bot_config.strategy.range_bet_enabled = True
     bot_config.strategy.range_bet_spread = 1
@@ -44,44 +47,64 @@ def _clean_db():
 
 
 def _td(offset=1):
-    return (datetime.now(timezone.utc) + timedelta(days=offset)).replace(
-        hour=23, minute=59, second=59, microsecond=0
-    )
+    return (datetime.now(timezone.utc) + timedelta(days=offset)).replace(hour=23, minute=59, second=59, microsecond=0)
 
 
-def _add_market(session, mid=None, city="Testville", icao="TEST", thresh=25,
-                yes_price=0.02, no_price=0.98, target_date=None):
+def _add_market(
+    session, mid=None, city="Testville", icao="TEST", thresh=25, yes_price=0.02, no_price=0.98, target_date=None
+):
     if mid is None:
         mid = _unique_id()
     td = target_date or _td()
     from database.models import WeatherMarket
-    session.add(WeatherMarket(
-        id=mid, question="Test?", city=city, city_code=icao,
-        metric="temperature_max", threshold=float(thresh),
-        target_date=td, yes_price=yes_price, no_price=no_price,
-        status="open", latitude=41.0, longitude=29.0,
-    ))
+
+    session.add(
+        WeatherMarket(
+            id=mid,
+            question="Test?",
+            city=city,
+            city_code=icao,
+            metric="temperature_max",
+            threshold=float(thresh),
+            target_date=td,
+            yes_price=yes_price,
+            no_price=no_price,
+            status="open",
+            latitude=41.0,
+            longitude=29.0,
+        )
+    )
 
 
 def _add_forecast(session, icao="TEST", target_date=None, value=25.0, source="test_source"):
     from database.models import WeatherForecast
+
     td = target_date or _td()
-    session.add(WeatherForecast(
-        market_id="", city=icao, lat=41.0, lon=41.0,
-        target_date=td, metric="temperature_max",
-        source=source, predicted_value=value,
-        fetched_at=datetime.now(),
-    ))
+    session.add(
+        WeatherForecast(
+            market_id="",
+            city=icao,
+            lat=41.0,
+            lon=41.0,
+            target_date=td,
+            metric="temperature_max",
+            source=source,
+            predicted_value=value,
+            fetched_at=datetime.now(),
+        )
+    )
 
 
 def _add_portfolio(session):
     from database.models import Portfolio
+
     pf = session.query(Portfolio).filter(Portfolio.id == 1).first()
     if pf is None:
         session.add(Portfolio(id=1, cash_balance=1000.0, total_value=1000.0))
 
 
 # ── BUG 1+2: accounting debit_stake / credit_sale ─────────────────────
+
 
 class TestRangeBetAccounting:
     """BUG 1+2: place_range_bets must call debit_stake and credit_sale."""
@@ -90,6 +113,7 @@ class TestRangeBetAccounting:
         """_place_one_bet should call debit_stake for stake + fee (6 calls for 3 bets)."""
         from executor.range_bet_placer import place_range_bets
         from database.db import get_session
+
         td = _td()
         with get_session() as s:
             _add_portfolio(s)
@@ -114,6 +138,7 @@ class TestRangeBetAccounting:
         """_place_one_bet should also debit entry_fee."""
         from executor.range_bet_placer import place_range_bets
         from database.db import get_session
+
         td = _td()
         with get_session() as s:
             _add_portfolio(s)
@@ -134,7 +159,7 @@ class TestRangeBetAccounting:
         """_close_bet should call credit_sale for sale proceeds."""
         from executor.range_bet_placer import _close_bet
         from database.db import get_session
-        from database.models import Bet, WeatherMarket, Portfolio
+        from database.models import Bet
 
         td = _td()
         mid = _unique_id()
@@ -142,11 +167,19 @@ class TestRangeBetAccounting:
             _add_portfolio(s)
             _add_market(s, mid=mid, thresh=25, target_date=td)
             bet = Bet(
-                market_id=mid, city="Testville", city_code="TEST",
-                side="YES", amount=10.0, stake_amount=10.0,
-                price=0.02, entry_price=0.02, shares=500.0,
-                current_price=0.05, status="placed",
-                order_id=f"range_{mid}_test", ladder_data='{}',
+                market_id=mid,
+                city="Testville",
+                city_code="TEST",
+                side="YES",
+                amount=10.0,
+                stake_amount=10.0,
+                price=0.02,
+                entry_price=0.02,
+                shares=500.0,
+                current_price=0.05,
+                status="placed",
+                order_id=f"range_{mid}_test",
+                ladder_data="{}",
             )
             s.add(bet)
             s.commit()
@@ -163,16 +196,23 @@ class TestRangeBetAccounting:
         """_execute_pt should call credit_sale for half the position."""
         from executor.range_bet_placer import _execute_pt
         from database.db import get_session
-        from database.models import Bet, Portfolio
+        from database.models import Bet
 
         mid = _unique_id()
         with get_session() as s:
             _add_portfolio(s)
             bet = Bet(
-                market_id=mid, city="Testville", city_code="TEST",
-                side="YES", amount=10.0, stake_amount=10.0,
-                price=0.02, entry_price=0.02, shares=500.0,
-                current_price=0.10, status="placed",
+                market_id=mid,
+                city="Testville",
+                city_code="TEST",
+                side="YES",
+                amount=10.0,
+                stake_amount=10.0,
+                price=0.02,
+                entry_price=0.02,
+                shares=500.0,
+                current_price=0.10,
+                status="placed",
                 order_id=f"range_{mid}_test",
                 ladder_data=json.dumps({"pt_taken": False, "peak_price": 0.02}),
             )
@@ -191,6 +231,7 @@ class TestRangeBetAccounting:
 
 # ── BUG 5: _load_from_db OPEN_BET_STATUSES ────────────────────────────
 
+
 class TestLoadFromDbStatuses:
     """BUG 5: _load_from_db must count bets with 'placed' and 'pending' status."""
 
@@ -202,10 +243,16 @@ class TestLoadFromDbStatuses:
 
         mid = _unique_id()
         with get_session() as s:
-            s.add(Bet(
-                market_id=mid, city="Testville", city_code="TEST",
-                side="YES", amount=10.0, status="placed",
-            ))
+            s.add(
+                Bet(
+                    market_id=mid,
+                    city="Testville",
+                    city_code="TEST",
+                    side="YES",
+                    amount=10.0,
+                    status="placed",
+                )
+            )
             s.commit()
             rm = RiskManager(db_session=s)
             assert rm.open_bets_count == 1
@@ -219,10 +266,16 @@ class TestLoadFromDbStatuses:
 
         mid = _unique_id()
         with get_session() as s:
-            s.add(Bet(
-                market_id=mid, city="Testville", city_code="TEST",
-                side="YES", amount=10.0, status="pending",
-            ))
+            s.add(
+                Bet(
+                    market_id=mid,
+                    city="Testville",
+                    city_code="TEST",
+                    side="YES",
+                    amount=10.0,
+                    status="pending",
+                )
+            )
             s.commit()
             rm = RiskManager(db_session=s)
             assert rm.open_bets_count == 1
@@ -235,10 +288,16 @@ class TestLoadFromDbStatuses:
 
         mid = _unique_id()
         with get_session() as s:
-            s.add(Bet(
-                market_id=mid, city="Testville", city_code="TEST",
-                side="YES", amount=10.0, status="rejected",
-            ))
+            s.add(
+                Bet(
+                    market_id=mid,
+                    city="Testville",
+                    city_code="TEST",
+                    side="YES",
+                    amount=10.0,
+                    status="rejected",
+                )
+            )
             s.commit()
             rm = RiskManager(db_session=s)
             assert rm.open_bets_count == 0
@@ -251,10 +310,16 @@ class TestLoadFromDbStatuses:
 
         mid = _unique_id()
         with get_session() as s:
-            s.add(Bet(
-                market_id=mid, city="Testville", city_code="TEST",
-                side="YES", amount=10.0, status="closed",
-            ))
+            s.add(
+                Bet(
+                    market_id=mid,
+                    city="Testville",
+                    city_code="TEST",
+                    side="YES",
+                    amount=10.0,
+                    status="closed",
+                )
+            )
             s.commit()
             rm = RiskManager(db_session=s)
             assert rm.open_bets_count == 0
@@ -268,10 +333,16 @@ class TestLoadFromDbStatuses:
         with get_session() as s:
             # Insert one bet for each possible status
             for status in list(OPEN_BET_STATUSES) + ["rejected", "closed", "settled"]:
-                s.add(Bet(
-                    market_id=_unique_id(), city="Testville", city_code="TEST",
-                    side="YES", amount=10.0, status=status,
-                ))
+                s.add(
+                    Bet(
+                        market_id=_unique_id(),
+                        city="Testville",
+                        city_code="TEST",
+                        side="YES",
+                        amount=10.0,
+                        status=status,
+                    )
+                )
             s.commit()
             rm = RiskManager(db_session=s)
             assert rm.open_bets_count == len(OPEN_BET_STATUSES)
@@ -279,51 +350,47 @@ class TestLoadFromDbStatuses:
 
 # ── BUG 6: STEP 5.5 throttling ────────────────────────────────────────
 
+
 class TestStep55Throttling:
     """BUG 6: check_range_pt should be throttled to 5-minute intervals."""
 
     def test_throttle_prevents_immediate_rerun(self):
         """If last_range_pt_check was <5min ago, PT check should be skipped."""
         from datetime import datetime, timezone, timedelta
+
         # Simulate the throttling logic from bot_loop.py
         last_check = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=2)
         now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
         _range_pt_interval = 300  # 5 minutes
 
-        should_run = (
-            last_check is None
-            or (now_utc - last_check).total_seconds() >= _range_pt_interval
-        )
+        should_run = last_check is None or (now_utc - last_check).total_seconds() >= _range_pt_interval
         assert should_run is False, "Should NOT run if last check was 2 minutes ago"
 
     def test_throttle_allows_after_interval(self):
         """If last_range_pt_check was >5min ago, PT check should run."""
         from datetime import datetime, timezone, timedelta
+
         last_check = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=6)
         now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
         _range_pt_interval = 300  # 5 minutes
 
-        should_run = (
-            last_check is None
-            or (now_utc - last_check).total_seconds() >= _range_pt_interval
-        )
+        should_run = last_check is None or (now_utc - last_check).total_seconds() >= _range_pt_interval
         assert should_run is True, "Should run if last check was 6 minutes ago"
 
     def test_first_run_always_executes(self):
         """First run (last_check=None) should always execute."""
         from datetime import datetime, timezone
+
         last_check = None
         now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
         _range_pt_interval = 300
 
-        should_run = (
-            last_check is None
-            or (now_utc - last_check).total_seconds() >= _range_pt_interval
-        )
+        should_run = last_check is None or (now_utc - last_check).total_seconds() >= _range_pt_interval
         assert should_run is True, "Should always run on first check"
 
 
 # ── ISSUE 9: defensive copy ───────────────────────────────────────────
+
 
 class TestDefensiveCopy:
     """ISSUE 9: range_bet_cities should not be mutated by bot."""
@@ -331,6 +398,7 @@ class TestDefensiveCopy:
     def test_range_bet_cities_not_mutated(self):
         """Bot should not mutate the original range_bet_cities list."""
         from config.settings import bot_config
+
         original = ["city1", "city2", "city3"]
         bot_config.strategy.range_bet_cities = list(original)
 
@@ -344,6 +412,7 @@ class TestDefensiveCopy:
     def test_range_bet_cities_copy_is_independent(self):
         """A copy of range_bet_cities should be independent."""
         from config.settings import bot_config
+
         original = ["city1", "city2"]
         bot_config.strategy.range_bet_cities = list(original)
 
@@ -357,6 +426,7 @@ class TestDefensiveCopy:
 
 # ── ISSUE 10: flush vs commit ─────────────────────────────────────────
 
+
 class TestExecuteSignalFlush:
     """ISSUE 10: execute_signal uses flush() not commit()."""
 
@@ -365,18 +435,28 @@ class TestExecuteSignalFlush:
         import asyncio
         from engine.strategy import BettingEngine
         from database.db import get_session
-        from database.models import Portfolio, WeatherMarket
+        from database.models import WeatherMarket
 
         with get_session() as s:
             _add_portfolio(s)
             # Add a market so the 8h guard doesn't block
             td = _td()
-            s.add(WeatherMarket(
-                id="flush_test_market", question="Q?", city="Testville",
-                city_code="TEST", metric="temperature_max", threshold=25.0,
-                target_date=td, yes_price=0.02, no_price=0.98,
-                status="open", latitude=41.0, longitude=29.0,
-            ))
+            s.add(
+                WeatherMarket(
+                    id="flush_test_market",
+                    question="Q?",
+                    city="Testville",
+                    city_code="TEST",
+                    metric="temperature_max",
+                    threshold=25.0,
+                    target_date=td,
+                    yes_price=0.02,
+                    no_price=0.98,
+                    status="open",
+                    latitude=41.0,
+                    longitude=29.0,
+                )
+            )
             s.commit()
 
             engine = BettingEngine(db_session=s)
@@ -400,9 +480,11 @@ class TestExecuteSignalFlush:
             with patch.object(s, "flush") as mock_flush:
                 with patch.object(s, "commit") as mock_commit:
                     # execute_signal should use flush, not commit
-                    result = asyncio.get_event_loop().run_until_complete(
-                        engine.execute_signal(signal, market_data)
-                    )
+                    loop = asyncio.new_event_loop()
+                    try:
+                        result = loop.run_until_complete(engine.execute_signal(signal, market_data))
+                    finally:
+                        loop.close()
 
                     # flush should have been called (to assign ID)
                     mock_flush.assert_called()
@@ -412,6 +494,7 @@ class TestExecuteSignalFlush:
 
 # ── Price Gate: yes_price > 0.10 ─────────────────────────────────────
 
+
 class TestPriceGate:
     """New rule: all bets with yes_price > 0.10 must be refused."""
 
@@ -420,17 +503,27 @@ class TestPriceGate:
         import asyncio
         from engine.strategy import BettingEngine
         from database.db import get_session
-        from database.models import Portfolio, WeatherMarket
+        from database.models import WeatherMarket
 
         with get_session() as s:
             _add_portfolio(s)
             td = _td()
-            s.add(WeatherMarket(
-                id="price_gate_market", question="Q?", city="Testville",
-                city_code="TEST", metric="temperature_max", threshold=25.0,
-                target_date=td, yes_price=0.30, no_price=0.70,
-                status="open", latitude=41.0, longitude=29.0,
-            ))
+            s.add(
+                WeatherMarket(
+                    id="price_gate_market",
+                    question="Q?",
+                    city="Testville",
+                    city_code="TEST",
+                    metric="temperature_max",
+                    threshold=25.0,
+                    target_date=td,
+                    yes_price=0.30,
+                    no_price=0.70,
+                    status="open",
+                    latitude=41.0,
+                    longitude=29.0,
+                )
+            )
             s.commit()
 
             engine = BettingEngine(db_session=s)
@@ -449,9 +542,11 @@ class TestPriceGate:
 
             market_data = {"market_id": "price_gate_market", "city_code": "TEST", "yes_price": 0.30}
 
-            result = asyncio.get_event_loop().run_until_complete(
-                engine.execute_signal(signal, market_data)
-            )
+            loop = asyncio.new_event_loop()
+            try:
+                result = loop.run_until_complete(engine.execute_signal(signal, market_data))
+            finally:
+                loop.close()
             assert result is None, "Bet with yes_price=0.30 should be refused"
 
     def test_execute_signal_allows_low_price(self):
@@ -459,17 +554,27 @@ class TestPriceGate:
         import asyncio
         from engine.strategy import BettingEngine
         from database.db import get_session
-        from database.models import Portfolio, WeatherMarket
+        from database.models import WeatherMarket
 
         with get_session() as s:
             _add_portfolio(s)
             td = _td()
-            s.add(WeatherMarket(
-                id="price_ok_market", question="Q?", city="Testville",
-                city_code="TEST", metric="temperature_max", threshold=25.0,
-                target_date=td, yes_price=0.05, no_price=0.95,
-                status="open", latitude=41.0, longitude=29.0,
-            ))
+            s.add(
+                WeatherMarket(
+                    id="price_ok_market",
+                    question="Q?",
+                    city="Testville",
+                    city_code="TEST",
+                    metric="temperature_max",
+                    threshold=25.0,
+                    target_date=td,
+                    yes_price=0.05,
+                    no_price=0.95,
+                    status="open",
+                    latitude=41.0,
+                    longitude=29.0,
+                )
+            )
             s.commit()
 
             engine = BettingEngine(db_session=s)
@@ -488,9 +593,11 @@ class TestPriceGate:
 
             market_data = {"market_id": "price_ok_market", "city_code": "TEST", "yes_price": 0.05}
 
-            result = asyncio.get_event_loop().run_until_complete(
-                engine.execute_signal(signal, market_data)
-            )
+            loop = asyncio.new_event_loop()
+            try:
+                result = loop.run_until_complete(engine.execute_signal(signal, market_data))
+            finally:
+                loop.close()
             assert result is not None, "Bet with yes_price=0.05 should be allowed"
 
     def test_execute_signal_refuses_exactly_011(self):
@@ -498,17 +605,27 @@ class TestPriceGate:
         import asyncio
         from engine.strategy import BettingEngine
         from database.db import get_session
-        from database.models import Portfolio, WeatherMarket
+        from database.models import WeatherMarket
 
         with get_session() as s:
             _add_portfolio(s)
             td = _td()
-            s.add(WeatherMarket(
-                id="price_edge_market", question="Q?", city="Testville",
-                city_code="TEST", metric="temperature_max", threshold=25.0,
-                target_date=td, yes_price=0.11, no_price=0.89,
-                status="open", latitude=41.0, longitude=29.0,
-            ))
+            s.add(
+                WeatherMarket(
+                    id="price_edge_market",
+                    question="Q?",
+                    city="Testville",
+                    city_code="TEST",
+                    metric="temperature_max",
+                    threshold=25.0,
+                    target_date=td,
+                    yes_price=0.11,
+                    no_price=0.89,
+                    status="open",
+                    latitude=41.0,
+                    longitude=29.0,
+                )
+            )
             s.commit()
 
             engine = BettingEngine(db_session=s)
@@ -527,9 +644,11 @@ class TestPriceGate:
 
             market_data = {"market_id": "price_edge_market", "city_code": "TEST", "yes_price": 0.11}
 
-            result = asyncio.get_event_loop().run_until_complete(
-                engine.execute_signal(signal, market_data)
-            )
+            loop = asyncio.new_event_loop()
+            try:
+                result = loop.run_until_complete(engine.execute_signal(signal, market_data))
+            finally:
+                loop.close()
             assert result is None, "Bet with yes_price=0.11 should be refused"
 
 

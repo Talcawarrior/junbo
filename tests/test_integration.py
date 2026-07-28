@@ -43,7 +43,11 @@ class TestDataPipeline:
             mock_instance.fetch_polymarket_events = AsyncMock(
                 return_value=[{"id": "123", "question": "Temperature test"}]
             )
-            markets = asyncio.get_event_loop().run_until_complete(mock_instance.fetch_polymarket_events())
+            loop = asyncio.new_event_loop()
+            try:
+                markets = loop.run_until_complete(mock_instance.fetch_polymarket_events())
+            finally:
+                loop.close()
             assert len(markets) > 0
             assert markets[0]["id"] == "123"
 

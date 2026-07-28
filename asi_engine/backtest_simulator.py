@@ -7,8 +7,10 @@ deep backtests over the full backfilled meteorology calibration tables.
 
 import json
 import logging
+import math
 import sqlite3
 
+from config.settings import bot_config
 from database.db import DB_PATH, get_session
 from database.models import Analysis, Bet, WeatherMarket
 from utils.formulas import polymarket_fee
@@ -19,6 +21,86 @@ from utils.probability import estimate_probability
 WEATHER_FEE_RATE = 0.05
 
 logger = logging.getLogger("ASI_BACKTESTER")
+
+# ── Model name mapping ─────────────────────────────────────────────────
+# DB stores Open-Meteo API names; config uses internal canonical names.
+# This reverse map normalizes DB names → config names for weight lookup.
+_API_TO_INTERNAL: dict[str, str] = {
+    "ecmwf_ifs04": "ecmwf_ifs025",
+    "gem_seamless": "gem_global",
+    "icon_seamless": "icon_global",
+    "jma_msm": "jma_seamless",
+    "cma_grapes_global": "cma_grapes_global",
+    "gfs_seamless": "gfs_seamless",
+    "ukmo_seamless": "ukmo_seamless",
+    "meteofrance_seamless": "meteofrance_seamless",
+}
+
+
+def _normalize_model(name: str) -> str:
+    """Map a DB/API model name to the canonical config key."""
+    return _API_TO_INTERNAL.get(name, name)
+
+
+# ── Metrics helpers ─────────────────────────────────────────────────────
+
+
+def _compute_extended_metrics(
+    pnl_series: list[float],
+    winning_pnls: list[float],
+    losing_pnls: list[float],
+    total_trades: int,
+) -> dict:
+    """Compute Sharpe, Sortino, max drawdown, profit factor from PnL series."""
+    result: dict = {}
+
+    # Average win / loss
+    result["avg_win"] = round(sum(winning_pnls) / len(winning_pnls), 2) if winning_pnls else 0.0
+    result["avg_loss"] = round(sum(losing_pnls) / len(losing_pnls), 2) if losing_pnls else 0.0
+
+    # Profit factor
+    gross_profit = sum(winning_pnls)
+    gross_loss = abs(sum(losing_pnls))
+    result["profit_factor"] = round(gross_profit / gross_loss, 2) if gross_loss > 0 else float("inf")
+
+    if not pnl_series or total_trades < 2:
+        result["sharpe"] = 0.0
+        result["sortino"] = 0.0
+        result["max_drawdown_pct"] = 0.0
+        return result
+
+    # Daily returns (normalize by number of trades per "day" approximation)
+    n = len(pnl_series)
+    mean_ret = sum(pnl_series) / n
+    variance = sum((r - mean_ret) ** 2 for r in pnl_series) / (n - 1)
+    std_ret = math.sqrt(variance) if variance > 0 else 1e-9
+
+    # Annualize: assume ~365 trading days
+    result["sharpe"] = round((mean_ret / std_ret) * math.sqrt(365), 2)
+
+    # Sortino: only downside deviation
+    negative_returns = [r for r in pnl_series if r < 0]
+    if negative_returns:
+        downside_var = sum(r**2 for r in negative_returns) / len(negative_returns)
+        downside_std = math.sqrt(downside_var) if downside_var > 0 else 1e-9
+        result["sortino"] = round((mean_ret / downside_std) * math.sqrt(365), 2)
+    else:
+        result["sortino"] = float("inf")
+
+    # Max drawdown from equity curve
+    equity = 10000.0
+    peak = equity
+    max_dd = 0.0
+    for pnl in pnl_series:
+        equity += pnl
+        if equity > peak:
+            peak = equity
+        dd = (peak - equity) / peak if peak > 0 else 0.0
+        if dd > max_dd:
+            max_dd = dd
+    result["max_drawdown_pct"] = round(max_dd * 100, 2)
+
+    return result
 
 
 class BacktestSimulator:
@@ -42,6 +124,12 @@ class BacktestSimulator:
         bets_lost = 0
         total_wagered = 0.0
         brier_errors = []
+        pnl_series: list[float] = []
+        winning_pnls: list[float] = []
+        losing_pnls: list[float] = []
+
+        # Use config max_bet_pct (single source of truth)
+        cfg_max_bet_pct = bot_config.strategy.max_bet_pct
 
         with get_session() as session:
             # Query all settled bets with their analysis & market details
@@ -73,13 +161,16 @@ class BacktestSimulator:
                 if not model_probs:
                     continue
 
+                # Normalize model names for weight lookup
+                normalized_probs = {_normalize_model(m): float(p) for m, p in model_probs.items()}
+
                 # 1. Recalculate consensus probability using proposed model weights
-                weight_sum = sum(model_weights.get(m, 0.0) for m in model_probs)
+                weight_sum = sum(model_weights.get(m, 0.0) for m in normalized_probs)
                 if weight_sum <= 0:
                     continue
 
                 recalculated_prob = (
-                    sum(model_weights.get(m, 0.0) * float(prob) for m, prob in model_probs.items()) / weight_sum
+                    sum(model_weights.get(m, 0.0) * prob for m, prob in normalized_probs.items()) / weight_sum
                 )
 
                 # 2. Check if the market outcome matches the YES direction
@@ -113,7 +204,7 @@ class BacktestSimulator:
                     # Yes, would place a bet!
                     total_bets_opened += 1
 
-                    # Kelly size it
+                    # Kelly size it (use config max_bet_pct, not hardcoded)
                     prob_win = recalculated_prob if sim_side == "YES" else (1.0 - recalculated_prob)
                     bet_size = kelly_bet_amount(
                         bankroll,
@@ -121,24 +212,28 @@ class BacktestSimulator:
                         entry_price,
                         fraction=kelly_fraction,
                         min_bet=1.0,
-                        max_bet_pct=0.03,
+                        max_bet_pct=cfg_max_bet_pct,
                     )
 
                     # Evaluate bet outcome
                     won = (sim_side == "YES" and outcome_yes) or (sim_side == "NO" and not outcome_yes)
                     total_wagered += bet_size
 
+                    # Entry fee applies to ALL bets (win or lose)
+                    shares = bet_size / entry_price
+                    entry_fee = polymarket_fee(shares, entry_price, WEATHER_FEE_RATE)
+
                     if won:
                         bets_won += 1
                         payout = bet_size / entry_price
-                        # Polymarket taker fee: C × feeRate × p × (1-p)
-                        shares = bet_size / entry_price
-                        fee = polymarket_fee(shares, entry_price, WEATHER_FEE_RATE)
-                        pnl = payout - bet_size - fee
+                        pnl = payout - bet_size - entry_fee
+                        winning_pnls.append(pnl)
                     else:
                         bets_lost += 1
-                        pnl = -bet_size
+                        pnl = -bet_size - entry_fee
+                        losing_pnls.append(pnl)
 
+                    pnl_series.append(pnl)
                     simulated_pnl += pnl
                     bankroll += pnl
                     if bankroll <= 0:
@@ -150,11 +245,15 @@ class BacktestSimulator:
         roi = (simulated_pnl / total_wagered * 100) if total_wagered > 0 else 0.0
         win_rate = (bets_won / total_bets_opened) if total_bets_opened > 0 else 0.0
 
+        extended = _compute_extended_metrics(pnl_series, winning_pnls, losing_pnls, total_bets_opened)
+
         logger.info(
-            "  Backtest Results -> Brier=%.4f, ROI=%.2f%%, Opened Bets=%d",
+            "  Backtest Results -> Brier=%.4f, ROI=%.2f%%, Opened Bets=%d, Sharpe=%.2f, MaxDD=%.2f%%",
             final_brier,
             roi,
             total_bets_opened,
+            extended["sharpe"],
+            extended["max_drawdown_pct"],
         )
 
         return {
@@ -163,6 +262,7 @@ class BacktestSimulator:
             "win_rate": round(win_rate, 4),
             "total_bets": total_bets_opened,
             "pnl": round(simulated_pnl, 2),
+            **extended,
         }
 
     def run_extended_backtest(self, parameters: dict) -> dict:
@@ -190,6 +290,8 @@ class BacktestSimulator:
             forecasts the bot uses, plus an independent inefficiency noise
             term (mean 0, std 7pp) so the bot can only profit by being
             smarter than the naive average — not by peeking at the answer.
+          * Enforces production risk limits: city cap, total exposure cap,
+            daily loss limit, and min entry price filter.
         """
         import random as _random
 
@@ -200,6 +302,13 @@ class BacktestSimulator:
         model_weights = parameters["model_weights"]
         min_edge = parameters["min_edge"]
         kelly_fraction = parameters["kelly_fraction"]
+
+        # Load production risk limits from config
+        cfg_max_bet_pct = bot_config.strategy.max_bet_pct
+        city_cap = bot_config.city_cap
+        total_exposure_pct = bot_config.strategy.total_exposure_pct
+        daily_loss_limit = bot_config.strategy.daily_loss_limit
+        min_entry_price = bot_config.strategy.min_entry_price
 
         # Deterministic seed so the backtest is reproducible across runs.
         # The seed does NOT touch the ground truth or the market price
@@ -234,8 +343,17 @@ class BacktestSimulator:
         trades_won = 0
         trades_lost = 0
         total_wagered = 0.0
-        brier_errors = []
+        brier_errors: list[float] = []
+        pnl_series: list[float] = []
+        winning_pnls: list[float] = []
+        losing_pnls: list[float] = []
         bankroll = 10000.0
+
+        # Risk limit tracking
+        city_bet_counts: dict[str, int] = {}
+        current_exposure = 0.0
+        daily_pnl = 0.0
+        current_date = None
 
         # Strike grid — covers a realistic temperature range in °C.
         # Using a fixed grid (instead of drawing from a distribution) keeps
@@ -243,6 +361,24 @@ class BacktestSimulator:
         strike_grid = [round(0.5 * k, 1) for k in range(-20, 80)]  # -10.0 .. +39.5
 
         for city_code, _city_name, date_str, metric, actual_val in groups:
+            # ── Daily reset: new date → reset daily PnL tracker ──────
+            if date_str != current_date:
+                current_date = date_str
+                daily_pnl = 0.0
+
+            # ── Daily loss limit check ───────────────────────────────
+            if daily_loss_limit > 0 and daily_pnl < -(daily_loss_limit * bankroll):
+                continue
+
+            # ── City cap check ───────────────────────────────────────
+            if city_cap > 0 and city_bet_counts.get(city_code, 0) >= city_cap:
+                continue
+
+            # ── Exposure cap check ───────────────────────────────────
+            max_exposure = total_exposure_pct * bankroll
+            if max_exposure > 0 and current_exposure >= max_exposure:
+                continue
+
             # Query all model predictions for this specific group
             cursor.execute(
                 """
@@ -256,12 +392,15 @@ class BacktestSimulator:
             if not preds:
                 continue
 
+            # Normalize DB model names → config canonical names
+            normalized_preds = {_normalize_model(m): v for m, v in preds.items()}
+
             # Calculate weighted average temperature prediction
-            weight_sum = sum(model_weights.get(m, 0.0) for m in preds)
+            weight_sum = sum(model_weights.get(m, 0.0) for m in normalized_preds)
             if weight_sum <= 0:
                 continue
 
-            weighted_temp = sum(model_weights.get(m, 0.0) * val for m, val in preds.items()) / weight_sum
+            weighted_temp = sum(model_weights.get(m, 0.0) * val for m, val in normalized_preds.items()) / weight_sum
 
             # ── HONEST STRIKE PRICE ────────────────────────────────────────
             # Pick a strike from a wide grid. Half the scenarios will resolve
@@ -270,7 +409,7 @@ class BacktestSimulator:
             outcome_yes = actual_val > strike
 
             # Calculate probability of YES using normal distribution estimate
-            pred_vals = list(preds.values())
+            pred_vals = list(normalized_preds.values())
             mean = sum(pred_vals) / len(pred_vals)
             std = (
                 max(
@@ -292,12 +431,6 @@ class BacktestSimulator:
             brier_errors.append((prob - (1.0 if outcome_yes else 0.0)) ** 2)
 
             # ── HONEST MARKET PRICE ────────────────────────────────────────
-            # The market price is built from the same ensemble the bot uses
-            # (a naive average), plus an independent inefficiency noise term
-            # that DOES NOT depend on `outcome_yes`. The bot can only beat
-            # the market by reading the ensemble better than the naive
-            # average did — exactly the question we want the backtest to
-            # answer.
             naive_z = (strike - mean) / max(std, 1.0)
             import math as _math
 
@@ -321,6 +454,10 @@ class BacktestSimulator:
                 sim_edge = no_edge
                 entry_price = no_price
 
+            # ── Min entry price filter ─────────────────────────────────────
+            if entry_price < min_entry_price:
+                continue
+
             ev = sim_edge - 0.02
             if sim_edge >= min_edge and ev > 0:
                 total_trades += 1
@@ -331,25 +468,37 @@ class BacktestSimulator:
                     entry_price,
                     fraction=kelly_fraction,
                     min_bet=1.0,
-                    max_bet_pct=0.03,
+                    max_bet_pct=cfg_max_bet_pct,
                 )
 
                 won = (sim_side == "YES" and outcome_yes) or (sim_side == "NO" and not outcome_yes)
                 total_wagered += bet_size
 
+                # Entry fee applies to ALL bets (win or lose)
+                shares = bet_size / entry_price
+                entry_fee = polymarket_fee(shares, entry_price, WEATHER_FEE_RATE)
+
                 if won:
                     trades_won += 1
                     payout = bet_size / entry_price
-                    # Polymarket taker fee: C × feeRate × p × (1-p)
-                    shares = bet_size / entry_price
-                    fee = polymarket_fee(shares, entry_price, WEATHER_FEE_RATE)
-                    pnl = payout - bet_size - fee
+                    pnl = payout - bet_size - entry_fee
+                    winning_pnls.append(pnl)
                 else:
                     trades_lost += 1
-                    pnl = -bet_size
+                    pnl = -bet_size - entry_fee
+                    losing_pnls.append(pnl)
 
+                pnl_series.append(pnl)
                 sim_pnl += pnl
                 bankroll += pnl
+                daily_pnl += pnl
+
+                # Update risk tracking
+                city_bet_counts[city_code] = city_bet_counts.get(city_code, 0) + 1
+                if won:
+                    current_exposure = max(0, current_exposure - bet_size)
+                else:
+                    current_exposure += bet_size
 
         conn.close()
 
@@ -357,12 +506,16 @@ class BacktestSimulator:
         roi = (sim_pnl / total_wagered * 100) if total_wagered > 0 else 0.0
         win_rate = (trades_won / total_trades) if total_trades > 0 else 0.0
 
+        extended = _compute_extended_metrics(pnl_series, winning_pnls, losing_pnls, total_trades)
+
         logger.info(
-            "  Extended Backtest Results [%d records] -> Brier=%.4f, ROI=%.2f%%, Trades=%d",
+            "  Extended Backtest Results [%d records] -> Brier=%.4f, ROI=%.2f%%, Trades=%d, Sharpe=%.2f, MaxDD=%.2f%%",
             len(groups),
             final_brier,
             roi,
             total_trades,
+            extended["sharpe"],
+            extended["max_drawdown_pct"],
         )
 
         return {
@@ -371,6 +524,7 @@ class BacktestSimulator:
             "win_rate": round(win_rate, 4),
             "total_bets": total_trades,
             "pnl": round(sim_pnl, 2),
+            **extended,
         }
 
     @staticmethod
