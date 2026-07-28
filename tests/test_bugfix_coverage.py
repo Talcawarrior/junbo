@@ -118,8 +118,8 @@ class TestRangeBetAccounting:
         with get_session() as s:
             _add_portfolio(s)
             _add_market(s, thresh=24, yes_price=0.01, target_date=td)
-            _add_market(s, thresh=25, yes_price=0.02, target_date=td)
-            _add_market(s, thresh=26, yes_price=0.03, target_date=td)
+            _add_market(s, thresh=25, yes_price=0.04, target_date=td)
+            _add_market(s, thresh=26, yes_price=0.02, target_date=td)
             _add_forecast(s, "TEST", td, 25.0, "src1")
             _add_forecast(s, "TEST", td, 25.0, "src2")
             s.commit()
@@ -143,8 +143,8 @@ class TestRangeBetAccounting:
         with get_session() as s:
             _add_portfolio(s)
             _add_market(s, thresh=24, yes_price=0.01, target_date=td)
-            _add_market(s, thresh=25, yes_price=0.02, target_date=td)
-            _add_market(s, thresh=26, yes_price=0.03, target_date=td)
+            _add_market(s, thresh=25, yes_price=0.04, target_date=td)
+            _add_market(s, thresh=26, yes_price=0.02, target_date=td)
             _add_forecast(s, "TEST", td, 25.0, "src1")
             _add_forecast(s, "TEST", td, 25.0, "src2")
             s.commit()

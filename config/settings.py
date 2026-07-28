@@ -174,7 +174,7 @@ class StrategyConfig:
     range_bet_enabled: bool = True
     range_bet_cities: list = None  # type: ignore[assignment]
     range_bet_amount: float = 10.0
-    range_bet_spread: int = 2  # 5 bet: T-2, T-1, T, T+1, T+2
+    range_bet_spread: int = 1  # 3 bet: T-1, T, T+1
     range_bet_pt_take_rate: float = 1.0  # %100 kar olunca bu orani sat (1.0 = $30)
     range_bet_trail_stop_pct: float = 0.0  # trail stop devre disi
     range_bet_pre_settlement_hours: float = 1.0  # settlementa 1 saat kala hepsini sat
@@ -352,8 +352,8 @@ class BotConfig:
 
     # ── Portfolio ──────────────────────────────────────────────────
     initial_portfolio: float = 1000.0
-    max_exposure_pct: float = 0.25
-    city_cap: int = 5
+    max_exposure_pct: float = 0.50
+    city_cap: int = 16
     weather_fee_rate: float = 0.05
     fee_exponent: float = 0.5  # Weather category: 0.5 (flatter curve)
 

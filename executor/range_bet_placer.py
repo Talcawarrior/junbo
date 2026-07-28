@@ -54,6 +54,25 @@ def _get_forecast_temp(city: str, icao: str, metric: str, target_date: datetime)
         return sum(values) / len(values)
 
 
+def _polymarket_favorite(city: str, target_date: datetime) -> int | None:
+    """Return the threshold (int) of the Polymarket strike with highest yes_price."""
+    with get_session() as s:
+        market = (
+            s.query(WeatherMarket)
+            .filter(
+                WeatherMarket.city.ilike(city),
+                WeatherMarket.metric == "temperature_max",
+                WeatherMarket.target_date == target_date,
+                WeatherMarket.status == "open",
+            )
+            .order_by(WeatherMarket.yes_price.desc())
+            .first()
+        )
+        if market and market.threshold:
+            return int(round(market.threshold))
+        return None
+
+
 def _find_market(city: str, threshold: int, target_date: datetime) -> WeatherMarket | None:
     with get_session() as s:
         s.expire_on_commit = False
@@ -109,17 +128,20 @@ def place_range_bets() -> list[str]:
             logger.info("Range: %s — ICAO bulunamadi", city)
             continue
 
-        # Weather fetch et (cache-first)
+        # Weather fetch et (cache-first) — for forecast data freshness
         _ensure_weather(city, icao, target_date)
 
-        # Forecast al
-        temp = _get_forecast_temp(city, icao, "temperature_max", target_date)
-        if temp is None:
-            logger.info("Range: %s — forecast yok", city)
-            continue
+        # Use Polymarket highest-priced strike as center
+        base = _polymarket_favorite(city, target_date)
+        if base is None:
+            # Fallback: model forecast
+            temp = _get_forecast_temp(city, icao, "temperature_max", target_date)
+            if temp is None:
+                logger.info("Range: %s — polymarket da forecast da yok", city)
+                continue
+            base = round(temp)
 
-        base = round(temp)
-        spread = s.range_bet_spread  # 2 = T-2,T-1,T,T+1,T+2
+        spread = s.range_bet_spread  # =1 (3 bet: T-1, T, T+1)
         thresholds = list(range(base - spread, base + spread + 1))
 
         candidates = []

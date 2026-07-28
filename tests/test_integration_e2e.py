@@ -54,12 +54,12 @@ class TestRiskManagementE2E:
         assert current_exposure + new_bet <= max_exp
 
     def test_city_cap_enforcement(self):
-        """City cap uygulanmalı."""
+        """City cap uygulanmalı — no city exceeds cap."""
         from config.settings import bot_config
 
         city_cap = bot_config.city_cap
-        assert city_bets["Dallas"] >= city_cap if "Dallas" in city_bets else True
-        assert city_bets["London"] < city_cap if "London" in city_bets else True
+        for city, bets in city_bets.items():
+            assert bets <= city_cap, f"{city} has {bets} bets, exceeds cap {city_cap}"
 
     def test_daily_loss_limit(self):
         """Daily loss limit uygulanmalı."""

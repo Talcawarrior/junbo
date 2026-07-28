@@ -153,13 +153,15 @@ class TestPlaceRangeBets:
         td = _td()
         with get_session() as s:
             _add_portfolio(s)
+            # Polymarket favorite = 25C (highest price at 0.03)
             _add_market(s, thresh=24, yes_price=0.01, target_date=td)
-            _add_market(s, thresh=25, yes_price=0.02, target_date=td)
-            _add_market(s, thresh=26, yes_price=0.03, target_date=td)
+            _add_market(s, thresh=25, yes_price=0.03, target_date=td)
+            _add_market(s, thresh=26, yes_price=0.02, target_date=td)
             _add_forecast(s, "TEST", td, 25.0, "src1")
             _add_forecast(s, "TEST", td, 25.0, "src2")
             s.commit()
         results = place_range_bets()
+        # spread=1 → thresholds = [24, 25, 26], all exist & ≤0.10
         assert len(results) == 3
 
     def test_skips_city_when_one_price_above_10(self):
@@ -179,9 +181,11 @@ class TestPlaceRangeBets:
 
     def test_disabled_when_not_enabled(self):
         from config.settings import bot_config
+        old = bot_config.strategy.range_bet_enabled
         bot_config.strategy.range_bet_enabled = False
         from executor.range_bet_placer import place_range_bets
         assert place_range_bets() == []
+        bot_config.strategy.range_bet_enabled = old
 
 
 class TestCheckRangePT:
@@ -192,13 +196,14 @@ class TestCheckRangePT:
         td = _td()
         with get_session() as s:
             _add_portfolio(s)
+            # Polymarket favorite = 25C (highest price)
             _add_market(s, thresh=24, yes_price=0.01, target_date=td)
-            _add_market(s, thresh=25, yes_price=0.02, target_date=td)
-            _add_market(s, thresh=26, yes_price=0.03, target_date=td)
+            _add_market(s, thresh=25, yes_price=0.04, target_date=td)
+            _add_market(s, thresh=26, yes_price=0.02, target_date=td)
             _add_forecast(s, "TEST", td, 25.0, "src1")
             _add_forecast(s, "TEST", td, 25.0, "src2")
             s.commit()
-        place_range_bets()
+        place_range_bets()  # expects 3 bets: 24C, 25C, 26C
 
         with get_session() as s:
             for b in s.query(Bet).filter(Bet.order_id.like("range_%")).all():
@@ -216,12 +221,12 @@ class TestCheckRangePT:
         with get_session() as s:
             _add_portfolio(s)
             _add_market(s, thresh=24, yes_price=0.01, target_date=td)
-            _add_market(s, thresh=25, yes_price=0.02, target_date=td)
-            _add_market(s, thresh=26, yes_price=0.03, target_date=td)
+            _add_market(s, thresh=25, yes_price=0.04, target_date=td)
+            _add_market(s, thresh=26, yes_price=0.02, target_date=td)
             _add_forecast(s, "TEST", td, 25.0, "src1")
             _add_forecast(s, "TEST", td, 25.0, "src2")
             s.commit()
-        place_range_bets()
+        place_range_bets()  # expects 3 bets: 24C, 25C, 26C
 
         with get_session() as s:
             for b in s.query(Bet).filter(Bet.order_id.like("range_%")).all():
