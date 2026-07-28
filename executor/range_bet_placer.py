@@ -14,7 +14,7 @@ from database.models import OPEN_BET_STATUSES, Bet, Portfolio, WeatherMarket, We
 
 logger = logging.getLogger("RANGE_BET")
 
-_TARGET_DAY_OFFSET = 1  # yarin (API'de en guncel data)
+_TARGET_DAY_OFFSET = 2  # 2 gun sonrasi (30/7 icin)
 
 
 # ── HELPERS ──────────────────────────────────────────────────────────────
