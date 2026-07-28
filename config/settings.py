@@ -353,7 +353,7 @@ class BotConfig:
     # ── Portfolio ──────────────────────────────────────────────────
     initial_portfolio: float = 1000.0
     max_exposure_pct: float = 0.50
-    city_cap: int = 16
+    city_cap: int = 5
     weather_fee_rate: float = 0.05
     fee_exponent: float = 0.5  # Weather category: 0.5 (flatter curve)
 
@@ -408,8 +408,9 @@ class BotConfig:
 
         if self.strategy.range_bet_cities is None:
             self.strategy.range_bet_cities = list([
-                "istanbul", "london", "newyork", "tokyo",
-                "seoul", "paris", "miami", "chicago",
+                "istanbul", "london", "tokyo", "seoul",
+                "paris", "munich", "hong kong", "sao paulo",
+                "shanghai",
             ])
 
         # ── Override from .env (single source: .env > dataclass defaults) ──
