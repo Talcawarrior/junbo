@@ -381,11 +381,6 @@ class PolymarketScraper:
                             (parsed.get("question") or "")[:80],
                         )
 
-                    # Upsert
-                    existing = (
-                        session.query(WeatherMarket).filter_by(id=parsed["id"]).first()
-                    )
-
                     # Skip markets with missing target_date or zero threshold
                     if parsed["target_date"] is None:
                         logger.warning(
@@ -409,6 +404,31 @@ class PolymarketScraper:
                         continue
 
                     status = "no_coords" if not has_coords else "open"
+
+                    # --- Duplicate prevention ---
+                    # Check by Polymarket ID first (fast path)
+                    existing = (
+                        session.query(WeatherMarket).filter_by(id=parsed["id"]).first()
+                    )
+                    # Also check by (city, target_date, threshold) to prevent
+                    # duplicate entries from different Polymarket events
+                    # tracking the same strike.
+                    if not existing:
+                        existing = (
+                            session.query(WeatherMarket)
+                            .filter(
+                                WeatherMarket.city == parsed["city"],
+                                WeatherMarket.threshold == parsed["threshold"],
+                                WeatherMarket.target_date.isnot(None),
+                            )
+                            .first()
+                        )
+                        # Verify same date (string comparison)
+                        if existing:
+                            td_str = parsed["target_date"].strftime("%Y-%m-%d") if hasattr(parsed["target_date"], "strftime") else str(parsed["target_date"])[:10]
+                            ex_str = str(existing.target_date)[:10] if existing.target_date else ""
+                            if ex_str != td_str:
+                                existing = None
 
                     if existing:
                         existing.yes_price = parsed["yes_price"]

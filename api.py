@@ -606,36 +606,27 @@ def get_markets():
             )
 
         # 2. Fetch other open markets (today + 7 days)
+        # No limit: return ALL open markets so the frontend/comparison
+        # scripts see the full picture.
         upper = now + timedelta(days=7)
+        existing_ids = [m["id"] for m in market_list]
         markets = (
             db.query(WeatherMarket)
             .filter(
                 WeatherMarket.target_date >= now,
                 WeatherMarket.target_date <= upper,
                 WeatherMarket.status == "open",
-                ~WeatherMarket.id.in_([m["id"] for m in market_list]),
+                ~WeatherMarket.id.in_(existing_ids) if existing_ids else True,
             )
-            .limit(100)
             .all()
         )
 
-        calc = Calculator()
         for m in markets:
             if m.yes_price is None or m.threshold is None:
                 continue
             current_price = float(m.yes_price)
+            # Use yes_price as model_prob baseline (fast, no forecast query)
             model_prob = current_price
-            forecasts = (
-                db.query(WeatherForecast)
-                .filter(WeatherForecast.market_id == m.id)
-                .order_by(WeatherForecast.fetched_at.desc())
-                .limit(8)
-                .all()
-            )
-            if forecasts:
-                latest_vals = [f.predicted_value for f in forecasts]
-                days_ahead = max((m.target_date - now).days, 1)
-                model_prob = calc.estimate_probability(latest_vals, float(m.threshold), days_ahead)
 
             market_list.append(
                 {
@@ -648,7 +639,7 @@ def get_markets():
                     "current_yes_bid": current_price,
                     "current_no_bid": m.no_price or (1 - current_price),
                     "model_prob": model_prob,
-                    "edge": model_prob - current_price,
+                    "edge": 0.0,
                     "ev": safe_ev(model_prob, current_price),
                     "status": "OPEN",
                 }
