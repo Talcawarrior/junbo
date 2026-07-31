@@ -74,8 +74,8 @@ def init_db():
     _migrate_add_index("ix_analyses_market_id", "analyses", "market_id")
     _migrate_add_index("ix_bets_market_id", "bets", "market_id")
     _migrate_add_index("ix_bets_status", "bets", "status")
-    _migrate_add_index("ix_bet_snapshots_bet_id", "bet_snapshots", "bet_id")
-    _migrate_add_index("ix_bet_snapshots_snapshot_time", "bet_snapshots", "snapshot_time")
+    _migrate_add_index("ix_market_snapshots_market_id", "market_snapshots", "market_id")
+    _migrate_add_index("ix_market_snapshots_snapshot_time", "market_snapshots", "snapshot_time")
 
     _DB_INITIALIZED = True
     logger.info("Database initialized at %s with WAL mode", DB_PATH)

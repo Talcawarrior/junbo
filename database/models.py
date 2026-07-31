@@ -248,41 +248,40 @@ class ModelPerformance(Base):
     recorded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
-class BetSnapshot(Base):
-    """Saatlik bet fiyat snapshot'i — giris zamani analizi icin."""
+class MarketSnapshot(Base):
+    """Saatlik piyasa fiyat snapshot'i — giris zamani analizi icin.
 
-    __tablename__ = "bet_snapshots"
+    Tum acik WeatherMarket'lerin YES/NO fiyatlarini saatlik olarak kaydeder.
+    Sadece yes_price > 0.01 olan marketler kaydedilir.
+    """
+
+    __tablename__ = "market_snapshots"
 
     __table_args__ = (
-        Index("ix_bet_snapshots_bet_id", "bet_id"),
-        Index("ix_bet_snapshots_snapshot_time", "snapshot_time"),
+        Index("ix_market_snapshots_market_id", "market_id"),
+        Index("ix_market_snapshots_snapshot_time", "snapshot_time"),
+        Index("ix_market_snapshots_city_metric", "city", "metric", "target_date"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    bet_id = Column(Integer, nullable=False)
     market_id = Column(String, nullable=False)
 
-    # Bet bilgileri
+    # Market bilgileri
     city = Column(String)
     metric = Column(String)
     target_date = Column(DateTime)
-    entry_price = Column(Float)
-    amount = Column(Float)
-    side = Column(String)
+    threshold = Column(Float, nullable=True)
+    threshold_unit = Column(String, nullable=True)
+    market_type = Column(String, nullable=True)
 
-    # Snapshot anindaki degerler
-    current_price = Column(Float)
-    unrealized_pnl = Column(Float, default=0.0)
-    market_yes_price = Column(Float)
+    # Piyasa fiyatlari
+    yes_price = Column(Float)
+    no_price = Column(Float)
+    volume = Column(Float, default=0.0)
 
     # Zaman bilgisi
-    placed_at = Column(DateTime)
     snapshot_time = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    hours_held = Column(Float, default=0.0)
     hours_to_settlement = Column(Float, default=0.0)
-
-    # Bet durumu
-    bet_status = Column(String)
 
 
 # Compatibility Aliases

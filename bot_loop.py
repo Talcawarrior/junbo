@@ -481,14 +481,14 @@ _SNAPSHOT_INTERVAL = 3600  # 1 saat
 
 async def snapshot_loop(state):
     """Saatlik bet snapshot dongusu — giris zamani analizi icin."""
-    from jobs.snapshot_job import take_bet_snapshots, cleanup_old_snapshots
+    from jobs.snapshot_job import take_market_snapshots, cleanup_old_snapshots
 
     last_cleanup_date = None
     logger.info("Snapshot loop started")
 
     while state.is_running:
         try:
-            saved = await asyncio.to_thread(take_bet_snapshots)
+            saved = await asyncio.to_thread(take_market_snapshots)
             logger.info("Snapshot loop: %d snapshots saved", saved)
 
             today = datetime.now(timezone.utc).date()
