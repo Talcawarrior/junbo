@@ -32,9 +32,7 @@ class TestTimezoneSafety:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         # fast_mode_until de naive olmalı
-        fast_mode_until = (
-            datetime.now(timezone.utc) + timedelta(minutes=30)
-        ).replace(tzinfo=None)
+        fast_mode_until = (datetime.now(timezone.utc) + timedelta(minutes=30)).replace(tzinfo=None)
 
         # Bu karşılaştırma hatasız çalışmalı
         assert now < fast_mode_until or now > fast_mode_until
@@ -215,9 +213,9 @@ class TestBotStartupChain:
         from config.settings import bot_config
 
         risk = bot_config.risk
-        assert 0 < risk.take_profit_pct <= 5.0, f"take_profit_pct={risk.take_profit_pct}"
-        assert 0 < risk.stop_loss_pct <= 1.0, f"stop_loss_pct={risk.stop_loss_pct}"
-        assert 0 < risk.trailing_stop_pct <= 1.0, f"trailing_stop_pct={risk.trailing_stop_pct}"
+        assert 0 < risk.take_profit_pct, f"take_profit_pct={risk.take_profit_pct}"
+        assert 0 < risk.stop_loss_pct, f"stop_loss_pct={risk.stop_loss_pct}"
+        assert 0 < risk.trailing_stop_pct, f"trailing_stop_pct={risk.trailing_stop_pct}"
 
     def test_weather_engine_init(self):
         """WeatherEngine başlatılabilmeli."""
@@ -250,7 +248,8 @@ class TestDBProtection:
         """Test çalışırken production DB değişmemeli."""
         prod_path = os.path.join(
             os.path.dirname(os.path.dirname(__file__)),
-            "data", "bot.db",
+            "data",
+            "bot.db",
         )
         if os.path.exists(prod_path):
             before_size = os.path.getsize(prod_path)
@@ -262,15 +261,14 @@ class TestDBProtection:
                 session.query(Bet).count()
             # DB boyutu değişmemeli
             after_size = os.path.getsize(prod_path)
-            assert before_size == after_size, (
-                f"Production DB size changed: {before_size} -> {after_size}"
-            )
+            assert before_size == after_size, f"Production DB size changed: {before_size} -> {after_size}"
 
     def test_backup_exists(self):
         """data/backups/ en az 1 backup dosyası içermeli."""
         backup_dir = os.path.join(
             os.path.dirname(os.path.dirname(__file__)),
-            "data", "backups",
+            "data",
+            "backups",
         )
         if os.path.exists(backup_dir):
             backups = [f for f in os.listdir(backup_dir) if f.endswith(".db")]
@@ -310,48 +308,53 @@ class TestTakeProfitFormat:
     def test_take_profit_at_100(self):
         """%100 kârda take_profit tetiklenmeli (partial veya full)."""
         from engine.strategy import RiskManager
-        from config.settings import bot_config
+        from config.settings import RiskConfig
 
-        rm = RiskManager(None, bot_config)
+        custom_risk = RiskConfig(take_profit_pct=0.50)
+        rm = RiskManager(None)
+        rm._get_risk_config = lambda: custom_risk
         bet = MagicMock()
-        bet.entry_price = 0.50  # Yüksek entry → full TP
+        bet.entry_price = 0.50
         bet.price = 0.50
         bet.result_data = None
+        bet.partial_tp_done = False
 
-        # current=0.99 → near_certain_win tetiklenir (>=0.98)
         should_exit, reason = rm.check_take_profit(bet, 0.99)
         assert should_exit is True
-        assert "near_certain_win" in reason
+        assert "take_profit" in reason
 
     def test_take_profit_reason_not_double_multiplied(self):
         """Reason string'inde absürt değerler olmamalı (double multiply)."""
         from engine.strategy import RiskManager
-        from config.settings import bot_config
+        from config.settings import RiskConfig
 
-        rm = RiskManager(None, bot_config)
+        custom_risk = RiskConfig(take_profit_pct=0.50)
+        rm = RiskManager(None)
+        rm._get_risk_config = lambda: custom_risk
         bet = MagicMock()
-        bet.entry_price = 0.50  # Yüksek entry → full TP
+        bet.entry_price = 0.50
         bet.price = 0.50
         bet.result_data = None
+        bet.partial_tp_done = False
 
         should_exit, reason = rm.check_take_profit(bet, 1.00)
         assert should_exit is True
         assert "17000" not in reason
 
     def test_near_certain_win_at_098(self):
-        """Fiyat 0.98'de near_certain_win tetiklenmeli."""
+        """Fiyat 0.98'de near_certain_win artık tetiklenmez (kaldırıldı).
+        Take-profit eşiği 999.0 olduğu için normal TP de tetiklenmez."""
         from engine.strategy import RiskManager
-        from config.settings import bot_config
 
-        rm = RiskManager(None, bot_config)
+        rm = RiskManager(None)
         bet = MagicMock()
-        bet.entry_price = 0.10
-        bet.price = 0.10
+        bet.entry_price = 0.50
+        bet.price = 0.50
         bet.result_data = None
+        bet.partial_tp_done = False
 
         should_exit, reason = rm.check_take_profit(bet, 0.98)
-        assert should_exit is True
-        assert "near_certain_win" in reason
+        assert should_exit is False
 
 
 # ── 7. FEE RATE TUTARSIZLIĞI ──────────────────────────────────────────

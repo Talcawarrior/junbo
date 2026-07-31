@@ -94,7 +94,7 @@ class StrategyConfig:
     # public NWS/Open-Meteo consensus.  5% is enough to cover bookmaker
     # vig + a thin profit margin in paper mode.  Can be lowered once a
     # private weather feed (e.g. ECMWF-direct) gives a structural edge.
-    min_edge: float = 0.05  # 5% edge minimum (must exceed 2% fee_drag + margin)
+    min_edge: float = 0.001  # 0.1% - accept nearly all positive edge bets
     max_bet_amount: float = 10.0  # Maximum $10 per bet (flat)
     max_bet_pct: float = 1.0  # Safety ceiling (flat_bet_usd overrides Kelly sizing)
     min_bet_size: float = 1.0  # Minimum bet size in USD
@@ -171,7 +171,7 @@ class StrategyConfig:
     daily_loss_limit: float = 0.05  # 5% daily max loss
 
     # ── Range betting (YES-only, fixed $10, temperature range) ──────────
-    range_bet_enabled: bool = True
+    range_bet_enabled: bool = False
     range_bet_cities: list = None  # type: ignore[assignment]
     range_bet_amount: float = 10.0
     range_bet_spread: int = 1  # 3 bet: T-1, T, T+1
@@ -179,23 +179,29 @@ class StrategyConfig:
     range_bet_trail_stop_pct: float = 0.0  # trail stop devre disi
     range_bet_pre_settlement_hours: float = 1.0  # settlementa 1 saat kala hepsini sat
 
+    # ── Rotation: kapanisa X saat kala en yuksek fiyata gec ─────────────
+    rotation_hours: tuple = (12, 11, 10)  # hangi saatlerde taranacak
+
 
 @dataclass
 class RiskConfig:
-    """Active risk management: position-level stop-loss, take-profit, time decay, rebalance."""
+    """Active risk management: position-level stop-loss, take-profit, time decay, rebalance.
+
+    DISABLED: all early exits set to extreme values so bets ONLY close at settlement (ST).
+    """
 
     # Position-level limits
-    stop_loss_pct: float = 0.25  # %25 kayıpta otomatik kapat
-    take_profit_pct: float = 1.0  # %100 karda otomatik kapat
-    trailing_stop_pct: float = 0.15  # %15 trailing stop (tepeden düşüşte)
+    stop_loss_pct: float = 999.0  # %999 kayıtta kapat = asla tetiklenmez
+    take_profit_pct: float = 999.0  # %999 karda kapat = asla tetiklenmez
+    trailing_stop_pct: float = 999.0  # %999 trailing drop = asla tetiklenmez
 
     # Time-based exits
-    time_decay_hours: int = 24  # Settlement'a bu kadar saat kala
-    time_decay_threshold: float = -0.10  # %10 zarardaysa kapat
+    time_decay_hours: int = 0  # 0 saat = time decay devre dışı
+    time_decay_threshold: float = -999.0  # %999 zararda kapat = asla tetiklenmez
 
-    # Rebalancing
-    min_rebalance_edge_ratio: float = 2.0  # Yeni edge en az 2x eski edge
-    rebalance_min_loss: float = -0.15  # Rebalance için min zarar eşiği
+    # Rebalancing (disabled via extreme ratio)
+    min_rebalance_edge_ratio: float = 999.0
+    rebalance_min_loss: float = -999.0
 
     # Risk management loop interval (seconds)
 
@@ -275,6 +281,40 @@ _ICAO_COORDS = {
     # Africa (2)
     "HECA": (30.1219, 31.4056),
     "FACT": (-33.9694, 18.5972),
+    # Additional US cities (11)
+    "KMSP": (44.8848, -93.2223),
+    "KPDX": (45.5887, -122.5975),
+    "KSAN": (32.7338, -117.1900),
+    "KTPA": (27.9755, -82.5332),
+    "KSMF": (38.6954, -121.5908),
+    "KPIT": (40.4915, -80.2329),
+    "KSTL": (38.7487, -90.3700),
+    "KBWI": (39.1774, -76.6684),
+    "KMKE": (42.9472, -87.8966),
+    "KMCI": (39.2976, -94.7139),
+    "KSLC": (40.7884, -111.9778),
+    "KAUS": (30.1945, -97.6700),  # Austin
+    # Asia additional (15)
+    "WMKK": (2.7456, 101.7099),  # Kuala Lumpur
+    "RPLL": (14.5086, 121.0194),  # Manila
+    "LIMC": (45.6306, 8.7281),  # Milan
+    "EPWA": (52.1657, 20.9671),  # Warsaw
+    "RKPK": (35.0689, 128.9625),  # Busan
+    "ZUUU": (30.5785, 103.9471),  # Chengdu
+    "ZUCK": (29.7192, 106.6417),  # Chongqing
+    "ZGGG": (23.3924, 113.2988),  # Guangzhou
+    "EFHK": (60.3172, 24.9633),  # Helsinki
+    "OEJN": (21.6796, 39.1565),  # Jeddah
+    "OPKC": (24.9065, 67.1608),  # Karachi
+    "RKSI": (37.4602, 126.4407),  # Seoul Incheon
+    "ZGSZ": (22.6393, 113.8107),  # Shenzhen
+    "NZWN": (-41.3272, 174.8053),  # Wellington
+    "ZHHH": (30.7838, 114.2081),  # Wuhan
+    "VILK": (26.7606, 80.8893),  # Lucknow
+    "ZSQD": (36.0986, 120.3719),  # Qingdao
+    "MPTO": (9.0716, -79.3829),  # Panama City
+    # NYC alias
+    "NYC": (40.7769, -73.8740),
 }
 
 _CITY_ICAO_MAP = {
@@ -308,6 +348,31 @@ _CITY_ICAO_MAP = {
     "buenos aires": "SAEZ",
     "santiago": "SCEL",
     "lima": "SPJC",
+    # Missing US cities from Polymarket
+    "minneapolis": "KMSP",
+    "portland": "KPDX",
+    "san diego": "KSAN",
+    "tampa": "KTPA",
+    "sacramento": "KSMF",
+    "pittsburgh": "KPIT",
+    "st louis": "KSTL",
+    "baltimore": "KBWI",
+    "milwaukee": "KMKE",
+    "kansas city": "KMCI",
+    "salt lake city": "KSLC",
+    # Missing international cities
+    "osaka": "RJOO",
+    "jakarta": "WIII",
+    "mumbai": "VABB",
+    "delhi": "VIDP",
+    "sydney": "YSSY",
+    "melbourne": "YMML",
+    "auckland": "NZAA",
+    "cairo": "HECA",
+    "kuala lumpur": "WMKK",
+    "manila": "RPLL",
+    "milan": "LIMC",
+    "warsaw": "EPWA",
     "london": "EGLL",
     "paris": "LFPG",
     "berlin": "EDDT",
@@ -343,6 +408,23 @@ _CITY_ICAO_MAP = {
     "auckland": "NZAA",
     "cairo": "HECA",
     "cape town": "FACT",
+    # Additional cities from Polymarket
+    "austin": "KAUS",
+    "busan": "RKPK",
+    "chengdu": "ZUUU",
+    "chongqing": "ZUCK",
+    "guangzhou": "ZGGG",
+    "helsinki": "EFHK",
+    "jeddah": "OEJN",
+    "karachi": "OPKC",
+    "nyc": "KLGA",
+    "seoul (incheon)": "RKSI",
+    "shenzhen": "ZGSZ",
+    "wellington": "NZWN",
+    "wuhan": "ZHHH",
+    "lucknow": "VILK",
+    "qingdao": "ZSQD",
+    "panama city": "MPTO",
 }
 
 
@@ -351,9 +433,9 @@ class BotConfig:
     """Combined configurations — single source of truth for ALL config."""
 
     # ── Portfolio ──────────────────────────────────────────────────
-    initial_portfolio: float = 1000.0
+    initial_portfolio: float = 2000.0
     max_exposure_pct: float = 1.0
-    city_cap: int = 5
+    city_cap: int = 999  # no city limit - bet all cities
     weather_fee_rate: float = 0.05
     fee_exponent: float = 0.5  # Weather category: 0.5 (flatter curve)
 
@@ -407,13 +489,31 @@ class BotConfig:
         self.risk = self.risk or RiskConfig()
 
         if self.strategy.range_bet_cities is None:
-            self.strategy.range_bet_cities = list([
-                "istanbul", "london", "tokyo", "seoul",
-                "paris", "munich", "hong kong", "sao paulo",
-                "shanghai", "amsterdam", "ankara", "beijing",
-                "buenos aires", "cape town", "madrid", "mexico city",
-                "moscow", "singapore", "taipei", "tel aviv", "toronto",
-            ])
+            self.strategy.range_bet_cities = list(
+                [
+                    "istanbul",
+                    "london",
+                    "tokyo",
+                    "seoul",
+                    "paris",
+                    "munich",
+                    "hong kong",
+                    "sao paulo",
+                    "shanghai",
+                    "amsterdam",
+                    "ankara",
+                    "beijing",
+                    "buenos aires",
+                    "cape town",
+                    "madrid",
+                    "mexico city",
+                    "moscow",
+                    "singapore",
+                    "taipei",
+                    "tel aviv",
+                    "toronto",
+                ]
+            )
 
         # ── Override from .env (single source: .env > dataclass defaults) ──
         self.initial_portfolio = float(os.getenv("INITIAL_PORTFOLIO", str(self.initial_portfolio)))
@@ -596,7 +696,7 @@ def apply_persisted_strategy_params() -> dict:
 
     if "min_edge" in persisted:
         try:
-            s.min_edge = float(persisted["min_edge"])
+            s.min_edge = 0.001  # Hard floor — no override allowed
             applied["min_edge"] = s.min_edge
         except (TypeError, ValueError):
             pass

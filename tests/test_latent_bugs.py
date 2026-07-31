@@ -501,6 +501,7 @@ ALLOWED_DEAD = {
     "price_poller_loop",
     "scan_and_bet_loop",
     "settlement_loop",
+    "snapshot_loop",
     # Model blacklist utility (public API for debugging/inspection)
     "get_blacklist_summary",
     # 5-bet simulation script (analysis/educational, not wired into bot)
@@ -511,6 +512,8 @@ ALLOWED_DEAD = {
     # Model run detector (public API for latency arbitrage)
     "get_active_model_windows",
     "detect_forecast_delta",
+    # Entry time analysis (called from API/CLI on demand)
+    "get_entry_time_analysis",
 }
 
 

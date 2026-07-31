@@ -25,7 +25,7 @@ from database.models import Analysis, Bet, Portfolio
 setup_logging()
 
 # Import app, state, and loop functions from split modules.
-from api import app, price_poller_loop, scan_and_bet_loop, settlement_loop, state  # noqa: E402
+from api import app, price_poller_loop, scan_and_bet_loop, settlement_loop, snapshot_loop, state  # noqa: E402
 
 logger = __import__("logging").getLogger(__name__)
 
@@ -127,6 +127,7 @@ def run_cli():
     # Bot başlamadan önce DB backup al
     try:
         from db_backup import create_backup
+
         create_backup("startup")
     except Exception:
         pass
@@ -186,7 +187,8 @@ def run_cli():
             state.tasks["scan_and_bet"] = asyncio.create_task(scan_and_bet_loop(state))
             state.tasks["settlement"] = asyncio.create_task(settlement_loop(state))
             state.tasks["price_poller"] = asyncio.create_task(price_poller_loop(state))
-            logger.info("Bot loops started (scan_and_bet + settlement + price_poller)")
+            state.tasks["snapshot"] = asyncio.create_task(snapshot_loop(state))
+            logger.info("Bot loops started (scan_and_bet + settlement + price_poller + snapshot)")
             yield
             # Shutdown
             logger.info("LIFESPAN SHUTDOWN - Stopping bot loops")
@@ -226,12 +228,14 @@ def run_cli():
         # Silmeden ÖNCE backup al
         try:
             from db_backup import create_backup
+
             create_backup("pre_reset_cli")
         except Exception:
             pass
         # Bets ve portfolio'yu parquet'a arşivle
         try:
             from database.db_cleanup import archive_bets_and_portfolio
+
             archive_bets_and_portfolio()
         except Exception:
             pass

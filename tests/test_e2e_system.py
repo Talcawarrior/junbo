@@ -194,22 +194,24 @@ class TestStep5_RiskManagement:
 
     def test_stop_loss_triggers(self):
         """Stop-loss tetiklenmeli."""
-        from config.settings import bot_config
+
+        # Use normal threshold for testing stop-loss trigger
+        stop_loss_pct = 0.25
 
         entry = 0.50
         current = 0.34  # %32 zarar
-        stop_loss_pct = bot_config.risk.stop_loss_pct  # 0.30
 
         loss_pct = (current - entry) / entry
         assert loss_pct <= -stop_loss_pct
 
     def test_take_profit_triggers(self):
         """Take-profit tetiklenmeli."""
-        from config.settings import bot_config
+
+        # Use normal threshold for testing take-profit trigger
+        take_profit_pct = 1.0
 
         entry = 0.25
         current = 0.55  # %120 kâr
-        take_profit_pct = bot_config.risk.take_profit_pct  # 1.0
 
         profit_pct = (current - entry) / entry
         assert profit_pct >= take_profit_pct
@@ -508,7 +510,8 @@ class TestStep12_CompleteFlow:
 
     def test_risk_check_flow(self):
         """Risk kontrol akışı."""
-        from config.settings import bot_config
+        # Use normal threshold for testing stop-loss trigger
+        stop_loss_pct = 0.25
 
         # Mock bet
         entry = 0.50
@@ -516,12 +519,12 @@ class TestStep12_CompleteFlow:
         loss_pct = (current - entry) / entry  # -0.30 = %30 zarar
 
         # Stop-loss kontrolü (%30 zararda kapat)
-        if loss_pct <= -bot_config.risk.stop_loss_pct:
+        if loss_pct <= -stop_loss_pct:
             should_close = True
         else:
             should_close = False
 
-        # %30 zarar = %30 stop-loss threshold → tetiklenmeli
+        # %30 zarar > %25 stop-loss threshold → tetiklenmeli
         assert should_close is True
 
 

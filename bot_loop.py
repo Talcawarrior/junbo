@@ -115,6 +115,7 @@ def _get_scan_interval(now: datetime, fast_mode_until: datetime | None) -> int:
         return _FAST_SCAN_INTERVAL
     # Forecast Latency Arbitrage: scan faster during model run data windows
     from utils.model_run_detector import get_model_run_fast_interval
+
     model_interval = get_model_run_fast_interval(now)
     if model_interval is not None:
         return model_interval
@@ -235,6 +236,7 @@ async def scan_and_bet_loop(state):
             # ve bahis açılımını bloklamaz.
             # Range betting aktifse regular place_bets atlanir (5-bet kurali)
             from config.settings import bot_config as _bc
+
             skip_bets = _bc.strategy.range_bet_enabled
             await asyncio.wait_for(asyncio.to_thread(run_cycle, skip_place_bets=skip_bets), timeout=_CYCLE_TIMEOUT)
 
@@ -262,13 +264,12 @@ async def scan_and_bet_loop(state):
                     log_model_run_status,
                     MODEL_RUN_FAST_WINDOW,
                 )
+
                 now_utc_arb = datetime.now(timezone.utc).replace(tzinfo=None)
                 if is_in_model_run_window(now_utc_arb):
                     # Activate fast mode for model run window
                     if model_run_fast_until is None or now_utc_arb >= model_run_fast_until:
-                        model_run_fast_until = (
-                            now_utc_arb + timedelta(seconds=MODEL_RUN_FAST_WINDOW)
-                        )
+                        model_run_fast_until = now_utc_arb + timedelta(seconds=MODEL_RUN_FAST_WINDOW)
                         log_model_run_status(now_utc_arb)
                         logger.info(
                             "MODEL RUN WINDOW — FAST MODE for %d min",
@@ -320,8 +321,10 @@ async def scan_and_bet_loop(state):
                     # Hemen range bet ac — 2 gun sonrasi piyasasi acildi
                     try:
                         from config.settings import bot_config as _bc2
+
                         if _bc2.strategy.range_bet_enabled:
                             from executor.range_bet_placer import place_range_bets
+
                             r = await asyncio.wait_for(asyncio.to_thread(place_range_bets), timeout=60)
                             if r:
                                 logger.info("Range betting (immediate): %s", "; ".join(r))
@@ -337,6 +340,7 @@ async def scan_and_bet_loop(state):
             # Sadece saat başı çalışır (her 60 dk'da 1 kez)
             try:
                 from config.settings import bot_config as _bc
+
                 range_interval = 3600
                 now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
                 if _bc.strategy.range_bet_enabled and (
@@ -357,6 +361,7 @@ async def scan_and_bet_loop(state):
                 now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
                 if last_range_pt_check is None or (now_utc - last_range_pt_check).total_seconds() >= _range_pt_interval:
                     from executor.range_bet_placer import check_range_pt
+
                     pt_closed = await asyncio.wait_for(asyncio.to_thread(check_range_pt), timeout=30)
                     last_range_pt_check = datetime.now(timezone.utc).replace(tzinfo=None)
                     if pt_closed:
@@ -380,9 +385,11 @@ async def scan_and_bet_loop(state):
             # Also check model run fast mode
             if model_run_fast_until and now < model_run_fast_until:
                 interval = min(interval, _FAST_SCAN_INTERVAL)
-            mode = "FAST" if (fast_mode_until and now < fast_mode_until) or (
-                model_run_fast_until and now < model_run_fast_until
-            ) else "NORMAL"
+            mode = (
+                "FAST"
+                if (fast_mode_until and now < fast_mode_until) or (model_run_fast_until and now < model_run_fast_until)
+                else "NORMAL"
+            )
             logger.info("Scan completed in %.1fs [%s mode], next in %ds", scan_duration, mode, interval)
 
             await asyncio.sleep(interval)
@@ -467,6 +474,37 @@ async def settlement_loop(state):
         await asyncio.sleep(state.config.SETTLEMENT_INTERVAL)
 
     logger.info("Settlement loop exited (is_running=%s)", state.is_running)
+
+
+_SNAPSHOT_INTERVAL = 3600  # 1 saat
+
+
+async def snapshot_loop(state):
+    """Saatlik bet snapshot dongusu — giris zamani analizi icin."""
+    from jobs.snapshot_job import take_bet_snapshots, cleanup_old_snapshots
+
+    last_cleanup_date = None
+    logger.info("Snapshot loop started")
+
+    while state.is_running:
+        try:
+            saved = await asyncio.to_thread(take_bet_snapshots)
+            logger.info("Snapshot loop: %d snapshots saved", saved)
+
+            today = datetime.now(timezone.utc).date()
+            if last_cleanup_date != today:
+                await asyncio.to_thread(cleanup_old_snapshots, days=30)
+                last_cleanup_date = today
+
+        except asyncio.CancelledError:
+            logger.info("Snapshot loop cancelled")
+            break
+        except Exception as e:
+            logger.error("Snapshot error: %s", e, exc_info=True)
+
+        await asyncio.sleep(_SNAPSHOT_INTERVAL)
+
+    logger.info("Snapshot loop exited (is_running=%s)", state.is_running)
 
 
 def _cleanup_stale_bets():

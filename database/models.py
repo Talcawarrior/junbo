@@ -248,6 +248,43 @@ class ModelPerformance(Base):
     recorded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class BetSnapshot(Base):
+    """Saatlik bet fiyat snapshot'i — giris zamani analizi icin."""
+
+    __tablename__ = "bet_snapshots"
+
+    __table_args__ = (
+        Index("ix_bet_snapshots_bet_id", "bet_id"),
+        Index("ix_bet_snapshots_snapshot_time", "snapshot_time"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    bet_id = Column(Integer, nullable=False)
+    market_id = Column(String, nullable=False)
+
+    # Bet bilgileri
+    city = Column(String)
+    metric = Column(String)
+    target_date = Column(DateTime)
+    entry_price = Column(Float)
+    amount = Column(Float)
+    side = Column(String)
+
+    # Snapshot anindaki degerler
+    current_price = Column(Float)
+    unrealized_pnl = Column(Float, default=0.0)
+    market_yes_price = Column(Float)
+
+    # Zaman bilgisi
+    placed_at = Column(DateTime)
+    snapshot_time = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    hours_held = Column(Float, default=0.0)
+    hours_to_settlement = Column(Float, default=0.0)
+
+    # Bet durumu
+    bet_status = Column(String)
+
+
 # Compatibility Aliases
 Market = WeatherMarket
 

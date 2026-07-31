@@ -128,11 +128,11 @@ class BotState:
         """Initialize all modular components."""
         self.db_session_factory = get_db_session_factory()
         self.data_fetcher = PolymarketScraper()
-        self.weather_engine = WeatherEngine(self.db_session_factory, self.config)
-        self.risk_manager = RiskManager(None, self.config)
+        self.weather_engine = WeatherEngine(self.db_session_factory, config)
+        self.risk_manager = RiskManager(None, bot_config)
         self.betting_engine = BettingEngine(None, self.risk_manager, self.weather_engine)
         self.settlement_engine = SettlementEngine()
-        self.sia_loop = SIALoop(self.db_session_factory, self.config)
+        self.sia_loop = SIALoop(self.db_session_factory, config)
 
         # ASI-Evolve engines
         self.orchestrator = JunboOrchestrator()
@@ -222,12 +222,11 @@ async def root():
 def get_status():
     """Get bot status and metrics with strict accounting."""
     from sqlalchemy import func
-
-    from database.models import Analysis, Bet
+    from database.models import Analysis, Bet, Portfolio
 
     db = get_db_session()
     try:
-        db.query(Portfolio).filter(Portfolio.id == 1).first()
+        pf = db.query(Portfolio).filter(Portfolio.id == 1).first()
 
         # 1. Realized PnL (Closed bets)
         from datetime import datetime, timezone
@@ -317,6 +316,11 @@ def get_status():
         initial_capital = state.config.INITIAL_PORTFOLIO
         total_pnl = realized_pnl_db + unrealized_pnl_db
 
+        # 4. Available Cash (from Portfolio table)
+        pf = db.query(Portfolio).filter(Portfolio.id == 1).first()
+        print(f"DEBUG: pf={pf}, cash_balance={pf.cash_balance if pf else None}")
+        available_cash = float(pf.cash_balance) if pf and pf.cash_balance is not None else 0.0
+
         # Total amount staked in settled bets (sum of all bet amounts
         # regardless of win/loss). ROI = PnL / total_stake, NOT PnL / initial.
         total_stake_settled = (
@@ -404,6 +408,21 @@ def get_status():
                 price_poller_health = "stalled"
         price_poller_running = bool(state.tasks.get("price_poller") and not state.tasks["price_poller"].done())
 
+        # Calculate derived values
+        equity = portfolio_current_value(
+            initial_capital, realized_pnl_db, unrealized_pnl_db
+        )  # Portföy Değeri = Sermaye + Realized + Unrealized
+        available_cash = float(pf.cash_balance or 0.0) if pf else 0.0  # Nakit (Hemen Çekilebilir)
+        exposure = float(exposure_db)  # Açık Pozisyonlar Toplamı
+        max_exposure_allowed = round(
+            max_exposure_cap(
+                initial_capital,
+                realized_before_today,
+                state.config.TOTAL_EXPOSURE_PCT,
+            ),
+            2,
+        )
+
         return {
             "is_running": state.is_running,
             "locked": state.locked,
@@ -415,23 +434,47 @@ def get_status():
             "last_price_update": state.last_price_update.isoformat() + "Z" if state.last_price_update else None,
             "minutes_since_last_price_update": minutes_since_price_update,
             "portfolio": {
+                # Yeni Türkçe alanlar (yeni format)
+                "sermaye": initial_capital,  # Başlangıç Sermayesi
+                "nakit": available_cash,  # Çekilebilir Nakit (Free Cash)
+                "portfoy_degeri": equity,  # Portföy Değeri = Sermaye + Realized PnL + Unrealized PnL
+                "acik_pozisyonlar": exposure,  # Açık Pozisyonlar Toplamı (Bet Tutarı)
+                "maks_pozisyon": max_exposure_allowed,  # İzin Verilen Maksimum Pozisyon
+                "kullanilan_pozisyon_pct": round(
+                    (exposure / max_exposure_allowed * 100) if max_exposure_allowed > 0 else 0, 1
+                ),
+                # Meta kutuları
+                "sermayeden_kalan": round(float(available_cash), 2),
+                # Sermayeden Kalan = Mevcut Nakit Bakiyesi (çekilebilir para)
+                "acik_betlerin_net_pnl": round(float(exposure) + float(unrealized_pnl_db), 2),
+                # Açık Betlerin Net PnL = Açık Betlerin Toplamı + Gerçekleşmemiş PnL
+                # Açık betlerin toplam maliyeti ile şu anki değerleri arasındaki fark
+                # PnL
+                "gunluk_pnl": daily_pnl,
+                "gunluk_roi_pct": daily_roi,
+                "gerceklenmis_pnl": float(realized_pnl_db),  # Kapanan Betlerden Kar/Zarar
+                "gerceklenmemis_pnl": float(unrealized_pnl_db),  # Açık Pozisyonlardan Kar/Zarar (Kağıt Üzerinde)
+                "toplam_pnl": total_pnl,  # Toplam Kar/Zarar = Gerçekleşmiş + Gerçekleşmemiş
+                "toplam_roi_pct": total_roi,
+                # Eski İngilizce alanlar (Geriye uyumluluk - Frontend için)
                 "initial": initial_capital,
-                "current": portfolio_current_value(initial_capital, realized_pnl_db, unrealized_pnl_db),
+                "current": equity,
+                "free_cash": available_cash,
                 "daily_pnl": daily_pnl,
                 "daily_roi": daily_roi,
                 "unrealized_pnl": float(unrealized_pnl_db),
                 "realized_pnl": float(realized_pnl_db),
                 "total_pnl": total_pnl,
                 "total_roi": total_roi,
-                "exposure": float(exposure_db),
-                "max_exposure": round(
-                    max_exposure_cap(
-                        initial_capital,
-                        realized_before_today,
-                        state.config.TOTAL_EXPOSURE_PCT,
-                    ),
-                    2,
-                ),
+                "exposure": exposure,
+                "max_exposure": max_exposure_allowed,
+                # Formüller (Şeffaflık için)
+                "formullar": {
+                    "portfoy_degeri": "Sermaye + Gerçekleşmiş PnL + Gerçekleşmemiş PnL",
+                    "nakit": "Sermaye - Açık Pozisyonlar Toplamı + Gerçekleşmiş Kazançlar",
+                    "acik_pozisyonlar": "Tüm Açık Bet Tutarı Toplamı",
+                    "toplam_pnl": "Gerçekleşmiş PnL + Gerçekleşmemiş PnL",
+                },
             },
             "stats": {
                 "total_signals": total_signals_db,
@@ -843,7 +886,7 @@ def get_city_bets():
 
     db = get_db_session()
     try:
-        from executor.range_bet_placer import _get_forecast_temp
+        from executor.range_bet_placer import _get_forecast_temp, _resolve_icao
         from datetime import datetime, timezone, timedelta
 
         target_date = (datetime.now(timezone.utc) + timedelta(days=2)).replace(
@@ -868,7 +911,8 @@ def get_city_bets():
             bets = by_city.get(city_key, [])
             total_pnl = sum(float(b.unrealized_pnl or 0) for b in bets)
             total_stake = sum(float(b.amount or 0) for b in bets)
-            temp = _get_forecast_temp(city, "temperature_max", target_date)
+            icao = _resolve_icao(city)
+            temp = _get_forecast_temp(city, icao, "temperature_max", target_date) if icao else None
 
             bet_details = []
             for b in bets:
@@ -1278,6 +1322,7 @@ async def start_bot(_key: str = Depends(verify_api_key)):
         state.tasks["scan_and_bet"] = asyncio.create_task(scan_and_bet_loop(state))
         state.tasks["settlement"] = asyncio.create_task(settlement_loop(state))
         state.tasks["price_poller"] = asyncio.create_task(price_poller_loop(state))
+        state.tasks["snapshot"] = asyncio.create_task(snapshot_loop(state))
         return {"status": "started"}
 
 
@@ -1717,4 +1762,4 @@ async def websocket_endpoint(websocket: WebSocket, api_key: str = ""):
 
 # Re-export loop functions from bot_loop module so existing
 # callers (e.g. bot_lifespan in main.py) can import from here.
-from bot_loop import price_poller_loop, scan_and_bet_loop, settlement_loop  # noqa: E402, F401
+from bot_loop import price_poller_loop, scan_and_bet_loop, settlement_loop, snapshot_loop  # noqa: E402, F401

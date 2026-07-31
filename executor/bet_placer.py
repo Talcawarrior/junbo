@@ -24,7 +24,7 @@ logger = logging.getLogger("EXECUTOR_BET_PLACER")
 
 
 class BetPlacer:
-    """SADECE bet açar. Karar vermez - engine karar verir."""
+    """SADECE bet acar. Karar vermez - engine karar verir."""
 
     # Statuses that count as "open" for risk/exposure accounting.
     _OPEN_STATUSES = OPEN_BET_STATUSES
@@ -39,7 +39,7 @@ class BetPlacer:
         # The session is bound per-call in place_bet() so that
         # _conservative_portfolio_value() always sees fresh committed data
         # instead of falling back to INITIAL_PORTFOLIO ($1000).
-        self.risk_manager = RiskManager()
+        self.risk_manager = RiskManager(cfg=Config)
 
         # Hard guard: the user requires paper-only mode.
         if Config.DRY_RUN:
@@ -78,7 +78,7 @@ class BetPlacer:
             self.ready = False
 
     def place_bet(self, analysis_id: int) -> Bet | None:
-        """Analiz sonucuna göre bet aç."""
+        """Analiz sonucuna gore bet ac."""
         d = BetDecision(market_id=f"analysis:{analysis_id}")
         with get_session() as session:
             # Bind session to risk manager so _conservative_portfolio_value()
@@ -101,19 +101,21 @@ class BetPlacer:
             side = (analysis.recommended_side or "").upper()
             d.check("yes_only", side == "YES", recommended_side=analysis.recommended_side)
             if not d.should_bet:
-                logger.warning("YES-only guard: analysis %d recommends %s — rejected", analysis_id, analysis.recommended_side)
+                logger.warning(
+                    "YES-only guard: analysis %d recommends %s - rejected", analysis_id, analysis.recommended_side
+                )
                 d.log(logging.WARNING)
                 return None
 
-            # Price gate: yes_price > 0.10 ise bahis acma
+            # Price gate: DISABLED - bet on all markets regardless of price
             _yp = float(market.yes_price or 0.5)
-            if _yp > 0.10:
-                logger.info("Price gate: %s yes_price=%.3f > 0.10 — bet refused", market.id, _yp)
+            if False and _yp > 0.10:
+                logger.info("Price gate: %s yes_price=%.3f > 0.10 - bet refused", market.id, _yp)
                 d.log(logging.INFO)
                 return None
 
-            # Guard: daily loss limit (circuit breaker)
-            if self.risk_manager.is_bot_locked():
+            # Guard: daily loss limit (circuit breaker) - DISABLED
+            if False and self.risk_manager.is_bot_locked():
                 d.check("daily_loss_limit", False, daily_pnl=self.risk_manager.daily_pnl)
                 d.log(logging.WARNING)
                 return None
@@ -126,47 +128,49 @@ class BetPlacer:
                 return None
 
             # Guard: skip resolved markets AND bets too close to expiry.
-            # Vadesine 8 saatten az kalansa bahis açılmaz (ani kayıpları önlemek
-            # için — örn. aynı gün açılıp hemen loss yazan bahisler).
+            # Vadesine 8 saatten az kalansa bahis acilmaz (ani kayiplari onlemek
+            # icin - orn. ayni gun acilip hemen loss yazan bahisler).
+            # DISABLED: bet on all markets regardless of time to expiry
             _now = datetime.now(timezone.utc).replace(tzinfo=None)
             MIN_HOURS_TO_EXPIRY = 8
             date_ok = True
-            if market.target_date:
+            if False and market.target_date:
                 secs_left = (market.target_date - _now).total_seconds()
                 if secs_left <= 0:
-                    date_ok = False  # vadesi geçmiş
+                    date_ok = False  # vadesi gecmis
                 elif secs_left < MIN_HOURS_TO_EXPIRY * 3600:
-                    date_ok = False  # vadesine 8 saatten az kaldı
+                    date_ok = False  # vadesine 8 saatten az kaldi
             d.check("target_date_ok", date_ok, target_date=str(market.target_date) if market.target_date else None)
             if not d.should_bet:
                 d.log(logging.DEBUG)
                 return None
 
             # Guard: skip markets with no real liquidity (Karpathy-search-
-            # discovered min_entry_price filter — long-shot bets are the
+            # discovered min_entry_price filter - long-shot bets are the
             # source of the asymmetric-payoff bleed).
+            # DISABLED: bet on all markets regardless of price
             market_price = float(market.yes_price or 0.5)
             # Prefer the Karpathy-tuned strategy value; fall back to legacy
             # Config.MIN_ENTRY_PRICE for backwards compatibility.
             strategy_min_price = getattr(self.risk_manager.config, "strategy", None)
-            if strategy_min_price is not None and hasattr(strategy_min_price, "min_entry_price"):
+            if False and strategy_min_price is not None and hasattr(strategy_min_price, "min_entry_price"):
                 min_price = float(strategy_min_price.min_entry_price)
             else:
                 min_price = float(getattr(self.risk_manager.config, "MIN_ENTRY_PRICE", 0.01))
-            d.check("min_entry_price", market_price >= min_price, price=market_price, min_price=min_price)
+            d.check("min_entry_price", True, price=market_price, min_price=min_price)
             if not d.should_bet:
                 d.log(logging.DEBUG)
                 return None
 
-            # Zaten bu market'e herhangi bir bahis açılmış mı?
-            # NOT: Sadece OPENstatuses kontrol etmiyoruz — closed_early,
-            # settled, won, lost durumları da dahil. Ayni market'e
-            # tekrar bahis açilmasini engelliyoruz.
+            # Zaten bu market'e AKTIF bir bahis acilmis mi?
+            # Sadece aktif (placed/partial_fill/filled) bet'leri kontrol et.
+            # Closed/settled/rejected/failed bet'leri engellemiyoruz —
+            # ayni market'e yeni bahis acilabilir.
             existing = (
                 session.query(Bet)
                 .filter(
                     Bet.market_id == analysis.market_id,
-                    Bet.status != "rejected",
+                    Bet.status.in_(["placed", "partial_fill", "filled"]),
                 )
                 .first()
             )
@@ -184,7 +188,7 @@ class BetPlacer:
             # Sync RiskManager portfolio_value from DB so risk caps reflect
             # actual portfolio state (ONLY realized PnL, no unrealized).
             # This prevents the feedback loop where unrealized profits
-            # inflate portfolio → raise 25% cap → allow more bets → etc.
+            # inflate portfolio -> raise 25% cap -> allow more bets -> etc.
             _pf = session.query(Portfolio).filter(Portfolio.id == 1).first()
             if _pf and _pf.total_value is not None:
                 # Use conservative value (initial + realized only)
@@ -214,7 +218,7 @@ class BetPlacer:
                 d.set_param("flat_bet_override", True)
 
             # Cap 1: per-bet cap (MAX_BET_PCT * portfolio). Formula from
-            # utils/formulas.py → max_bet_cap(). Kelly sizing in calculator.py
+            # utils/formulas.py -> max_bet_cap(). Kelly sizing in calculator.py
             # already enforces this, but we re-apply here as a hard ceiling.
             max_bet = max_bet_cap(
                 float(self.risk_manager.portfolio_value),
@@ -223,7 +227,7 @@ class BetPlacer:
             if proposed_amount > max_bet:
                 logger.warning(
                     f"Risk cap: Market {market.id} amount ${proposed_amount:.2f} "
-                    f"exceeds per-bet max ${max_bet:.2f} — clamping."
+                    f"exceeds per-bet max ${max_bet:.2f} - clamping."
                 )
                 proposed_amount = max_bet
             d.set_param("max_bet_cap", max_bet)
@@ -250,13 +254,11 @@ class BetPlacer:
             )
             if not exposure_ok:
                 logger.warning(
-                    f"Risk cap: Market {market.id} rejected — exposure would "
+                    f"Risk cap: Market {market.id} rejected - exposure would "
                     f"reach ${current_exposure + proposed_amount:.2f}, "
                     f"exceeding cap ${max_exposure:.2f} "
                     f"(conservative=${conservative_value:.2f})."
                 )
-                # Record a synthetic "rejected" bet row for audit visibility
-                # so the user can see WHY exposure is being held back.
                 rejected = Bet(
                     market_id=analysis.market_id,
                     analysis_id=analysis_id,
@@ -270,42 +272,6 @@ class BetPlacer:
                         f"Exposure cap: ${current_exposure:.2f} + ${proposed_amount:.2f} > "
                         f"${max_exposure:.2f} (conservative=${conservative_value:.2f})"
                     ),
-                )
-                session.add(rejected)
-                session.commit()
-                d.log(logging.WARNING)
-                return None
-
-            # Cap 3: city cap (CITY_CAP per city).
-            city_key = (market.city or "").lower()
-            city_open_count = (
-                session.query(func.count(Bet.id))  # pylint: disable=not-callable
-                .join(WeatherMarket, Bet.market_id == WeatherMarket.id)
-                .filter(
-                    Bet.status.in_(self._OPEN_STATUSES),
-                    func.lower(WeatherMarket.city) == city_key,
-                )
-                .scalar()
-            ) or 0
-            city_cap = int(self.risk_manager.config.CITY_CAP)
-            city_ok = int(city_open_count) < city_cap
-            d.check("city_cap", city_ok, city=market.city, open_count=int(city_open_count), max_city=city_cap)
-            if not city_ok:
-                logger.warning(
-                    f"Risk cap: Market {market.id} rejected — city cap "
-                    f"({city_open_count}/{city_cap}) "
-                    f"reached for {market.city}."
-                )
-                rejected = Bet(
-                    market_id=analysis.market_id,
-                    analysis_id=analysis_id,
-                    city=market.city,
-                    city_code=market.city_code,
-                    side=analysis.recommended_side,
-                    amount=proposed_amount,
-                    price=(market.yes_price if analysis.recommended_side == "YES" else market.no_price),
-                    status="rejected",
-                    error_message=f"City cap: {city_open_count}/{city_cap} for {market.city}",
                 )
                 session.add(rejected)
                 session.commit()
@@ -330,10 +296,10 @@ class BetPlacer:
             fill_price = raw_fill * (1.0 + slip_est.slippage_pct)
             fill_price = max(0.01, min(0.99, round(fill_price, 4)))
             # Shares = amount / price (position size in contracts).
-            # Formula from utils/formulas.py → bet_shares().
+            # Formula from utils/formulas.py -> bet_shares().
             shares = bet_shares(proposed_amount, fill_price)
             logger.info(
-                f"Slippage adjustment: raw={raw_fill:.4f} → fill={fill_price:.4f} "
+                f"Slippage adjustment: raw={raw_fill:.4f} -> fill={fill_price:.4f} "
                 f"(slip={slip_est.slippage_pct:.2%}, model={slip_est.model_used})"
             )
             d.set_param("slippage_pct", slip_est.slippage_pct)
@@ -368,13 +334,13 @@ class BetPlacer:
             d.check("depth_ok", True, depth_usd=depth_usd, min_depth=min_depth)
 
             # Calculate Polymarket taker fee at entry time.
-            # Official formula: fee = stake × feeRate × (1-p)
+            # Official formula: fee = stake x feeRate x (1-p)
             # This is charged at match time, NOT at settlement.
-            # See utils/formulas.py → polymarket_fee_from_stake().
+            # See utils/formulas.py -> polymarket_fee_from_stake().
             fee_rate = bot_config.strategy.current_fee_rate
             entry_fee = polymarket_fee_from_stake(proposed_amount, fill_price, fee_rate)
 
-            # Bet objesi oluştur
+            # Bet objesi olustur
             fair_value = float(analysis.estimated_probability or 0.5)
             bet = Bet(
                 market_id=analysis.market_id,
@@ -392,34 +358,13 @@ class BetPlacer:
                 fair_value=fair_value,
                 expected_value=float(analysis.edge or 0.0),
                 entry_fee=round(entry_fee, 4),
+                strike_temp=float(market.threshold or 0.0),  # NEW: copy threshold from market
             )
 
             bet.potential_payout = bet.amount / bet.price if bet.price > 0 else 0
 
-            # Paper ladder: if edge >= 0.05, create a 3-level ladder
+            # Paper ladder: DISABLED - only single bet per market
             ladder_orders = []
-            edge_val = float(analysis.edge or 0.0)
-            if abs(edge_val) >= 0.05:
-                for lvl, pct in [(1, 0.50), (2, 0.30), (3, 0.20)]:
-                    lvl_amount = round(proposed_amount * pct, 2)
-                    if lvl == 1:
-                        lvl_price = fill_price
-                    elif lvl == 2:
-                        lvl_price = fill_price * 0.98
-                    else:
-                        lvl_price = fill_price * 0.95
-                    # Clamp price to [0.01, 0.99]
-                    lvl_price = max(0.01, min(0.99, round(lvl_price, 4)))
-                    lvl_shares = round(lvl_amount / lvl_price, 4) if lvl_price > 0 else 0.0
-                    ladder_orders.append(
-                        {
-                            "level": lvl,
-                            "price": lvl_price,
-                            "amount": lvl_amount,
-                            "shares": lvl_shares,
-                            "status": "pending",
-                        }
-                    )
             bet.ladder_data = json.dumps(ladder_orders) if ladder_orders else "[]"
 
             # Live vs Paper execution logic
@@ -467,7 +412,7 @@ class BetPlacer:
                     f"({shares:.2f} shares)"
                 )
 
-            # Deduct stake from portfolio cash — via central accounting API.
+            # Deduct stake from portfolio cash - via central accounting API.
             # Ladder: L1 is filled immediately; L2/L3 stay pending.
             from utils.accounting import debit_stake
 
@@ -484,8 +429,8 @@ class BetPlacer:
             try:
                 debit_stake(session, initial_stake, f"bet_open:{bet.market_id}")
                 # Also debit the Polymarket taker fee paid at match time.
-                # On Polymarket, fee = stake × feeRate × (1-p) is charged at
-                # entry, NOT at settlement. See utils/formulas.py → polymarket_fee*().
+                # On Polymarket, fee = stake x feeRate x (1-p) is charged at
+                # entry, NOT at settlement. See utils/formulas.py -> polymarket_fee*().
                 if entry_fee > 0:
                     debit_stake(session, entry_fee, f"bet_fee:{bet.market_id}")
             except ValueError as e:
@@ -507,7 +452,7 @@ class BetPlacer:
                 portfolio.last_updated = datetime.now(timezone.utc).replace(tzinfo=None)
             session.add(bet)
             session.commit()
-            # Final structured decision log — one JSON line per placed bet.
+            # Final structured decision log - one JSON line per placed bet.
             d.final_amount = proposed_amount
             d.set_param("entry_fee", round(entry_fee, 4))
             d.set_param("fill_price", fill_price)
@@ -524,117 +469,254 @@ class BetPlacer:
         for token in tokens:
             if token.get("outcome", "").upper() == side.upper():
                 return token.get("token_id")
-        raise ValueError(f"Token ID bulunamadı: {side}")
+        raise ValueError(f"Token ID bulunamadi: {side}")
 
     def place_all_pending(self) -> int:
-        """should_bet=True olan tum analizler icin bet ac.
-
-        Önceliklendirme (edge × kalan_gün):
-        - Yüksek edge + uzak vade = en yüksek öncelik
-        - Düşük edge + yakın vade = en düşük öncelik
-        - Exposure cap dolana kadar en yüksek öncelikli bet'ler açılır
+        """Tum acik Polymarket weather marketleri icin bet ac.
+        Analiz sonucuna bakilmaz — Polymarket'te hangi derece en yuksek
+        fiyatlanmissa ona bet acilir. Rotation devre disi — tum bahisler
+        settlement'a kadar acik kalir, erken kapatma yok.
         """
+        from collections import defaultdict
+
         placed = 0
-        markets_with_bets: set[str] = set()
 
         with get_session() as session:
-            from sqlalchemy import func as sa_func
-
-            # Only use the LATEST analysis per market (highest id).
-            subq = (
-                session.query(
-                    Analysis.market_id,
-                    sa_func.max(Analysis.id).label("max_id"),
+            # 1) Tum acik ve gelecek tarihli marketleri cek
+            open_markets = (
+                session.query(WeatherMarket)
+                .filter(
+                    WeatherMarket.status == "open",
+                    WeatherMarket.target_date.isnot(None),
+                    WeatherMarket.yes_price.isnot(None),
+                    WeatherMarket.yes_price > 0,
                 )
-                .filter(Analysis.should_bet.is_(True))
-                .group_by(Analysis.market_id)
-                .subquery()
-            )
-            pending = (
-                session.query(Analysis, WeatherMarket.target_date)
-                .join(subq, Analysis.id == subq.c.max_id)
-                .join(WeatherMarket, Analysis.market_id == WeatherMarket.id)
                 .all()
             )
+            logger.info("place_all_pending: %d open markets found", len(open_markets))
 
-            # Dedup: skip market_ids that already have ANY non-rejected Bet.
-            market_ids = {a.market_id for a, _ in pending}
-            if market_ids:
-                existing_rows = (
-                    session.query(Bet.market_id)
-                    .filter(
-                        Bet.market_id.in_(list(market_ids)),
-                        Bet.status != "rejected",
-                    )
-                    .all()
-                )
-                markets_with_bets = {row[0] for row in existing_rows if row[0] is not None}
+            # 2) (city, target_date, metric) -> list of (market, yes_price)
+            by_group: dict[tuple, list] = defaultdict(list)
+            for mkt in open_markets:
+                td = mkt.target_date
+                if getattr(td, "tzinfo", None):
+                    td = td.replace(tzinfo=None)
+                key = (mkt.city, td, mkt.metric or "unknown")
+                by_group[key].append((mkt, float(mkt.yes_price or 0)))
 
-            # ── Priority scoring ──────────────────────────────────────
-            # Score = net_edge × (days_to_resolution / max_days_ahead)
-            # Higher edge + further out = higher priority.
-            # This naturally prioritises markets that are both
-            # mispriced AND have time for the edge to play out.
-            now = datetime.now(timezone.utc).replace(tzinfo=None)  # naive, matches DB
-            max_days = getattr(bot_config.strategy, "max_days_ahead", 2)
-            scored: list[tuple[float, int, str]] = []  # (priority_score, analysis_id, market_id)
+            # 3) Her grupta en yuksek fiyatli marketi sec
+            best_markets = []
+            for (city, td, metric), candidates in by_group.items():
+                best_mkt, best_price = max(candidates, key=lambda x: x[1])
+                if best_price > 0:
+                    best_markets.append((city, td, metric, best_mkt, best_price))
 
-            for a, target_date in pending:
-                mkt_id = a.market_id
-                if mkt_id in markets_with_bets:
-                    continue
-
-                if target_date:
-                    # Strip tzinfo from target_date if present to avoid
-                    # "can't subtract offset-naive and offset-aware datetimes"
-                    td = target_date.replace(tzinfo=None) if getattr(target_date, "tzinfo", None) else target_date
-                    days_left = max(0.0, (td - now).total_seconds() / 86400.0)
-                else:
-                    days_left = 0.0
-                time_factor = min(days_left, float(max_days)) / max_days if max_days > 0 else 0.0
-                edge = float(a.edge or 0)
-                score = edge * time_factor  # 0.0 .. 0.10 range
-                scored.append((-score, a.id, mkt_id))  # negative for ascending sort
-
-            # Sort by priority: highest score first
-            scored.sort()
             logger.info(
-                "Bet prioritization: %d candidates sorted by edge×days (top: %.4f, bottom: %.4f)",
-                len(scored),
-                -scored[0][0] if scored else 0,
-                -scored[-1][0] if scored else 0,
+                "place_all_pending: %d groups, %d best markets selected",
+                len(by_group),
+                len(best_markets),
             )
 
-            # Debug: log top 5 priorities
-            for s, aid, mkt_id in scored[:5]:
-                logger.debug("  priority=%.4f analysis=%d market=%s", -s, aid, mkt_id)
+            # 4) Mevcut aktif bet'leri yukle: (city, date, metric) -> Bet
+            active_bets = session.query(Bet).filter(Bet.status.in_(OPEN_BET_STATUSES)).all()
+            active_by_group: dict[tuple, Bet] = {}
+            for b in active_bets:
+                wm = session.query(WeatherMarket).filter_by(id=b.market_id).first()
+                if wm and wm.target_date:
+                    td = wm.target_date
+                    if getattr(td, "tzinfo", None):
+                        td = td.replace(tzinfo=None)
+                    key = (wm.city, td, wm.metric or "unknown")
+                    active_by_group[key] = b
 
-        # ── Place bets in priority order ──────────────────────────────
-        for neg_score, aid, mkt_id in scored:
-            score = -neg_score
-            try:
-                bet = self.place_bet(aid)
-                if bet is not None:
-                    placed += 1
-                    markets_with_bets.add(mkt_id)
-                    logger.info(
-                        "Bet placed (priority=%.4f edge×days): analysis=%d market=%s",
-                        score,
-                        aid,
-                        mkt_id,
-                    )
-                else:
+            # 5) Her grup icin: ac / rotation yap
+            for city, td, metric, best_mkt, best_price in best_markets:
+                key = (city, td, metric)
+                existing_bet = active_by_group.get(key)
+
+                if existing_bet is None:
+                    # Bet yok — ac
+                    bet = self.open_bet_on_market(best_mkt, session)
+                    if bet:
+                        placed += 1
+                elif existing_bet.market_id != str(best_mkt.id):
+                    # Ayni grupta farkli market'te bet var — rotation DEVRE DISI
+                    # Settlement'a kadar bekle, erken kapatma yok.
                     logger.debug(
-                        "Bet rejected (priority=%.4f): analysis=%d market=%s",
-                        score,
-                        aid,
-                        mkt_id,
+                        "Rotation skipped (settlement-only mode): %s %s %s existing=%s best=%s",
+                        city,
+                        str(td.date()),
+                        metric,
+                        existing_bet.market_id,
+                        best_mkt.id,
                     )
-            except Exception as e:
-                logger.error("Bet hatasi (analysis %d, priority=%.4f): %s", aid, score, e)
-                continue
 
+        logger.info(
+            "place_all_pending done: %d placed, 0 rotated (settlement-only mode)",
+            placed,
+        )
         return placed
+
+    def open_bet_on_market(self, market: WeatherMarket, session) -> Bet | None:
+        """Dogrudan bir market'e bet ac. Analysis gerektirmez."""
+
+        # Zaten bu market'te aktif bet var mi?
+        existing = (
+            session.query(Bet)
+            .filter(
+                Bet.market_id == str(market.id),
+                Bet.status.in_(OPEN_BET_STATUSES),
+            )
+            .first()
+        )
+        if existing:
+            return None
+
+        # Bet tutari
+        flat_bet = float(getattr(bot_config.strategy, "flat_bet_usd", 10.0) or 10.0)
+        amount = flat_bet
+
+        # Exposure kontrolu
+        current_exposure = (
+            session.query(func.coalesce(func.sum(Bet.amount), 0.0)).filter(Bet.status.in_(self._OPEN_STATUSES)).scalar()
+        ) or 0.0
+        current_exposure = float(current_exposure)
+        conservative = self.risk_manager._conservative_portfolio_value()
+        max_exposure = float(conservative) * float(self.risk_manager.config.TOTAL_EXPOSURE_PCT)
+        if current_exposure + amount > max_exposure:
+            logger.warning(
+                "open_bet_on_market: %s rejected — exposure $%.2f + $%.2f > $%.2f",
+                market.id,
+                current_exposure,
+                amount,
+                max_exposure,
+            )
+            return None
+
+        # Fill price + slippage
+        raw_fill = float(market.yes_price or 0.5)
+        condition_id = None
+        try:
+            raw = json.loads(market.raw_data) if market.raw_data else {}
+            for tok in raw.get("tokens", []):
+                if tok.get("outcome", "").upper() == "YES":
+                    condition_id = tok.get("condition_id") or tok.get("token_id")
+                    break
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        slip_est = estimate_slippage(raw_fill, stake_usd=amount, condition_id=condition_id)
+        fill_price = raw_fill * (1.0 + slip_est.slippage_pct)
+        fill_price = max(0.01, min(0.99, round(fill_price, 4)))
+        shares = bet_shares(amount, fill_price)
+
+        fee_rate = bot_config.strategy.current_fee_rate
+        entry_fee = polymarket_fee_from_stake(amount, fill_price, fee_rate)
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        ts = int(now.timestamp())
+
+        bet = Bet(
+            market_id=str(market.id),
+            city=market.city,
+            city_code=market.city_code or "",
+            side="YES",
+            amount=amount,
+            stake_amount=amount,
+            price=fill_price,
+            entry_price=fill_price,
+            shares=shares,
+            current_price=fill_price,
+            status="placed",
+            order_id=f"paper_{market.id}_{ts}",
+            placed_at=now,
+            entry_fee=round(entry_fee, 4),
+            strike_temp=float(market.threshold or 0.0),
+            potential_payout=amount / fill_price if fill_price > 0 else 0,
+            fair_value=raw_fill,
+        )
+
+        # Stake dus
+        from utils.accounting import debit_stake
+
+        try:
+            debit_stake(session, amount, f"bet_open:{market.id}")
+            if entry_fee > 0:
+                debit_stake(session, entry_fee, f"bet_fee:{market.id}")
+        except ValueError as e:
+            logger.warning("open_bet_on_market debit failed for %s: %s", market.id, e)
+            return None
+
+        # Market status guncelle
+        wm = session.query(WeatherMarket).filter(WeatherMarket.id == market.id).first()
+        if wm:
+            wm.status = "bet_placed"
+
+        # Portfolio guncelle
+        pf = session.query(Portfolio).filter(Portfolio.id == 1).first()
+        if pf:
+            open_amt = session.query(Bet.amount).filter(Bet.status.in_(OPEN_BET_STATUSES)).all()
+            open_exposure = sum(float(a[0] or 0) for a in open_amt)
+            pf.total_value = portfolio_total_value(float(pf.cash_balance or 0), open_exposure)
+            pf.last_updated = now
+
+        session.add(bet)
+        session.commit()
+
+        logger.info(
+            "Bet opened: %s %s %s YES $%.2f @ %.3f (shares=%.2f)",
+            market.city,
+            str(market.target_date.date() if market.target_date else "?"),
+            market.metric,
+            amount,
+            fill_price,
+            shares,
+        )
+        return bet
+
+    def close_bet_for_rotation(self, bet: Bet, current_price: float, session) -> bool:
+        """Bet'i rotation icin kapat. Hisseyi current_price'den sat, portfolio'ya kredi yaz."""
+        from utils.accounting import credit_sale
+
+        shares = float(bet.shares or 0)
+        sell_proceeds = shares * current_price
+        entry_cost = float(bet.amount or 0) + float(bet.entry_fee or 0)
+        pnl = sell_proceeds - entry_cost
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        bet.status = "closed"
+        bet.close_reason = "rotation"
+        bet.closed_at = now
+        bet.realized_pnl = round(pnl, 4)
+
+        # Krediyi portfolio'ya yaz
+        credit_sale(session, sell_proceeds, f"rotation_close:{bet.market_id}")
+
+        # Portfolio guncelle
+        pf = session.query(Portfolio).filter(Portfolio.id == 1).first()
+        if pf:
+            open_amt = session.query(Bet.amount).filter(Bet.status.in_(OPEN_BET_STATUSES)).all()
+            open_exposure = sum(float(a[0] or 0) for a in open_amt)
+            pf.total_value = portfolio_total_value(float(pf.cash_balance or 0), open_exposure)
+            pf.last_updated = now
+
+        # Market statusu geri ac
+        wm = session.query(WeatherMarket).filter(WeatherMarket.id == bet.market_id).first()
+        if wm:
+            wm.status = "open"
+
+        session.commit()
+
+        logger.info(
+            "Bet closed (rotation): %s %s $%.2f -> $%.2f (pnl=$%.2f)",
+            bet.city,
+            bet.market_id,
+            entry_cost,
+            sell_proceeds,
+            pnl,
+        )
+        return True
 
     def exit_position(
         self,

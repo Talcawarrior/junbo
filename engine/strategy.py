@@ -306,10 +306,6 @@ class RiskManager:
         if entry <= 0:
             return False, ""
 
-        # Fiyat 0.98'e ulaştı → kesin kazanç, hemen TAM kapat (partial değil)
-        if current_price >= 0.98:
-            return True, f"near_certain_win: price={current_price:.2f}"
-
         # Partial TP: zaten yapıldıysa tekrar tetikleme (trailing stop'a bırak)
         if bool(getattr(bet, "partial_tp_done", False)):
             return False, ""
@@ -453,8 +449,8 @@ class RiskManager:
         if exit_bool:
             return True, reason
 
-        # 4. Time decay (sadece market objesi varsa)
-        if market is not None:
+        # 4. Time decay (sadece non-range betlerde, market objesi varsa)
+        if not is_range and market is not None:
             exit_bool, reason = self.check_time_decay(bet, current_price, market)
             if exit_bool:
                 return True, reason
@@ -807,11 +803,13 @@ class BettingEngine:
             # 8-hour pre-settlement guard: settlement'a 8 saatten az kaldiysa bet acma
             try:
                 from database.models import WeatherMarket as _WM
+
                 _market_row = self.db.query(_WM).filter(_WM.id == str(market_id)).first() if self.db else None
                 if _market_row and _market_row.target_date:
                     _res = _market_row.target_date
                     if getattr(_res, "tzinfo", None) is None:
                         from datetime import timezone as _tz
+
                         _res = _res.replace(tzinfo=_tz.utc)
                     _hours_left = (_res - datetime.now(timezone.utc)).total_seconds() / 3600.0
                     if _hours_left <= 8:
@@ -1128,25 +1126,8 @@ class SIALoop:
             total_roi,
         )
 
-        # 1. Selectivity (min_edge)
-        if win_rate < 0.45:
-            # Low win rate: tighten the filter
-            old_edge = strategy.min_edge
-            strategy.min_edge = min(0.15, strategy.min_edge + 0.01)
-            logger.info(
-                "  min_edge: %.2f -> %.2f (Selectivity INCREASED due to low Win Rate)",
-                old_edge,
-                strategy.min_edge,
-            )
-        elif win_rate > 0.60 and total_roi > 5:
-            # High win rate & profit: relax filter to find more trades
-            old_edge = strategy.min_edge
-            strategy.min_edge = max(0.01, strategy.min_edge - 0.005)
-            logger.info(
-                "  min_edge: %.2f -> %.2f (Selectivity RELAXED due to high performance)",
-                old_edge,
-                strategy.min_edge,
-            )
+        # 1. Selectivity (min_edge) — LOCKED at 0.001, no adjustment
+        # (clamp in save_strategy_params prevents any override)
 
         # 2. Risk Appetite (kelly_fraction)
         if total_roi < -10:

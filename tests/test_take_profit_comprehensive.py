@@ -11,16 +11,23 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from config.settings import bot_config
+from config.settings import bot_config, RiskConfig
 from engine.strategy import RiskManager
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def make_risk_manager():
-    """Config ile initialized RiskManager."""
-    return RiskManager(db_session=None, cfg=bot_config)
+def make_risk_manager(risk_cfg=None):
+    """Config ile initialized RiskManager.
+
+    If risk_cfg is provided, monkeypatch _get_risk_config on the instance
+    so that check_* methods use the custom config without modifying globals.
+    """
+    rm = RiskManager(db_session=None, cfg=bot_config)
+    if risk_cfg is not None:
+        rm._get_risk_config = lambda: risk_cfg
+    return rm
 
 
 def make_mock_bet(**kwargs):
@@ -98,20 +105,20 @@ class TestTakeProfit:
         assert should_exit is False
 
     def test_near_certain_win_at_098(self):
-        """Fiyat 0.98'e ulaştığında near_certain_win tetiklenmeli."""
+        """Fiyat 0.98'e ulaştığında near_certain_win artık tetiklenmez (kaldırıldı).
+        take_profit_pct=999.0 oldugu icin normal TP de tetiklenmez."""
         rm = make_risk_manager()
-        bet = make_mock_bet(entry_price=0.10)  # entry önemli değil
+        bet = make_mock_bet(entry_price=0.50)
         should_exit, reason = rm.check_take_profit(bet, 0.98)
-        assert should_exit is True
-        assert "near_certain_win" in reason
+        assert should_exit is False
 
     def test_near_certain_win_at_099(self):
-        """Fiyat 0.99'da da near_certain_win tetiklenmeli."""
+        """Fiyat 0.99'da near_certain_win artık tetiklenmez (kaldırıldı).
+        take_profit_pct=999.0 oldugu icin normal TP de tetiklenmez."""
         rm = make_risk_manager()
         bet = make_mock_bet(entry_price=0.50)
         should_exit, reason = rm.check_take_profit(bet, 0.99)
-        assert should_exit is True
-        assert "near_certain_win" in reason
+        assert should_exit is False
 
     def test_real_scenario_tokyo_170_percent(self):
         """Gerçek senaryo: Tokyo entry=0.27, current=0.73 → %170 kâr."""
@@ -175,7 +182,8 @@ class TestStopLoss:
 
     def test_stop_loss_at_30_percent(self):
         """Tam %30 zararda tetiklenmeli."""
-        rm = make_risk_manager()
+        normal_risk = RiskConfig(stop_loss_pct=0.25)
+        rm = make_risk_manager(normal_risk)
         bet = make_mock_bet(entry_price=0.50)
         should_exit, reason = rm.check_stop_loss(bet, 0.35)
         assert should_exit is True
@@ -183,14 +191,16 @@ class TestStopLoss:
 
     def test_stop_loss_above_threshold(self):
         """%20 zararda tetiklenmemeli (%25 eşiği)."""
-        rm = make_risk_manager()
+        normal_risk = RiskConfig(stop_loss_pct=0.25)
+        rm = make_risk_manager(normal_risk)
         bet = make_mock_bet(entry_price=0.50)
         should_exit, _ = rm.check_stop_loss(bet, 0.40)
         assert should_exit is False
 
     def test_stop_loss_deep_loss(self):
         """%50+ zararda tetiklenmeli."""
-        rm = make_risk_manager()
+        normal_risk = RiskConfig(stop_loss_pct=0.25)
+        rm = make_risk_manager(normal_risk)
         bet = make_mock_bet(entry_price=0.50)
         should_exit, _ = rm.check_stop_loss(bet, 0.20)
         assert should_exit is True
@@ -204,7 +214,8 @@ class TestTrailingStop:
 
     def test_trailing_stop_drops_from_peak(self):
         """Tepeden %15+ düşüşte tetiklenmeli."""
-        rm = make_risk_manager()
+        normal_risk = RiskConfig(trailing_stop_pct=0.10)
+        rm = make_risk_manager(normal_risk)
         # peak 0.60'a çıkmış, sonra 0.50'ye düşmüş → %16.7 düşüş
         peak_data = json.dumps({"peak_price": 0.60})
         bet = make_mock_bet(entry_price=0.30, result_data=peak_data)
@@ -214,7 +225,8 @@ class TestTrailingStop:
 
     def test_trailing_stop_no_drop(self):
         """Tepeden az düşüşte tetiklenmemeli."""
-        rm = make_risk_manager()
+        normal_risk = RiskConfig(trailing_stop_pct=0.10)
+        rm = make_risk_manager(normal_risk)
         peak_data = json.dumps({"peak_price": 0.60})
         bet = make_mock_bet(entry_price=0.30, result_data=peak_data)
         should_exit, _ = rm.check_trailing_stop(bet, 0.55)
@@ -222,7 +234,8 @@ class TestTrailingStop:
 
     def test_trailing_stop_never_profitable(self):
         """Hiç kâra geçmemiş pozisyonda tetiklenmemeli."""
-        rm = make_risk_manager()
+        normal_risk = RiskConfig(trailing_stop_pct=0.10)
+        rm = make_risk_manager(normal_risk)
         bet = make_mock_bet(entry_price=0.50, result_data=None)
         should_exit, _ = rm.check_trailing_stop(bet, 0.40)
         assert should_exit is False
@@ -236,7 +249,8 @@ class TestExitInteraction:
 
     def test_stop_loss_checked_before_take_profit(self):
         """check_early_exit'te stop_loss önce kontrol edilir."""
-        rm = make_risk_manager()
+        normal_risk = RiskConfig(stop_loss_pct=0.25)
+        rm = make_risk_manager(normal_risk)
         # Hem stop_loss hem take_profit tetiklenebilir (olası durum)
         bet = make_mock_bet(entry_price=0.50)
         market = make_mock_market()
@@ -247,7 +261,8 @@ class TestExitInteraction:
 
     def test_take_profit_via_early_exit(self):
         """check_early_exit take_profit'i tetikleyebilmeli."""
-        rm = make_risk_manager()
+        normal_risk = RiskConfig(take_profit_pct=1.0)
+        rm = make_risk_manager(normal_risk)
         bet = make_mock_bet(entry_price=0.20)
         market = make_mock_market()
         should_exit, reason = rm.check_early_exit(bet, 0.60, market)
@@ -256,7 +271,8 @@ class TestExitInteraction:
 
     def test_no_exit_when_profitable_but_below_tp(self):
         """Kârda ama TP altında → çıkış olmamalı."""
-        rm = make_risk_manager()
+        normal_risk = RiskConfig(take_profit_pct=1.0)
+        rm = make_risk_manager(normal_risk)
         bet = make_mock_bet(entry_price=0.50)
         market = make_mock_market()
         should_exit, reason = rm.check_early_exit(bet, 0.70, market)

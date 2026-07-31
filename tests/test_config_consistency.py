@@ -19,9 +19,7 @@ def test_strategy_config_min_edge_default():
     from config.settings import StrategyConfig
 
     s = StrategyConfig()
-    assert 0.01 <= s.min_edge <= 0.20, (
-        f"Expected min_edge between 0.01 and 0.20, got {s.min_edge}"
-    )
+    assert 0.0001 <= s.min_edge <= 0.20, f"Expected min_edge between 0.0001 and 0.20, got {s.min_edge}"
 
 
 def test_config_kelly_fraction_matches_strategy():
