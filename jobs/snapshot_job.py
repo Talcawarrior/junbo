@@ -8,6 +8,7 @@ sicaklik araligina girmek daha karli oldugu analiz edilebilir.
 
 import logging
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 
 from sqlalchemy import func
 
@@ -65,7 +66,7 @@ def take_market_snapshots() -> int:
                 .filter(
                     MarketSnapshot.market_id == market.id,
                     func.date(MarketSnapshot.snapshot_time) == now.date(),
-                    func.hour(MarketSnapshot.snapshot_time) == now.hour,
+                    func.strftime("%H", MarketSnapshot.snapshot_time) == f"{now.hour:02d}",
                 )
                 .first()
             )
@@ -104,11 +105,7 @@ def cleanup_old_snapshots(days: int = 30) -> int:
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
     with get_session() as session:
-        deleted = (
-            session.query(MarketSnapshot)
-            .filter(MarketSnapshot.snapshot_time < cutoff)
-            .delete()
-        )
+        deleted = session.query(MarketSnapshot).filter(MarketSnapshot.snapshot_time < cutoff).delete()
         if deleted:
             logger.info(
                 "cleanup_old_snapshots: deleted %d snapshots older than %d days",
@@ -119,16 +116,15 @@ def cleanup_old_snapshots(days: int = 30) -> int:
 
 
 def get_price_history(
-    city: str = None,
-    metric: str = None,
-    target_date=None,
+    city: Optional[str] = None,
+    metric: Optional[str] = None,
+    target_date: Optional[datetime] = None,
     hours_back: int = 24,
-) -> list:
+) -> list[dict]:
     """Belirli bir market icin saatlik YES fiyat gecmisini getir.
 
     Returns list of dicts with snapshot data.
     """
-    from datetime import datetime as dt
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     cutoff = now - timedelta(hours=hours_back)
@@ -147,10 +143,7 @@ def get_price_history(
                 target_date = target_date.replace(tzinfo=None)
             query = query.filter(MarketSnapshot.target_date == target_date)
 
-        rows = (
-            query.order_by(MarketSnapshot.snapshot_time.asc())
-            .all()
-        )
+        rows = query.order_by(MarketSnapshot.snapshot_time.asc()).all()
 
         return [
             {
@@ -171,15 +164,14 @@ def get_price_history(
 
 def get_city_price_comparison(
     city: str,
-    metric: str = None,
-    target_date=None,
+    metric: Optional[str] = None,
+    target_date: Optional[datetime] = None,
     hours_back: int = 24,
 ) -> dict:
     """Belirli bir sehir icin saatler arasinda YES fiyat karsilastirmasi.
 
     Returns dict mapping threshold -> list of (snapshot_time, yes_price).
     """
-    from datetime import datetime as dt
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     cutoff = now - timedelta(hours=hours_back)
@@ -197,12 +189,9 @@ def get_city_price_comparison(
                 target_date = target_date.replace(tzinfo=None)
             query = query.filter(MarketSnapshot.target_date == target_date)
 
-        rows = (
-            query.order_by(MarketSnapshot.snapshot_time.asc())
-            .all()
-        )
+        rows = query.order_by(MarketSnapshot.snapshot_time.asc()).all()
 
-        result = {}
+        result: dict[str, list] = {}
         for r in rows:
             key = r.threshold if r.threshold is not None else "unknown"
             if key not in result:
