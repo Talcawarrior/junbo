@@ -494,6 +494,7 @@ class BetPlacer:
                     WeatherMarket.yes_price.isnot(None),
                     WeatherMarket.yes_price > 0,
                     WeatherMarket.target_date >= now,
+                    WeatherMarket.city != "Unknown",
                 )
                 .all()
             )
@@ -546,15 +547,24 @@ class BetPlacer:
                 elif existing_bet.market_id != str(best_mkt.id):
                     # Ayni grupta farkli market'te bet var — daha iyi
                     # fiyatlı market varsa eski bet'i kapat ve yenisini ac
-                    old_mkt = session.query(WeatherMarket).filter_by(
-                        id=existing_bet.market_id,
-                    ).first()
+                    old_mkt = (
+                        session.query(WeatherMarket)
+                        .filter_by(
+                            id=existing_bet.market_id,
+                        )
+                        .first()
+                    )
                     old_price = float(old_mkt.yes_price or 0) if old_mkt else 0
                     improvement = best_price - old_price
                     if improvement >= 0.10:
                         logger.info(
                             "Smart rotation: %s %s %s old_price=%s new_price=%s improvement=%s",
-                            city, str(td.date()), metric, old_price, best_price, improvement,
+                            city,
+                            str(td.date()),
+                            metric,
+                            old_price,
+                            best_price,
+                            improvement,
                         )
                         self.close_bet_for_rotation(existing_bet, old_price, session)
                         rotated += 1
@@ -564,13 +574,18 @@ class BetPlacer:
                     else:
                         logger.debug(
                             "Rotation skipped (improvement=%.4f < 0.10): %s %s %s existing=%s best=%s",
-                            improvement, city, str(td.date()), metric,
-                            existing_bet.market_id, best_mkt.id,
+                            improvement,
+                            city,
+                            str(td.date()),
+                            metric,
+                            existing_bet.market_id,
+                            best_mkt.id,
                         )
 
         logger.info(
             "place_all_pending done: %d placed, %d rotated (smart rotation)",
-            placed, rotated,
+            placed,
+            rotated,
         )
         return placed
 
