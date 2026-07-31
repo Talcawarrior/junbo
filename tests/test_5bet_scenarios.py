@@ -27,7 +27,7 @@ from database.models import Portfolio, WeatherMarket, WeatherForecast, Bet
 CITIES = ["istanbul", "london", "tokyo", "seoul"]
 SPREAD = 1  # 3 bet: T-1, T, T+1
 _CENTER = 0  # market at base_temp has highest price -> Polymarket favorite
-TARGET_DATE = (datetime.now(timezone.utc) + timedelta(days=1)).replace(
+TARGET_DATE = (datetime.now(timezone.utc) + timedelta(days=2)).replace(
     hour=23, minute=59, second=59, microsecond=0
 )
 CITIES_TO_ICAO = {"istanbul": "LTFM", "london": "EGLL", "tokyo": "RJTT", "seoul": "RKSS"}

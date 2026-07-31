@@ -296,11 +296,13 @@ class TestSettlementPolymarket:
             _clean()
 
     def test_split_resolution(self):
-        """outcomePrices [0.5,0.5] -> None returned, no bets settled."""
+        """Market not yet officially resolved (closed=False) -> pending, no bets settled."""
         _setup_market_with_bets()
         try:
             with patch("executor.settler.requests.get") as mock_get:
                 mock_get.return_value = _gamma_mock(
+                    closed=False,
+                    status="open",
                     outcome_prices=["0.5", "0.5"],
                 )
                 from executor.settler import SettlementEngine
@@ -319,12 +321,12 @@ class TestSettlementPolymarket:
             _clean()
 
     def test_price_based_settlement_without_resolution(self):
-        """Gamma NOT officially closed but outcomePrices show clear winner (>=0.98).
+        """Gamma NOT officially closed (closed=false) even though outcomePrices
+        show a clear winner (["0.0005","0.9995"]).
 
-        Mirrors the real Denver stuck-bet case: ``closed=false`` and
-        ``umaResolutionStatus`` not ``"resolved"`` yet, but the visible
-        outcomePrices are ["0.0005","0.9995"] (NO clearly won). The bot
-        must settle on the clear price instead of waiting for UMA.
+        Price-based settlement is DISABLED — the bot waits for UMA's official
+        resolution (closed=true + umaResolutionStatus="resolved"). Until then
+        the market is pending and no bets are settled.
         """
         market, bet_yes, bet_no, pf = _setup_market_with_bets(yes_price=0.35, stake=10.0)
         try:
@@ -339,22 +341,19 @@ class TestSettlementPolymarket:
 
                 engine = SettlementEngine()
                 results = engine.settle_all()
-                assert results["win"] == 1
-                assert results["loss"] == 1
-                assert results["pending"] == 0
+                assert results["pending"] == 1
+                assert results["win"] == 0
+                assert results["loss"] == 0
 
             with get_session() as session:
-                # NO bet won (NO price 0.9995 >= 0.98)
+                # No bets settled — both remain "placed"
                 b_no = session.query(Bet).filter(Bet.market_id == "test-poly-001", Bet.side == "NO").first()
-                assert b_no.status == "won"
-                # YES bet lost
+                assert b_no.status == "placed"
                 b_yes = session.query(Bet).filter(Bet.market_id == "test-poly-001", Bet.side == "YES").first()
-                assert b_yes.status == "lost"
+                assert b_yes.status == "placed"
                 mkt = session.query(WeatherMarket).filter(WeatherMarket.id == "test-poly-001").first()
-                assert mkt.status == "settled_loss"  # outcome = NO
-                rd = json.loads(mkt.raw_data)
-                assert rd["source"] == "polymarket_price"
-                assert rd["outcome"] == "NO"
+                assert mkt.status == "bet_placed"
+                assert mkt.raw_data is None
         finally:
             _clean()
 

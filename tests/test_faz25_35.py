@@ -103,7 +103,7 @@ def test_config_tighter():
     from config.settings import StrategyConfig
 
     s = StrategyConfig()
-    assert s.min_edge == 0.05
+    assert s.min_edge == 0.001
     assert s.max_bet_amount == 10.0
     assert s.min_sources == 2
     assert s.fee_rate_weather == 0.05

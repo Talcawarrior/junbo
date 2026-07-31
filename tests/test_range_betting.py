@@ -41,7 +41,7 @@ def _clean_db():
     bot_config.strategy.current_fee_rate = 0.05
 
 
-def _td(offset=1):
+def _td(offset=2):
     return (datetime.now(timezone.utc) + timedelta(days=offset)).replace(hour=23, minute=59, second=59, microsecond=0)
 
 

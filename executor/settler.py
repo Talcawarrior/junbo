@@ -20,27 +20,6 @@ logger = logging.getLogger("EXECUTOR_SETTLER")
 GAMMA_API_BASE = "https://gamma-api.polymarket.com"
 
 
-def _parse_gamma_dt(value: str | None) -> datetime | None:
-    """Parse a Gamma API ISO datetime to a NAIVE UTC ``datetime``.
-
-    Accepts ``"...Z"`` (treated as UTC) or a plain ``"2026-07-19"`` date.
-    The result is always tz-naive UTC so it compares cleanly against the
-    tz-naive ``now`` used elsewhere in this module.
-    """
-    if not value:
-        return None
-    text = value.strip().replace("Z", "+00:00")
-    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%d"):
-        try:
-            dt = datetime.strptime(text, fmt)
-        except ValueError:
-            continue
-        if dt.tzinfo is not None:
-            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-        return dt
-    return None
-
-
 class SettlementEngine:
     """Resolves open bets by reading Polymarket's official resolution data.
 
@@ -174,19 +153,8 @@ class SettlementEngine:
             market.status = "expired"
             return None
 
-        now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
-
         # ── Fetch resolution from Gamma API ────────────────────────────────
         outcome = self._fetch_market_resolution(market)
-        if outcome is None and market.target_date and (now_naive - market.target_date) > timedelta(hours=24):
-            # Fallback: resolution tarihi +48h geçmişse, outcomePrices'a bak
-            outcome = self._fetch_market_resolution(market, force=True)
-            if outcome:
-                logger.warning(
-                    "Market %s resolved via fallback price resolution (48h+ past target): outcome=%s",
-                    market.id,
-                    outcome,
-                )
         if outcome is None:
             logger.warning(
                 "Market %s not yet resolved by Polymarket, will retry",
@@ -263,32 +231,20 @@ class SettlementEngine:
 
         Returns ``"YES"``, ``"NO"``, or ``None`` if not yet resolved.
 
-        A market is treated as resolved when EITHER:
-          * Polymarket has officially closed it (``closed == true`` and
-            ``umaResolutionStatus == "resolved"``), OR
-          * its ``outcomePrices`` show a clear winner (one side ≥0.98) and the
-            market's ``endDate`` has already passed.
+        Only settles when Polymarket has OFFICIALLY resolved the market:
+        ``closed == true`` AND ``umaResolutionStatus == "resolved"``.
 
-        The second path is the fix for weather markets where UMA's official
-        ``resolved`` flag lags hours/days behind the visible outcomePrices.
-        We settle promptly on the clear price instead of waiting.
-
-        *force* skips the ``endDate`` guard (used as a last-resort fallback
-        once the market is well past its target date).
+        Price-based settlement (outcomePrices >= 0.98) is DISABLED —
+        the market price reaching 0.98 does not mean the event is resolved.
+        We wait for UMA's official resolution to avoid premature settlement.
         """
         data = self._call_gamma_api(market)
         if data is None:
             return None
 
-        # Price-based settlement is always available — it does not depend on
-        # the official closed/resolved flags. Only block it when the market is
-        # still live (endDate in the future) and we are not forcing, so we never
-        # settle a pre-resolution market that happens to trade near 1.0.
-        if not force and not data.get("closed"):
-            end_date = _parse_gamma_dt(data.get("endDate"))
-            now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-            if end_date is not None and end_date > now_utc:
-                return None
+        officially_resolved = bool(data.get("closed")) and data.get("umaResolutionStatus") == "resolved"
+        if not officially_resolved:
+            return None
 
         prices = self._parse_outcome_prices(market, data.get("outcomePrices"))
         if prices is None:
@@ -305,25 +261,24 @@ class SettlementEngine:
             )
             return None
 
-        if yes_price >= 0.98:
+        if yes_price >= 0.5:
             outcome = "YES"
-        elif no_price >= 0.98:
+        elif no_price >= 0.5:
             outcome = "NO"
         else:
             logger.warning(
-                "Split/no-clear resolution for %s: outcomePrices=%s (neither side >= 0.98)",
+                "Ambiguous resolution for %s: outcomePrices=%s (neither side >= 0.50)",
                 market.id,
                 prices,
             )
             return None
 
-        officially_resolved = bool(data.get("closed")) and data.get("umaResolutionStatus") == "resolved"
         market.raw_data = json.dumps(
             {
-                "source": "polymarket" if officially_resolved else "polymarket_price",
+                "source": "polymarket",
                 "outcome": outcome,
                 "outcomePrices": prices,
-                "umaResolutionStatus": data.get("umaResolutionStatus") if officially_resolved else None,
+                "umaResolutionStatus": data.get("umaResolutionStatus"),
                 "closed": data.get("closed"),
                 "settled_at": datetime.now(timezone.utc).isoformat(),
             }
