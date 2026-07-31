@@ -482,6 +482,9 @@ class BetPlacer:
         placed = 0
 
         with get_session() as session:
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            today = now.date()
+
             # 1) Tum acik ve gelecek tarihli marketleri cek
             open_markets = (
                 session.query(WeatherMarket)
@@ -490,6 +493,7 @@ class BetPlacer:
                     WeatherMarket.target_date.isnot(None),
                     WeatherMarket.yes_price.isnot(None),
                     WeatherMarket.yes_price > 0,
+                    func.date(WeatherMarket.target_date) >= today,
                 )
                 .all()
             )
