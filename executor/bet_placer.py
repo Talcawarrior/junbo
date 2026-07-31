@@ -474,12 +474,13 @@ class BetPlacer:
     def place_all_pending(self) -> int:
         """Tum acik Polymarket weather marketleri icin bet ac.
         Analiz sonucuna bakilmaz — Polymarket'te hangi derece en yuksek
-        fiyatlanmissa ona bet acilir. Rotation devre disi — tum bahisler
-        settlement'a kadar acik kalir, erken kapatma yok.
+        fiyatlanmissa ona bet acilir. Smart rotation: ayni grupta daha iyi
+        fiyatlı market bulunursa eski bet kapatilir, yenisi acilir.
         """
         from collections import defaultdict
 
         placed = 0
+        rotated = 0
 
         with get_session() as session:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -543,20 +544,33 @@ class BetPlacer:
                     if bet:
                         placed += 1
                 elif existing_bet.market_id != str(best_mkt.id):
-                    # Ayni grupta farkli market'te bet var — rotation DEVRE DISI
-                    # Settlement'a kadar bekle, erken kapatma yok.
-                    logger.debug(
-                        "Rotation skipped (settlement-only mode): %s %s %s existing=%s best=%s",
-                        city,
-                        str(td.date()),
-                        metric,
-                        existing_bet.market_id,
-                        best_mkt.id,
-                    )
+                    # Ayni grupta farkli market'te bet var — daha iyi
+                    # fiyatlı market varsa eski bet'i kapat ve yenisini ac
+                    old_mkt = session.query(WeatherMarket).filter_by(
+                        id=existing_bet.market_id,
+                    ).first()
+                    old_price = float(old_mkt.yes_price or 0) if old_mkt else 0
+                    improvement = best_price - old_price
+                    if improvement >= 0.10:
+                        logger.info(
+                            "Smart rotation: %s %s %s old_price=%s new_price=%s improvement=%s",
+                            city, str(td.date()), metric, old_price, best_price, improvement,
+                        )
+                        self.close_bet_for_rotation(existing_bet, old_price, session)
+                        rotated += 1
+                        bet = self.open_bet_on_market(best_mkt, session)
+                        if bet:
+                            placed += 1
+                    else:
+                        logger.debug(
+                            "Rotation skipped (improvement=%.4f < 0.10): %s %s %s existing=%s best=%s",
+                            improvement, city, str(td.date()), metric,
+                            existing_bet.market_id, best_mkt.id,
+                        )
 
         logger.info(
-            "place_all_pending done: %d placed, 0 rotated (settlement-only mode)",
-            placed,
+            "place_all_pending done: %d placed, %d rotated (smart rotation)",
+            placed, rotated,
         )
         return placed
 
