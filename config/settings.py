@@ -153,6 +153,11 @@ class StrategyConfig:
     tie_bet_enabled: bool = True
     tie_loser_gap: float = 0.10  # ikiz betlerden biri %10+ one gecerse digerini kapat
 
+    # ── Max entry price ───────────────────────────────────────────────────
+    # 0.99'dan alimi yasakla: bu fiyatta kar marji cok dusuk (0.99 -> 1.0).
+    # Fill price bu degerin UZERINE cikarsa (>=) bet acilmaz.
+    max_entry_price: float = 0.99
+
 
 @dataclass
 class RiskConfig:
@@ -494,6 +499,7 @@ class BotConfig:
         s.kelly_fraction = float(os.getenv("KELLY_FRACTION", str(s.kelly_fraction)))
         s.daily_loss_limit = float(os.getenv("DAILY_LOSS_LIMIT", str(s.daily_loss_limit)))
         s.flat_bet_usd = float(os.getenv("FLAT_BET_USD", str(s.flat_bet_usd)))
+        s.max_entry_price = float(os.getenv("MAX_ENTRY_PRICE", str(s.max_entry_price)))
 
 
 # ── Config backward-compatibility proxy ────────────────────────────────────
@@ -541,6 +547,7 @@ class _ConfigProxy:
         "FLAT_BET_USD": ("strategy", "flat_bet_usd"),
         "DAILY_LOSS_LIMIT": ("strategy", "daily_loss_limit"),
         "TOTAL_EXPOSURE_PCT": ("strategy", "total_exposure_pct"),
+        "MAX_ENTRY_PRICE": ("strategy", "max_entry_price"),
     }
 
     def _resolve(self, name: str):

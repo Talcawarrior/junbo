@@ -13,6 +13,13 @@ from datetime import date, datetime, timezone, timedelta
 from database.db import get_session
 from database.models import OPEN_BET_STATUSES, Bet, WeatherMarket
 
+try:
+    from scripts.verify_ui_markets import verify_all_open_dates as _verify_ui
+    from scripts.verify_ui_markets import verify_db_vs_poly as _verify_poly
+except ImportError:
+    _verify_ui = None
+    _verify_poly = None
+
 logger = logging.getLogger("BOT_LOOP")
 
 # Timeout values (seconds)
@@ -199,6 +206,8 @@ async def scan_and_bet_loop(state):
     last_weather_fetch = None  # Son weather fetch zamanı
     last_two_day_date = None  # En son tetiklenen 2-gün (yeni tarih) açık market tarihi
     model_run_fast_until: datetime | None = None  # Model run fast mode end time
+    poly_verify_counter = 0  # 2 saatte bir DB vs Polymarket kontrolü
+    _POLY_VERIFY_INTERVAL = 24  # 5 dk döngü × 24 = 120 dk (2 saat)
 
     try:
         previous_market_count = _get_market_count()
@@ -219,6 +228,12 @@ async def scan_and_bet_loop(state):
 
             if is_new_day:
                 logger.info("Midnight detected — running immediate scan")
+                # UI doğrulama: Polymarket'teki yeni gün marketlerini DB ile kıyasla
+                if _verify_ui:
+                    try:
+                        _verify_ui()
+                    except Exception as e:
+                        logger.warning("UI doğrulama hatası (yeni gün): %s", e)
 
             # STEP 1: Fetch markets (Polymarket) — her döngü
             await asyncio.wait_for(asyncio.to_thread(run_fetch_markets), timeout=_FETCH_TIMEOUT)
@@ -313,6 +328,12 @@ async def scan_and_bet_loop(state):
                         _FAST_PRICE_WINDOW // 60,
                     )
                     last_two_day_date = new_date
+                    # UI doğrulama: yeni tarih için Polymarket marketlerini kontrol et
+                    if _verify_ui:
+                        try:
+                            _verify_ui()
+                        except Exception as e:
+                            logger.warning("UI doğrulama hatası (tarih=%s): %s", new_date.isoformat(), e)
                 elif new_date is not None:
                     last_two_day_date = new_date
             except Exception as e:
@@ -326,6 +347,19 @@ async def scan_and_bet_loop(state):
                     await asyncio.wait_for(asyncio.to_thread(_cleanup_stale_bets), timeout=_CLEANUP_TIMEOUT)
                 except Exception as e:
                     logger.warning("Stale cleanup failed: %s", e)
+
+            # DB vs Polymarket karşılaştırma: 2 saatte bir
+            poly_verify_counter += 1
+            if poly_verify_counter >= _POLY_VERIFY_INTERVAL and _verify_poly:
+                poly_verify_counter = 0
+                try:
+                    report = await asyncio.wait_for(asyncio.to_thread(_verify_poly), timeout=120)
+                    if report:
+                        logger.warning("DB vs Polymarket uyumsuzluk:\n%s", report)
+                    else:
+                        logger.info("DB vs Polymarket: tüm bet'ler eşleşiyor")
+                except Exception as e:
+                    logger.warning("DB vs Polymarket kontrol hatası: %s", e)
 
             # Scan duration log
             scan_duration = (datetime.now(timezone.utc) - scan_start).total_seconds()
