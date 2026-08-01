@@ -414,7 +414,7 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
             <CardTitle className="text-sm font-semibold" style={{ color: TEXT_PRIMARY }}>Açık Pozisyonlar</CardTitle>
           </CardHeader>
           <CardContent className="px-3">
-            <div className="max-h-[380px] overflow-y-auto custom-scroll">
+            <div className="max-h-[760px] overflow-y-auto custom-scroll">
               {openPositions.length === 0 ? (
                 <div className="text-center py-10 text-sm" style={{ color: TEXT_MUTED }}>Açık pozisyon yok</div>
               ) : (
@@ -555,25 +555,6 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
         </Card>
       </section>
 
-      {/* Edge Distribution */}
-      <Card className="shadow-sm py-4 gap-3" style={{ borderColor: BORDER }}>
-        <CardHeader className="pb-0 pt-0 px-5">
-          <CardTitle className="text-sm font-semibold" style={{ color: TEXT_PRIMARY }}>Edge Dağılımı</CardTitle>
-        </CardHeader>
-        <CardContent className="px-4">
-          <ChartWrapper height={220}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={edgeDistribution} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={BORDER} vertical={false} />
-                <XAxis dataKey="range" tick={{ fontSize: 11, fill: TEXT_MUTED }} axisLine={{ stroke: BORDER }} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: TEXT_MUTED }} axisLine={false} tickLine={false} width={30} />
-                <Tooltip content={<EdgeTooltip />} cursor={{ fill: "rgba(0,0,0,0.04)" }} />
-                <Bar dataKey="count" fill={GREEN} radius={[4, 4, 0, 0]} barSize={40} />
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartWrapper>
-        </CardContent>
-      </Card>
     </div>
   );
 }
