@@ -584,20 +584,8 @@ class _ConfigProxy:
         return bot_config.initial_portfolio * bot_config.strategy.daily_loss_limit
 
     @classmethod
-    def get_model_weight(cls, model_name: str) -> float:
-        return bot_config.model_weights.get(model_name, 0.0)
-
-    @classmethod
     def get_normalized_weights(cls) -> dict:
         return bot_config.model_weights
-
-    @classmethod
-    def get_max_exposure_amount(cls, portfolio_value: float) -> float:
-        return portfolio_value * bot_config.max_exposure_pct
-
-    @classmethod
-    def get_daily_loss_limit(cls, portfolio_value: float) -> float:
-        return portfolio_value * bot_config.strategy.daily_loss_limit
 
 
 # ── Singleton instances (bot_config FIRST, then Config proxy) ──────────────
