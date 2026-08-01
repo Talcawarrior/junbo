@@ -1,7 +1,7 @@
 """Comprehensive test suite for Junbo bot system.
 
 Tests cover:
-- AI Models (Karpathy grid search)
+- AI Models
 - Financial Formulas (Fee, Slippage, Kelly)
 - API Endpoints
 - Risk Management
@@ -10,50 +10,6 @@ Tests cover:
 
 import pytest
 import os
-from unittest.mock import patch
-
-
-# ============================================================================
-# 1. AI MODEL TESTLERİ
-# ============================================================================
-
-
-class TestAIModels:
-    """AI modelleri için testler."""
-
-    def test_researcher_agent_facts(self):
-        """Researcher Agent mock test."""
-        with patch("asi_engine.researcher_agent.ResearcherAgent") as MockRA:
-            MockRA.return_value.ask.return_value = "This is a prediction market for weather events"
-            agent = MockRA()
-            result = agent.ask("test")
-            assert isinstance(result, str)
-
-    def test_karpathy_grid_search(self):
-        """Karpathy weekly search fonksiyonunu test et."""
-        from asi_engine.karpathy_weekly import run_karpathy_weekly
-
-        result = run_karpathy_weekly(rounds=1, use_llm=False, seed=42)
-        assert isinstance(result, dict)
-        assert "rounds_run" in result or "error" in result
-
-    def test_karpathy_performance(self):
-        """Karpathy search performansını test et."""
-        import time
-        from asi_engine.karpathy_weekly import run_karpathy_weekly
-
-        start = time.time()
-        result = run_karpathy_weekly(rounds=2, use_llm=False, seed=42)
-        duration = time.time() - start
-        assert duration < 120
-        assert isinstance(result, dict)
-
-    def test_karpathy_cache(self):
-        """Karpathy cache hit rate'ı test et."""
-        from asi_engine.karpathy_weekly import _load_best
-
-        best = _load_best()
-        assert best is None or hasattr(best, "description")
 
 
 # ============================================================================

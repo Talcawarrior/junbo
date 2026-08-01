@@ -145,23 +145,6 @@ class BetPlacer:
                 d.log(logging.DEBUG)
                 return None
 
-            # Guard: skip markets with no real liquidity (Karpathy-search-
-            # discovered min_entry_price filter - long-shot bets are the
-            # source of the asymmetric-payoff bleed).
-            # DISABLED: bet on all markets regardless of price
-            market_price = float(market.yes_price or 0.5)
-            # Prefer the Karpathy-tuned strategy value; fall back to legacy
-            # Config.MIN_ENTRY_PRICE for backwards compatibility.
-            strategy_min_price = getattr(self.risk_manager.config, "strategy", None)
-            if False and strategy_min_price is not None and hasattr(strategy_min_price, "min_entry_price"):
-                min_price = float(strategy_min_price.min_entry_price)
-            else:
-                min_price = float(getattr(self.risk_manager.config, "MIN_ENTRY_PRICE", 0.01))
-            d.check("min_entry_price", True, price=market_price, min_price=min_price)
-            if not d.should_bet:
-                d.log(logging.DEBUG)
-                return None
-
             # Zaten bu market'e AKTIF bir bahis acilmis mi?
             # Sadece aktif (placed/partial_fill/filled) bet'leri kontrol et.
             # Closed/settled/rejected/failed bet'leri engellemiyoruz —
@@ -509,12 +492,18 @@ class BetPlacer:
                 key = (mkt.city, td, mkt.metric or "unknown")
                 by_group[key].append((mkt, float(mkt.yes_price or 0)))
 
-            # 3) Her grupta en yuksek fiyatli marketi sec
+            # 3) Her grupta en yuksek fiyatli market(ler)i sec.
+            #    tie_bet_enabled ise: ayni en yuksek fiyata sahip tum marketler
+            #    (tie) birlikte acilir — sona dogru biri one gecerse digeri
+            #    otomatik kapatilir. Degilse: sadece ilk (en yuksek) market.
+            tie_enabled = bool(getattr(bot_config.strategy, "tie_bet_enabled", True))
             best_markets = []
             for (city, td, metric), candidates in by_group.items():
-                best_mkt, best_price = max(candidates, key=lambda x: x[1])
+                best_price = max(p for _, p in candidates)
                 if best_price > 0:
-                    best_markets.append((city, td, metric, best_mkt, best_price))
+                    tied = [(m, p) for m, p in candidates if abs(p - best_price) < 1e-9]
+                    for mkt, price in tied[: None if tie_enabled else 1]:
+                        best_markets.append((city, td, metric, mkt, price))
 
             logger.info(
                 "place_all_pending: %d groups, %d best markets selected",
@@ -522,9 +511,9 @@ class BetPlacer:
                 len(best_markets),
             )
 
-            # 4) Mevcut aktif bet'leri yukle: (city, date, metric) -> Bet
+            # 4) Mevcut aktif bet'leri yukle: (city, date, metric) -> [Bet]
             active_bets = session.query(Bet).filter(Bet.status.in_(OPEN_BET_STATUSES)).all()
-            active_by_group: dict[tuple, Bet] = {}
+            active_by_group: dict[tuple, list] = defaultdict(list)
             for b in active_bets:
                 wm = session.query(WeatherMarket).filter_by(id=b.market_id).first()
                 if wm and wm.target_date:
@@ -532,21 +521,32 @@ class BetPlacer:
                     if getattr(td, "tzinfo", None):
                         td = td.replace(tzinfo=None)
                     key = (wm.city, td, wm.metric or "unknown")
-                    active_by_group[key] = b
+                    active_by_group[key].append(b)
 
             # 5) Her grup icin: ac / rotation yap
             for city, td, metric, best_mkt, best_price in best_markets:
                 key = (city, td, metric)
-                existing_bet = active_by_group.get(key)
+                group_bets = active_by_group.get(key, [])
+
+                # Bu markette zaten acik bet var mi?
+                existing_on_market = next(
+                    (b for b in group_bets if b.market_id == str(best_mkt.id)), None
+                )
+                if existing_on_market is not None:
+                    continue
+
+                # Grupta baska bir markette bet var mi?
+                existing_bet = group_bets[0] if group_bets else None
 
                 if existing_bet is None:
                     # Bet yok — ac
                     bet = self.open_bet_on_market(best_mkt, session)
                     if bet:
                         placed += 1
+                        active_by_group[key].append(bet)
                 elif existing_bet.market_id != str(best_mkt.id):
-                    # Ayni grupta farkli market'te bet var — daha iyi
-                    # fiyatlı market varsa eski bet'i kapat ve yenisini ac
+                    # Ayni grupta farkli market'te bet var — bu market de ayni
+                    # en yuksek fiyata sahipse (tie) ikiz bet olarak da acilir.
                     old_mkt = (
                         session.query(WeatherMarket)
                         .filter_by(
@@ -555,8 +555,21 @@ class BetPlacer:
                         .first()
                     )
                     old_price = float(old_mkt.yes_price or 0) if old_mkt else 0
-                    improvement = best_price - old_price
-                    if improvement >= 0.10:
+                    if best_price == old_price:
+                        logger.info(
+                            "Tie open: %s %s %s existing=%s twin=%s (both @%.4f)",
+                            city,
+                            str(td.date()),
+                            metric,
+                            existing_bet.market_id,
+                            best_mkt.id,
+                            best_price,
+                        )
+                        bet = self.open_bet_on_market(best_mkt, session)
+                        if bet:
+                            placed += 1
+                            active_by_group[key].append(bet)
+                    elif best_price - old_price >= 0.10:
                         logger.info(
                             "Smart rotation: %s %s %s old_price=%s new_price=%s improvement=%s",
                             city,
@@ -564,7 +577,7 @@ class BetPlacer:
                             metric,
                             old_price,
                             best_price,
-                            improvement,
+                            best_price - old_price,
                         )
                         self.close_bet_for_rotation(existing_bet, old_price, session)
                         rotated += 1
@@ -574,7 +587,7 @@ class BetPlacer:
                     else:
                         logger.debug(
                             "Rotation skipped (improvement=%.4f < 0.10): %s %s %s existing=%s best=%s",
-                            improvement,
+                            best_price - old_price,
                             city,
                             str(td.date()),
                             metric,
@@ -588,6 +601,69 @@ class BetPlacer:
             rotated,
         )
         return placed
+
+    def close_losing_twin_bets(self, session=None) -> int:
+        """Tie olarak acilan ikiz betlerden geride kalanini kapat.
+
+        Ayni (city, target_date, metric) grubunda birden fazla acik bet varsa
+        (tie acilimi nedeniyle) ve en yuksek fiyatli ile arasindaki fark
+        ``tie_loser_gap``'i asiyorsa, geride olan bet kapatilir. Boylece sona
+        dogru biri one gecince digeri otomatik satilir.
+        """
+        from collections import defaultdict
+
+        if not bool(getattr(bot_config.strategy, "tie_bet_enabled", True)):
+            return 0
+
+        gap = float(getattr(bot_config.strategy, "tie_loser_gap", 0.10) or 0.10)
+        if not gap or gap <= 0:
+            return 0
+
+        closed = 0
+        with get_session() as s:
+            active = (
+                s.query(Bet)
+                .filter(Bet.status.in_(OPEN_BET_STATUSES), Bet.side == "YES")
+                .all()
+            )
+            if not active:
+                return 0
+
+            # (city, date, metric) -> [(bet, market)]
+            groups: dict[tuple, list] = defaultdict(list)
+            for b in active:
+                wm = s.query(WeatherMarket).filter_by(id=b.market_id).first()
+                if not wm or not wm.target_date:
+                    continue
+                td = wm.target_date
+                if getattr(td, "tzinfo", None):
+                    td = td.replace(tzinfo=None)
+                key = (wm.city, td, wm.metric or "unknown")
+                cur = float(wm.yes_price or 0)
+                groups[key].append((b, wm, cur))
+
+            for key, entries in groups.items():
+                if len(entries) < 2:
+                    continue
+                entries.sort(key=lambda x: x[2], reverse=True)
+                leader_price = entries[0][2]
+                for bet, wm, cur in entries[1:]:
+                    if leader_price - cur >= gap:
+                        logger.info(
+                            "Twin loser close: %s %s %s cur=%.4f leader=%.4f gap=%.2f",
+                            key[0],
+                            str(key[1].date()),
+                            key[2],
+                            cur,
+                            leader_price,
+                            leader_price - cur,
+                        )
+                        self.close_bet_for_rotation(bet, cur, s)
+                        closed += 1
+
+        if closed:
+            logger.info("close_losing_twin_bets: %d positions closed", closed)
+        return closed
 
     def open_bet_on_market(self, market: WeatherMarket, session) -> Bet | None:
         """Dogrudan bir market'e bet ac. Analysis gerektirmez."""

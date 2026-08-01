@@ -607,7 +607,7 @@ def start_scheduler():
     logger.info("Scheduler initialized in background thread...")
 
 
-def run_cycle(skip_place_bets: bool = False):
+def run_cycle():
     """Run one full bot cycle with a SINGLE shared DB session.
 
     Combines analyze → place_bets → update_prices → risk_management
@@ -623,10 +623,9 @@ def run_cycle(skip_place_bets: bool = False):
             results.append(f"analyze error: {e}")
 
         try:
-            if not skip_place_bets:
-                # M5: run_place_bets intentionally manages its own DB session
-                # for bet placement atomicity — does NOT share the cycle session
-                results.append(run_place_bets())
+            # M5: run_place_bets intentionally manages its own DB session
+            # for bet placement atomicity — does NOT share the cycle session
+            results.append(run_place_bets())
         except Exception as e:
             logger.error("Cycle place_bets error: %s", e)
             results.append(f"place_bets error: {e}")
@@ -636,6 +635,18 @@ def run_cycle(skip_place_bets: bool = False):
         except Exception as e:
             logger.error("Cycle update_prices error: %s", e)
             results.append(f"update_prices error: {e}")
+
+        try:
+            # Tie olarak acilan ikiz betlerden geride kalanini kapat
+            from executor.bet_placer import BetPlacer
+
+            placer = BetPlacer()
+            twin_closed = placer.close_losing_twin_bets()
+            if twin_closed:
+                results.append(f"twin loser close: {twin_closed}")
+        except Exception as e:
+            logger.error("Cycle twin loser close error: %s", e)
+            results.append(f"twin loser close error: {e}")
 
         try:
             results.append(run_risk_management(session=session))

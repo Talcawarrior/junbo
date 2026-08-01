@@ -1,9 +1,12 @@
 """Saatlik piyasa fiyat snapshot'i — giris zamani analizi icin.
 
 Tum acik WeatherMarket'lerin YES/NO fiyatlarini saatlik olarak
-market_snapshots tablosuna kaydeder. Sadece yes_price > 0.01
-olan marketler kaydedilir. Boylece hangi saat/gunde hangi
-sicaklik araligina girmek daha karli oldugu analiz edilebilir.
+market_snapshots tablosuna kaydeder. "highest/lowest temperature"
+merdivenindeki her threshold (HIGH or-above, LOW or-below, RANGE exact
+bucket) ayri bir markettir ve YES fiyati >= 0.005 (%0.5, Polymarket'in
+"1%" olarak goruntuledigi ~0.009'luk tail bucket'larini da yakalar) olan
+hepsi kaydedilir. Boylece hangi saat/gunde hangi sicaklik araligina
+girmenin daha karli oldugu analiz edilebilir.
 """
 
 import logging
@@ -17,13 +20,16 @@ from database.models import WeatherMarket, MarketSnapshot
 
 logger = logging.getLogger("SNAPSHOT_JOB")
 
-YES_PRICE_MIN = 0.01
+YES_PRICE_MIN = 0.005
 
 
 def take_market_snapshots() -> int:
-    """Tum acik market'ler icin saatlik piyasa snapshot'i al.
+    """Tum acik sicaklik bucket marketleri icin saatlik piyasa snapshot'i al.
 
-    Sadece yes_price > 0.01 olan marketler kaydedilir.
+    Highest/lowest temperature merdivenindeki her threshold kaydedilir
+    (HIGH, LOW ve RANGE exact bucket'lari dahil). yes_price >= 0.005
+    olanlar kaydedilir; %1'in altinda kalan tail bucket'lari atlanir.
+
     Ayni market'e ait snapshot'lar saatlik guncellenir
     (aynı saat icin tekrar kayit yapilmaz).
 
@@ -33,15 +39,16 @@ def take_market_snapshots() -> int:
     saved = 0
 
     with get_session() as session:
-        # 1) Tum acik marketleri cek, yes_price > 0.01 olanlar
-        # Sadece HIGH ve LOW sicaklik marketleri (range marketleri haric)
+        # 1) Tum acik sicaklik bucket marketlerini cek, yes_price > 0.01 olanlar.
+        #    HIGH (or-above), LOW (or-below) VE RANGE (exact bucket) hepsi kaydedilir —
+        #    "highest/lowest temperature" merdivenindeki her threshold ayni urunun
+        #    bucket'laridir ve tamami saatlik olarak izlenmelidir.
         open_markets = (
             session.query(WeatherMarket)
             .filter(
                 WeatherMarket.status == "open",
                 WeatherMarket.yes_price.isnot(None),
                 WeatherMarket.yes_price > YES_PRICE_MIN,
-                WeatherMarket.market_type.in_(["HIGH", "LOW"]),
             )
             .all()
         )

@@ -18,11 +18,7 @@ import secrets
 from fastapi import Depends, FastAPI, Header, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
-from asi_engine.calibration_engine import CalibrationEngine
-from asi_engine.data_backfiller import DataBackfiller
 
-# ASI Engine imports (for ASI-Evolve dashboard endpoints)
-from asi_engine.orchestrator import JunboOrchestrator
 from config.logging_config import setup_logging
 
 # Package Imports
@@ -36,12 +32,11 @@ from database.db import (
 )
 from database.models import OPEN_BET_STATUSES, Analysis, Bet, Portfolio, WeatherMarket
 from engine.calculator import WeatherEngine
-from engine.strategy import BettingEngine, RiskManager, SIALoop
+from engine.strategy import BettingEngine, RiskManager
 from executor.settler import SettlementEngine
 from scrapers.polymarket import PolymarketScraper
 from utils.formulas import max_exposure_cap, portfolio_current_value, roi_pct, win_rate_pct
 from utils.price_sanity import safe_ev
-from utils.weights_store import load_weights
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -64,7 +59,7 @@ TR_MONTHS = {
 
 
 # ── API Key Authentication ──────────────────────────────────────────────────
-# Protects sensitive POST endpoints (reset, asi/*, start, stop, cleanup).
+# Protects sensitive POST endpoints (reset, start, stop, cleanup).
 # JUNBO_API_KEY MUST be set. If not set, a random key is generated at startup
 # and printed to console. Destructive endpoints are NEVER open.
 
@@ -114,15 +109,6 @@ class BotState:
         self.risk_manager = None
         self.betting_engine = None
         self.settlement_engine = None
-        self.sia_loop = None
-        self.sia_last_run = None  # datetime of last SIA optimization
-        self.sia_interval_hours = bot_config.sia_interval // 3600
-        self.last_range_bet = None  # Son range betting zamanı
-
-        # ASI-Evolve engines
-        self.orchestrator = None
-        self.backfiller = None
-        self.calibration_engine = None
 
     def initialize_modules(self):
         """Initialize all modular components."""
@@ -132,12 +118,6 @@ class BotState:
         self.risk_manager = RiskManager(None, bot_config)
         self.betting_engine = BettingEngine(None, self.risk_manager, self.weather_engine)
         self.settlement_engine = SettlementEngine()
-        self.sia_loop = SIALoop(self.db_session_factory, config)
-
-        # ASI-Evolve engines
-        self.orchestrator = JunboOrchestrator()
-        self.backfiller = DataBackfiller()
-        self.calibration_engine = CalibrationEngine()
 
 
 state = BotState()
@@ -502,110 +482,6 @@ def get_status():
         db.close()
 
 
-# --- ASI-Evolve Dashboard Endpoints ---
-
-
-@app.get("/api/asi/weights")
-def get_asi_weights():
-    """Retrieve current evolved weights with model performance metrics."""
-    from database.models import ModelPerformance
-    from sqlalchemy import func
-
-    weights = load_weights()
-    if not weights:
-        weights = config.MODEL_WEIGHTS
-
-    # Get latest performance metrics for each model
-    db = get_db_session()
-    try:
-        # Subquery to get latest record per model
-        latest_perf = (
-            db.query(
-                ModelPerformance.model_name,
-                func.max(ModelPerformance.recorded_at).label("max_date"),
-            )
-            .group_by(ModelPerformance.model_name)
-            .subquery()
-        )
-
-        perf_records = (
-            db.query(ModelPerformance)
-            .join(
-                latest_perf,
-                (ModelPerformance.model_name == latest_perf.c.model_name)
-                & (ModelPerformance.recorded_at == latest_perf.c.max_date),
-            )
-            .all()
-        )
-
-        perf_map = {p.model_name: p for p in perf_records}
-    finally:
-        db.close()
-
-    # Return enriched weights with performance data
-    result = {}
-    for model, weight in weights.items():
-        perf = perf_map.get(model)
-        result[model] = {
-            "weight": weight,
-            "brier_score": perf.brier_score if perf else None,
-            "accuracy": perf.accuracy if perf else None,
-            "num_predictions": perf.num_predictions if perf else 0,
-            "last_updated": perf.recorded_at.isoformat() if perf and perf.recorded_at else None,
-        }
-    return result
-
-
-@app.get("/api/asi/cognition")
-def get_asi_cognition():
-    """Retrieve ASI Cognition Base insights."""
-    if not state.orchestrator:
-        state.orchestrator = JunboOrchestrator()
-    return state.orchestrator.cognition_base.get_all_insights()
-
-
-@app.post("/api/asi/evolve")
-async def run_asi_evolve(_key: str = Depends(verify_api_key)):
-    """Run an autonomous evolution pipeline round (5 rounds)."""
-    if not state.orchestrator:
-        state.orchestrator = JunboOrchestrator()
-    loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(None, state.orchestrator.run_evolution_pipeline, 5)
-    return result
-
-
-@app.post("/api/asi/backfill")
-async def run_asi_backfill(days: int = 90, _key: str = Depends(verify_api_key)):
-    """Trigger a deep historical weather backfill from Open-Meteo APIs."""
-    if not state.backfiller:
-        state.backfiller = DataBackfiller()
-    loop = asyncio.get_running_loop()
-    records_inserted = await loop.run_in_executor(None, state.backfiller.run_deep_backfill, days, 12)
-    if state.calibration_engine:
-        state.calibration_engine.calculate_biases()
-    return {"status": "success", "inserted_records": records_inserted}
-
-
-@app.get("/api/asi/calibration")
-def get_asi_calibration():
-    """Retrieve the pre-calculated bias calibration maps for each city."""
-    if not state.calibration_engine:
-        state.calibration_engine = CalibrationEngine()
-    return state.calibration_engine.bias_map
-
-
-@app.post("/api/asi/calibration/recalculate")
-def run_asi_calibration_recalculate(_key: str = Depends(verify_api_key)):
-    """Manually recalculate model biases from the historical calibrations table."""
-    if not state.calibration_engine:
-        state.calibration_engine = CalibrationEngine()
-    biases = state.calibration_engine.calculate_biases()
-    return {"status": "success", "cities_calibrated": len(biases)}
-
-
-# --- Standard Endpoints ---
-
-
 @app.get("/api/markets")
 def get_markets():
     """Get all future active weather markets AND missed signals (rejected bets)."""
@@ -881,14 +757,45 @@ def get_signals():
 
 @app.get("/api/city-bets")
 def get_city_bets():
-    """Range bets grouped by city — for first-page dashboard."""
+    """Active bets grouped by city — for first-page dashboard."""
     from collections import defaultdict
+    from datetime import datetime, timezone, timedelta
+
+    def _resolve_icao(city: str) -> str | None:
+        """City name → ICAO code via WeatherMarket."""
+        row = db.query(WeatherMarket.city_code).filter(
+            WeatherMarket.city.ilike(city), WeatherMarket.city_code.isnot(None)
+        ).first()
+        return row[0] if row else None
+
+    def _get_forecast_temp(city: str, icao: str, metric: str, target_date: datetime) -> float | None:
+        """Get latest temperature forecast (cache-first)."""
+        from database.models import WeatherForecast
+
+        forecasts = (
+            db.query(WeatherForecast)
+            .filter(
+                WeatherForecast.city.ilike(icao),
+                WeatherForecast.metric == metric,
+                WeatherForecast.target_date == target_date,
+                WeatherForecast.source.isnot(None),
+            )
+            .order_by(WeatherForecast.fetched_at.desc())
+            .all()
+        )
+        if not forecasts:
+            return None
+        latest_by_source = {}
+        for f in forecasts:
+            if f.source not in latest_by_source:
+                latest_by_source[f.source] = f.predicted_value
+        values = list(latest_by_source.values())
+        if not values:
+            return None
+        return sum(values) / len(values)
 
     db = get_db_session()
     try:
-        from executor.range_bet_placer import _get_forecast_temp, _resolve_icao
-        from datetime import datetime, timezone, timedelta
-
         target_date = (datetime.now(timezone.utc) + timedelta(days=2)).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
@@ -904,11 +811,11 @@ def get_city_bets():
                 city_key = (b.city or "").lower()
                 by_city[city_key].append(b)
 
-        cities_config = bot_config.strategy.range_bet_cities or []
+        # Aktif bet olan şehirleri listele (city-bets = açık pozisyonlar)
         cities_out = []
-        for city in cities_config:
-            city_key = city.lower()
-            bets = by_city.get(city_key, [])
+        for city_key in sorted(by_city):
+            city = by_city[city_key][0].city
+            bets = by_city[city_key]
             total_pnl = sum(float(b.unrealized_pnl or 0) for b in bets)
             total_stake = sum(float(b.amount or 0) for b in bets)
             icao = _resolve_icao(city)
@@ -954,9 +861,9 @@ def get_city_bets():
             "total_pnl": round(sum(c["total_pnl"] for c in cities_out), 2),
             "total_stake": round(sum(c["total_stake"] for c in cities_out), 2),
             "total_bets": sum(c["bet_count"] for c in cities_out),
-            "bet_amount": bot_config.strategy.range_bet_amount,
-            "spread": bot_config.strategy.range_bet_spread,
-            "enabled": bot_config.strategy.range_bet_enabled,
+            "bet_amount": bot_config.strategy.flat_bet_usd,
+            "spread": 0,
+            "enabled": True,
             "cities": cities_out,
         }
     finally:

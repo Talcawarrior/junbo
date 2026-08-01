@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Pre-commit hook: localde commit öncesi testleri çalıştırır.
+# Kullanım: cp hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+set -euo pipefail
+
+echo "=== Pre-commit: latent-bug detection ==="
+python -m pytest tests/test_latent_bugs.py -v --tb=long -x || {
+    echo "FAILED: test_latent_bugs.py başarısız. Commit engellendi."
+    echo "  - Yeni bir public fonksiyon eklediysen ALLOWED_DEAD'a ekle"
+    echo "  - Import hatası varsa düzelt"
+    exit 1
+}
+
+echo "=== Pre-commit: quick_check (lint+type) ==="
+python quick_check.py --fast || {
+    echo "WARNING: quick_check başarısız (commit engellenmedi)"
+    echo "  - ruff/mypy hatalarını gözden geçir"
+}
+
+echo "=== Pre-commit: değişen dosyaların testleri ==="
+# Son commit'te değişen .py dosyalarını bul
+changed=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' || true)
+if [ -n "$changed" ]; then
+    echo "Değişen dosyalar: $changed"
+fi
+
+echo "=== Pre-commit: PASSED ==="

@@ -198,7 +198,6 @@ async def scan_and_bet_loop(state):
     fast_mode_until = None
     last_weather_fetch = None  # Son weather fetch zamanı
     last_two_day_date = None  # En son tetiklenen 2-gün (yeni tarih) açık market tarihi
-    last_range_pt_check = None  # Son PT/trail kontrol zamanı
     model_run_fast_until: datetime | None = None  # Model run fast mode end time
 
     try:
@@ -234,11 +233,7 @@ async def scan_and_bet_loop(state):
             # hemen cache'den açılır. Böylece bahisler Polymarket verisinin
             # tazelendiği 5 dk temposunda açılır; meteo saatte 1 kez yenilenir
             # ve bahis açılımını bloklamaz.
-            # Range betting aktifse regular place_bets atlanir (5-bet kurali)
-            from config.settings import bot_config as _bc
-
-            skip_bets = _bc.strategy.range_bet_enabled
-            await asyncio.wait_for(asyncio.to_thread(run_cycle, skip_place_bets=skip_bets), timeout=_CYCLE_TIMEOUT)
+            await asyncio.wait_for(asyncio.to_thread(run_cycle), timeout=_CYCLE_TIMEOUT)
 
             # STEP 4: Meteo tazeleme — SADECE saatte 1 kez ve bahis açılımından
             # SONRA (bet opening'ı bloklamaz). Önceki saatlik veri zaten cache'te,
@@ -318,56 +313,10 @@ async def scan_and_bet_loop(state):
                         _FAST_PRICE_WINDOW // 60,
                     )
                     last_two_day_date = new_date
-                    # Hemen range bet ac — 2 gun sonrasi piyasasi acildi
-                    try:
-                        from config.settings import bot_config as _bc2
-
-                        if _bc2.strategy.range_bet_enabled:
-                            from executor.range_bet_placer import place_range_bets
-
-                            r = await asyncio.wait_for(asyncio.to_thread(place_range_bets), timeout=60)
-                            if r:
-                                logger.info("Range betting (immediate): %s", "; ".join(r))
-                            state.last_range_bet = datetime.now(timezone.utc).replace(tzinfo=None)
-                    except Exception as e:
-                        logger.error("Immediate range bet error: %s", e)
                 elif new_date is not None:
                     last_two_day_date = new_date
             except Exception as e:
                 logger.warning("2-day-ahead detection failed: %s", e)
-
-            # STEP 5: Range betting (YES-only, $10, temperature range)
-            # Sadece saat başı çalışır (her 60 dk'da 1 kez)
-            try:
-                from config.settings import bot_config as _bc
-
-                range_interval = 3600
-                now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-                if _bc.strategy.range_bet_enabled and (
-                    state.last_range_bet is None or (now_utc - state.last_range_bet).total_seconds() >= range_interval
-                ):
-                    from executor.range_bet_placer import place_range_bets
-
-                    range_results = await asyncio.wait_for(asyncio.to_thread(place_range_bets), timeout=60)
-                    state.last_range_bet = datetime.now(timezone.utc).replace(tzinfo=None)
-                    if range_results:
-                        logger.info("Range betting placed: %s", "; ".join(range_results))
-            except Exception as e:
-                logger.error("Range betting error: %s", e)
-
-            # STEP 5.5: Range PT / trail stop / settlement satis (her 5 dk'da 1)
-            try:
-                _range_pt_interval = 300  # 5 dakika
-                now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-                if last_range_pt_check is None or (now_utc - last_range_pt_check).total_seconds() >= _range_pt_interval:
-                    from executor.range_bet_placer import check_range_pt
-
-                    pt_closed = await asyncio.wait_for(asyncio.to_thread(check_range_pt), timeout=30)
-                    last_range_pt_check = datetime.now(timezone.utc).replace(tzinfo=None)
-                    if pt_closed:
-                        logger.info("Range PT: %d positions closed", pt_closed)
-            except Exception as e:
-                logger.error("Range PT error: %s", e)
 
             # Stale cleanup her 10 döngüde
             stale_check_counter += 1
@@ -455,13 +404,6 @@ async def settlement_loop(state):
 
                 await asyncio.to_thread(auto_cleanup, hot_days=10, cold_days=120)
                 last_cleanup_date = today
-
-            if state.sia_loop is not None and (
-                state.sia_last_run is None
-                or (now_utc - state.sia_last_run).total_seconds() >= state.sia_interval_hours * 3600
-            ):
-                await asyncio.to_thread(state.sia_loop.run_optimization_cycle)
-                state.sia_last_run = datetime.now(timezone.utc).replace(tzinfo=None)
 
             await _run_daily_maintenance()
 
@@ -556,18 +498,6 @@ async def _run_daily_maintenance() -> None:
         await asyncio.to_thread(run_evolution_cycle)
 
     # ── Pre-flight safety check (logs warnings if strategy params unsafe) ─
-    try:
-        from asi_engine.preflight import run_preflight_check
-
-        report = await asyncio.to_thread(run_preflight_check)
-        if not report.passed:
-            logger.warning("Preflight FAILED: %s", "; ".join(report.issues))
-        elif report.warnings:
-            logger.info("Preflight warnings: %s", "; ".join(report.warnings))
-        else:
-            logger.info("Preflight OK")
-    except Exception as e:
-        logger.warning("Preflight check errored: %s", e)
 
     try:
         await asyncio.to_thread(run_backup_once)

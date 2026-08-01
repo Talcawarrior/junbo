@@ -143,43 +143,6 @@ class TestAPIEndpoints:
         assert "points" in data
 
 
-class TestASIEvolveEndpoints:
-    """ASI-Evolve dashboard endpoints testleri."""
-
-    def test_asi_weights_endpoint(self):
-        """ASI weights endpoint."""
-        from fastapi.testclient import TestClient
-        from api import app
-
-        client = TestClient(app)
-        response = client.get("/api/asi/weights")
-        assert response.status_code == 200
-        data = response.json()
-        assert "gfs_seamless" in data
-        assert "ecmwf_ifs025" in data
-
-    def test_asi_cognition_endpoint(self):
-        """ASI cognition endpoint."""
-        from fastapi.testclient import TestClient
-        from api import app
-
-        client = TestClient(app)
-        response = client.get("/api/asi/cognition")
-        assert response.status_code == 200
-        data = response.json()
-        # API returns list or dict
-        assert isinstance(data, (dict, list))
-
-    def test_asi_calibration_endpoint(self):
-        """ASI calibration endpoint."""
-        from fastapi.testclient import TestClient
-        from api import app
-
-        client = TestClient(app)
-        response = client.get("/api/asi/calibration")
-        assert response.status_code == 200
-
-
 class TestUIComponents:
     """UI component testleri — Python-level data validation only."""
 

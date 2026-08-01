@@ -113,9 +113,9 @@ def test_config_tighter():
 def test_should_bet_rejects_low_edge():
     """Low edge (below min_edge=0.05) must be rejected.
 
-    Note: bot_config.strategy.min_edge can be mutated by SIALoop or ASI-Evolve
-    at runtime. We set it explicitly to the default 0.05 to guarantee a
-    deterministic test regardless of prior test side-effects.
+    Note: bot_config.strategy.min_edge can be mutated at runtime. We set it
+    explicitly to the default 0.05 to guarantee a deterministic test
+    regardless of prior test side-effects.
     """
     from config.settings import bot_config
 

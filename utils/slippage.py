@@ -1,7 +1,7 @@
 """Slippage estimation for paper/live bet execution.
 
 Provides three slippage models of increasing fidelity:
-  1. ``flat``      — single fixed % (legacy, matches karpathy_weekly.py)
+  1. ``flat``      — single fixed %
   2. ``tiered``    — 3-tier based on entry price (proxy for book depth)
   3. ``orderbook`` — real depth-based slippage from ResolvedMarkets API
 
@@ -19,7 +19,7 @@ from config.settings import bot_config
 logger = logging.getLogger("UTIL_SLIPPAGE")
 
 # ---------------------------------------------------------------------------
-# Default cost constants (mirrors strategy_params.json / karpathy_weekly.py)
+# Default cost constants
 # ---------------------------------------------------------------------------
 FEE_PCT: float = 0.05  # Polymarket Weather category taker fee rate (5 %)
 # Correct formula: fee = C × feeRate × p × (1-p) = stake × feeRate × (1-p)
@@ -40,9 +40,6 @@ class SlippageEstimate:
 
 def _tiered_slippage(entry_price: float) -> float:
     """3-tier adaptive slippage based on entry price (liquidity proxy).
-
-    Mirrors the model in ``karpathy_weekly.py`` so backtest ↔ paper are
-    consistent.
 
     * < 0.05  → 3 %  (thin book, penny markets)
     * 0.05–0.10 → 1 %  (moderate)

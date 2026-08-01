@@ -134,34 +134,6 @@ def test_kelly_bankroll():
         print(f"✅ Test 3: recommended_amount=${rec_amount:.2f} (bankroll=$2000, max_bet=$50)")
 
 
-def test_sia_status():
-    """Test 4: SIALoop uses 'won'/'lost' not 'settled'."""
-    import inspect
-
-    from engine.strategy import SIALoop
-
-    src = inspect.getsource(SIALoop.analyze_model_performance)
-    assert '"won"' in src, "Missing 'won' in status filter"
-    assert '"lost"' in src, "Missing 'lost' in status filter"
-    assert '"settled"' not in src.replace('"won", "lost"', ""), "'settled' should not be in status filter"
-    print("✅ Test 4: SIALoop uses 'won'/'lost' statuses")
-
-
-def test_sia_brier_input():
-    """Test 5: SIALoop uses per-model probability (model_probs), not expected_value."""
-    import inspect
-
-    from engine.strategy import SIALoop
-
-    src = inspect.getsource(SIALoop.analyze_model_performance)
-    assert "model_probs" in src, "Missing model_probs in Brier calculation"
-    # Verify Brier uses _resolve_market_outcome (market resolution), not bet.status
-    assert "_resolve_market_outcome" in src, "Brier should use market resolution outcome, not bet.status"
-    # Ensure Bet.fair_value is NOT the Brier prediction input
-    assert "bet.fair_value" not in src, "Brier should not use bet.fair_value; uses per-model probs from analysis"
-    print("✅ Test 5: SIALoop uses per-model probability for Brier score")
-
-
 def test_ladder_pending():
     """Test 6: Ladder orders start as PENDING."""
     from engine.strategy import BettingEngine
@@ -236,8 +208,6 @@ def test_betting_engine_ev_full():
 if __name__ == "__main__":
     test_ev_with_fee()
     test_kelly_bankroll()
-    test_sia_status()
-    test_sia_brier_input()
     test_ladder_pending()
     test_exposure_query()
     test_risk_manager_init()

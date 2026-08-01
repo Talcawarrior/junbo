@@ -137,27 +137,6 @@ class StrategyConfig:
     # calibrated. Forecasts degrade past 3 days.
     max_days_ahead: int = 2
 
-    # ── Karpathy-search-discovered levers (asymmetric-payoff fix) ────────
-    # These were tuned by `scripts/karpathy_search.py` against 90 days /
-    # 15 cities of historical_calibrations data. The defaults below are
-    # deliberately permissive (min_entry_price=0.01 = accept anything,
-    # inefficiency_min=-1.0 = accept anything) so the unit tests that
-    # exercise the calculator with low-price markets still work.
-    #
-    # In production, the tuned values (min_entry_price≈0.35,
-    # inefficiency_min≈-0.124) are loaded from data/strategy_params.json
-    # by `apply_persisted_strategy_params()` at import time. That file is
-    # written by the Karpathy search script.
-    #
-    # Background: a naive Kelly bot wins ~94% of its trades but loses
-    # money overall because the 6% losing trades are at low prices
-    # (long-shot bets) where a single loss wipes out dozens of small
-    # wins. Setting MIN_ENTRY_PRICE higher filters out the long shots;
-    # INEFFICIENCY_MIN only takes trades where the market price looks
-    # mispriced in our favour by at least that much.
-    min_entry_price: float = 0.01
-    inefficiency_min: float = -1.0  # negative = gate disabled (accept all)
-
     # ── Slippage model ────────────────────────────────────────────────
     # "flat"   — fixed slippage_pct from strategy_params.json
     # "tiered" — 3-tier by entry price (<0.05: 3%, 0.05-0.10: 1%, >0.10: 0.5%)
@@ -170,17 +149,9 @@ class StrategyConfig:
     flat_bet_usd: float = 10.0  # Fixed $10 per bet (overrides Kelly sizing)
     daily_loss_limit: float = 0.05  # 5% daily max loss
 
-    # ── Range betting (YES-only, fixed $10, temperature range) ──────────
-    range_bet_enabled: bool = False
-    range_bet_cities: list = None  # type: ignore[assignment]
-    range_bet_amount: float = 10.0
-    range_bet_spread: int = 1  # 3 bet: T-1, T, T+1
-    range_bet_pt_take_rate: float = 1.0  # %100 kar olunca bu orani sat (1.0 = $30)
-    range_bet_trail_stop_pct: float = 0.0  # trail stop devre disi
-    range_bet_pre_settlement_hours: float = 1.0  # settlementa 1 saat kala hepsini sat
-
-    # ── Rotation: kapanisa X saat kala en yuksek fiyata gec ─────────────
-    rotation_hours: tuple = (12, 11, 10)  # hangi saatlerde taranacak
+    # ── Tie betting: ayni en yuksek fiyata sahip marketlere ayni anda ac ─
+    tie_bet_enabled: bool = True
+    tie_loser_gap: float = 0.10  # ikiz betlerden biri %10+ one gecerse digerini kapat
 
 
 @dataclass
@@ -261,7 +232,6 @@ _ICAO_COORDS = {
     "OMDB": (25.2532, 55.3657),
     "LLBG": (32.0114, 34.8867),
     "OTHH": (25.2731, 51.6081),
-    # Asia (12)
     "RJTT": (35.5533, 139.7811),
     "RJOO": (34.7882, 135.4381),
     "ZSPD": (31.1434, 121.8052),
@@ -294,7 +264,6 @@ _ICAO_COORDS = {
     "KMCI": (39.2976, -94.7139),
     "KSLC": (40.7884, -111.9778),
     "KAUS": (30.1945, -97.6700),  # Austin
-    # Asia additional (15)
     "WMKK": (2.7456, 101.7099),  # Kuala Lumpur
     "RPLL": (14.5086, 121.0194),  # Manila
     "LIMC": (45.6306, 8.7281),  # Milan
@@ -392,7 +361,6 @@ _CITY_ICAO_MAP = {
     "tel aviv": "LLBG",
     "doha": "OTHH",
     "tokyo": "RJTT",
-    "osaka": "RJOO",
     "shanghai": "ZSPD",
     "beijing": "ZBAA",
     "seoul": "RKSS",
@@ -400,13 +368,6 @@ _CITY_ICAO_MAP = {
     "taipei": "RCTP",
     "singapore": "WSSS",
     "bangkok": "VTBS",
-    "jakarta": "WIII",
-    "mumbai": "VABB",
-    "delhi": "VIDP",
-    "sydney": "YSSY",
-    "melbourne": "YMML",
-    "auckland": "NZAA",
-    "cairo": "HECA",
     "cape town": "FACT",
     # Additional cities from Polymarket
     "austin": "KAUS",
@@ -442,7 +403,6 @@ class BotConfig:
     # ── Intervals ──────────────────────────────────────────────────
     scan_interval: int = 900  # 15 dakika (Open-Meteo rate limit için)
     settlement_interval: int = 120
-    sia_interval: int = 86400
     # Midnight scan: after 00:00, scan every N seconds for the first
     # MIDNIGHT_SCAN_WINDOW minutes to catch 2-day-ahead markets early
     # (earlier = cheaper prices on Polymarket).
@@ -488,33 +448,6 @@ class BotConfig:
         self.strategy = self.strategy or StrategyConfig()
         self.risk = self.risk or RiskConfig()
 
-        if self.strategy.range_bet_cities is None:
-            self.strategy.range_bet_cities = list(
-                [
-                    "istanbul",
-                    "london",
-                    "tokyo",
-                    "seoul",
-                    "paris",
-                    "munich",
-                    "hong kong",
-                    "sao paulo",
-                    "shanghai",
-                    "amsterdam",
-                    "ankara",
-                    "beijing",
-                    "buenos aires",
-                    "cape town",
-                    "madrid",
-                    "mexico city",
-                    "moscow",
-                    "singapore",
-                    "taipei",
-                    "tel aviv",
-                    "toronto",
-                ]
-            )
-
         # ── Override from .env (single source: .env > dataclass defaults) ──
         self.initial_portfolio = float(os.getenv("INITIAL_PORTFOLIO", str(self.initial_portfolio)))
         self.max_exposure_pct = float(os.getenv("MAX_EXPOSURE_PCT", str(self.max_exposure_pct)))
@@ -523,7 +456,6 @@ class BotConfig:
         self.weather_fee_rate = float(os.getenv("WEATHER_FEE_RATE", str(self.weather_fee_rate)))
         self.scan_interval = int(os.getenv("SCAN_INTERVAL", str(self.scan_interval)))
         self.settlement_interval = int(os.getenv("SETTLEMENT_INTERVAL", str(self.settlement_interval)))
-        self.sia_interval = int(os.getenv("SIA_INTERVAL", str(self.sia_interval)))
         self.midnight_scan_interval = int(os.getenv("MIDNIGHT_SCAN_INTERVAL", str(self.midnight_scan_interval)))
         self.midnight_scan_window = int(os.getenv("MIDNIGHT_SCAN_WINDOW", str(self.midnight_scan_window)))
         self.host = os.getenv("HOST", self.host)
@@ -561,7 +493,6 @@ class BotConfig:
         s.min_bet_size = float(os.getenv("MIN_BET_SIZE", str(s.min_bet_size)))
         s.kelly_fraction = float(os.getenv("KELLY_FRACTION", str(s.kelly_fraction)))
         s.daily_loss_limit = float(os.getenv("DAILY_LOSS_LIMIT", str(s.daily_loss_limit)))
-        s.min_entry_price = float(os.getenv("MIN_ENTRY_PRICE", str(s.min_entry_price)))
         s.flat_bet_usd = float(os.getenv("FLAT_BET_USD", str(s.flat_bet_usd)))
 
 
@@ -585,7 +516,6 @@ class _ConfigProxy:
         "FEE_EXPONENT": ("root", "fee_exponent"),
         "SCAN_INTERVAL": ("root", "scan_interval"),
         "SETTLEMENT_INTERVAL": ("root", "settlement_interval"),
-        "SIA_INTERVAL": ("root", "sia_interval"),
         "MIDNIGHT_SCAN_INTERVAL": ("root", "midnight_scan_interval"),
         "MIDNIGHT_SCAN_WINDOW": ("root", "midnight_scan_window"),
         "POLYMARKET_GAMMA_API": ("root", "polymarket_gamma_api"),
@@ -608,7 +538,6 @@ class _ConfigProxy:
         "MAX_BET_PCT": ("strategy", "max_bet_pct"),
         "MIN_BET_SIZE": ("strategy", "min_bet_size"),
         "KELLY_FRACTION": ("strategy", "kelly_fraction"),
-        "MIN_ENTRY_PRICE": ("strategy", "min_entry_price"),
         "FLAT_BET_USD": ("strategy", "flat_bet_usd"),
         "DAILY_LOSS_LIMIT": ("strategy", "daily_loss_limit"),
         "TOTAL_EXPOSURE_PCT": ("strategy", "total_exposure_pct"),
@@ -676,18 +605,26 @@ if bot_config.polymarket.proxy_url:
     os.environ["ALL_PROXY"] = bot_config.polymarket.proxy_url
 
 
+def _load_strategy_params() -> dict:
+    """Read data/strategy_params.json (adaptive sizing persistence)."""
+    try:
+        import json
+
+        _p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "strategy_params.json")
+        with open(_p, encoding="utf-8") as _f:
+            _raw = json.load(_f)
+        return _raw if isinstance(_raw, dict) else {}
+    except Exception:
+        return {}
+
+
 def apply_persisted_strategy_params() -> dict:
     """Overlay any persisted strategy params from data/strategy_params.json
     onto the in-memory bot_config (single source of truth).
 
     Returns the params dict that was applied (empty dict if no file found).
     """
-    try:
-        from utils.weights_store import load_strategy_params
-    except Exception:
-        return {}
-
-    persisted = load_strategy_params()
+    persisted = _load_strategy_params()
     if not persisted:
         return {}
 
@@ -706,30 +643,16 @@ def apply_persisted_strategy_params() -> dict:
             applied["kelly_fraction"] = s.kelly_fraction
         except (TypeError, ValueError):
             pass
-    if "min_entry_price" in persisted:
-        try:
-            s.min_entry_price = float(persisted["min_entry_price"])
-            applied["min_entry_price"] = s.min_entry_price
-        except (TypeError, ValueError):
-            pass
-    if "inefficiency_min" in persisted:
-        try:
-            s.inefficiency_min = float(persisted["inefficiency_min"])
-            applied["inefficiency_min"] = s.inefficiency_min
-        except (TypeError, ValueError):
-            pass
 
     return applied
 
 
-# Apply persisted Karpathy-search winners at import time.
 try:
     _applied_params = apply_persisted_strategy_params()
     if _applied_params:
         import logging
 
         logging.getLogger("CONFIG").info(
-            "Applied Karpathy-search strategy params from disk: %s",
             ", ".join(f"{k}={v}" for k, v in _applied_params.items()),
         )
 except Exception as _e:

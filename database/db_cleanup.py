@@ -1,14 +1,13 @@
 """DB archival & cleanup — hot/cold data management.
 
 Hot (main DB):  Last 10 days — bot operational queries.
-Cold (Parquet): 10-120 days — Karpathy fine-tuning dataset.
+Cold (Parquet): 10-120 days.
 
 Purge (beyond 120 days): Deleted permanently.
 
 Usage:
-    from database.db_cleanup import archive_old_forecasts, load_archives, load_karpathy_dataset
+    from database.db_cleanup import archive_old_forecasts, load_archives
     archive_old_forecasts(hot_days=10, cold_days=120)
-    df = load_karpathy_dataset(since="2026-03-01")  # hot + cold combined
 """
 
 import glob
@@ -163,48 +162,6 @@ def load_archives(table: str = FORECAST_TABLE, since: str | None = None) -> pd.D
             df = df[df[date_col] >= ts]
 
     return df
-
-
-def load_karpathy_dataset(since: str | None = None, table: str = FORECAST_TABLE) -> pd.DataFrame:
-    """Load combined hot (SQLite) + cold (Parquet) data for Karpathy training.
-
-    This gives the FULL dataset: last 120 days (hot 10 + cold 110).
-
-    Args:
-        since: ISO date filter (e.g. "2026-03-01")
-        table: Table to load (default: weather_forecasts)
-    """
-    date_col = _TABLE_DATE_COL[table]
-
-    # Load cold (Parquet)
-    cold_df = load_archives(table=table, since=since)
-
-    # Load hot (SQLite) — last 10 days
-    conn = sqlite3.connect(config.DB_PATH)
-    if since:
-        hot_df = pd.read_sql_query(
-            f"SELECT * FROM [{table}] WHERE [{date_col}] >= ?",
-            conn,
-            params=[since],
-        )
-    else:
-        hot_df = pd.read_sql_query(f"SELECT * FROM [{table}]", conn)
-    conn.close()
-
-    # Combine & deduplicate
-    combined = pd.concat([cold_df, hot_df], ignore_index=True)
-    combined = combined.drop_duplicates(
-        subset=["id"] if "id" in combined.columns else None,
-        keep="last",
-    )
-
-    logger.info(
-        "Karpathy dataset: %d cold + %d hot = %d total rows",
-        len(cold_df),
-        len(hot_df),
-        len(combined),
-    )
-    return combined
 
 
 def get_archive_stats() -> dict:

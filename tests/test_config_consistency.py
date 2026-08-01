@@ -1,9 +1,8 @@
 """Tests for config/settings consistency checks.
 
 Note: bot_config is a module-level singleton that gets mutated at runtime
-by SIALoop.__init__ (loads strategy_params.json) and ASI-Evolve.
-Tests verify *defaults* by creating fresh StrategyConfig instances, not
-the potentially-mutated singleton.
+(loads strategy_params.json at import). Tests verify *defaults* by creating
+fresh StrategyConfig instances, not the potentially-mutated singleton.
 """
 
 

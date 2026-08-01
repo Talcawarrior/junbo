@@ -13,7 +13,7 @@ This suite fills that gap:
 2. **Config-proxy sync** — ``_ConfigProxy._MAP`` keys are checked against
    actual ``BotConfig`` attributes so the proxy cannot silently miss a field.
 3. **Dead-code audit** — modules expected to be wired into the bot loop
-   (jobs, asi_engine, data_pipeline) are verified to be import-reachable
+   (jobs, data_pipeline) are verified to be import-reachable
    from the scheduler / evolution_job entry points.
 4. **Calibration live** — the ``_get_calibration`` + ``get_calibrated_temperature``
    chain that ``Calculator`` now calls does not crash, even without real data.
@@ -59,8 +59,7 @@ def test_import_all_modules():
     """Every ``.py`` file must be importable without error.
 
     This catches silent AttributeError / broken ``from X import Y`` statements
-    in code paths that are never exercised by integration or e2e tests (e.g.
-    ``data_backfiller``, ``calibration_engine``, ``asi_evolve``).
+    in code paths that are never exercised by integration or e2e tests.
     """
     errors: list[str] = []
     for fpath in _iter_python_files(REPO_ROOT):
@@ -130,12 +129,6 @@ REQUIRED_REACHABLE_MODULES = [
     ("jobs.scheduler", "run_cycle"),
     ("jobs.evolution_job", "run_evolution_cycle"),
     ("jobs.backup_job", "run_backup_once"),
-    ("asi_engine.orchestrator", "JunboOrchestrator"),
-    ("asi_engine.calibration_engine", "CalibrationEngine"),
-    ("asi_engine.data_backfiller", "DataBackfiller"),
-    ("asi_engine.backtest_simulator", "BacktestSimulator"),
-    ("asi_engine.cognition_base", "CognitionBase"),
-    ("asi_engine.llm_loop_orchestrator", "run_full_cycle"),
     ("data_pipeline.backfill_from_live_db", "backfill"),
     ("data_pipeline.unified_datastore", "UnifiedDatastore"),
     ("data_pipeline.weather_ensemble", "backfill_archive_many"),
@@ -143,7 +136,7 @@ REQUIRED_REACHABLE_MODULES = [
 
 
 def test_required_modules_reachable():
-    """Every job / ASI / pipeline module listed in the architecture must
+    """Every job / pipeline module listed in the architecture must
     import without error, even if it is never called by the hot path.
 
     This catches the ``config.ICAO_COORDS`` class of bug — silent import
@@ -171,53 +164,6 @@ def test_required_reachable_names():
             errors.append(f"{dotted}: {exc}")
     if errors:
         pytest.fail("\n".join(errors))
-
-
-# ── 4. Calibration chain does not crash ──────────────────────────────────
-
-
-def test_calibration_get_calibrated_temperature_no_crash():
-    """``get_calibrated_temperature`` must never crash, even when the bias
-    map is empty or the config file is missing.
-
-    ``Calculator.analyze_market`` calls this on every forecast value; a
-    crash there would silently kill the scan loop.
-    """
-    from asi_engine.calibration_engine import CalibrationEngine
-
-    ce = CalibrationEngine()
-    # Without real data, the bias_map may be empty or partial.
-    # The method must handle missing city, missing model, etc.
-    for city_code in ("", "XXXX", "KDAL", "LTAC"):
-        for metric in ("temperature_max", "temperature_min", "unknown"):
-            for model in ("", "openmeteo", "gfs_seamless"):
-                try:
-                    result = ce.get_calibrated_temperature(city_code, metric, model, 25.0)
-                    assert isinstance(result, (int, float)), f"non-numeric result: {result}"
-                    assert result != float("inf"), "infinite result"
-                except Exception as exc:  # noqa: BLE001
-                    pytest.fail(f"crash city={city_code!r} metric={metric!r} model={model!r}: {exc}")
-
-
-def test_calibration_fallback_mbe_matches():
-    """The fallback MBE (city/metric average) must be a non-NaN float."""
-    from asi_engine.calibration_engine import CalibrationEngine
-
-    ce = CalibrationEngine()
-    avg = ce._city_metric_avg_mbe("KDAL", "temperature_max")
-    assert isinstance(avg, float), f"avg_mbe is not float: {type(avg)}"
-    assert avg == avg, "avg_mbe is NaN"  # NaN != self
-    # If bias_map exists, the fallback should produce the same result
-    # as get_calibrated_temperature for a known-missing model.
-    result_known = ce.get_calibrated_temperature("KDAL", "temperature_max", "gfs_seamless", 25.0)
-    result_fallback = ce.get_calibrated_temperature("KDAL", "temperature_max", "openmeteo", 25.0)
-    if ce.bias_map:
-        # When per-model data exists, per-model and fallback may differ
-        # (that's expected — fallback is a coarser average).  But both
-        # must be valid numbers.
-        pass
-    assert isinstance(result_known, (int, float))
-    assert isinstance(result_fallback, (int, float))
 
 
 # ── 5. Dead-code detection: public functions with zero callers ────────────
@@ -249,12 +195,6 @@ ALLOWED_DEAD = {
     "broadcast_message",
     "root",
     "get_status",
-    "get_asi_weights",
-    "get_asi_cognition",
-    "run_asi_evolve",
-    "run_asi_backfill",
-    "get_asi_calibration",
-    "run_asi_calibration_recalculate",
     "get_markets",
     "get_bets",
     "get_signals",
@@ -270,16 +210,6 @@ ALLOWED_DEAD = {
     "websocket_endpoint",
     "initialize_modules",
     "_safe_parse_ladder",
-    # ASI classes instantiated by the orchestrator by dotted string
-    "KarpathyWeeklyResearcher",
-    "ASIProposer",
-    "SIAHarness",
-    # Orchestrator layers called by run_full_cycle
-    "run_asi_evolve_layer",
-    "run_sia_layer",
-    "run_karpathy_layer",
-    "find_global_best",
-    "deploy_best_to_live",
     # Scheduler entry called by asyncio task
     "start_scheduler",
     "run_cycle",
@@ -354,45 +284,12 @@ ALLOWED_DEAD = {
     "archive_old_forecasts",
     "load_archives",
     "get_archive_stats",
-    "load_karpathy_dataset",
     # Weather ensemble
     "brier_score_per_model",
     "fetch_archive_actuals",
-    # Karpathy internal helpers
-    "evaluate_hypothesis_oos",
-    "generate_hypothesis",
-    "llm_propose_hypothesis",
-    "add_per_model_probabilities",
-    "run_karpathy_weekly",
-    # ASI evolve internal helpers
-    "get_parent_hypothesis",
-    "ucb1_select_parent",
-    "select_parent",
-    "retrieve_context",
-    "propose",
-    "evaluate_and_store",
-    # Asymmetric calibration (wired into evolution_job now)
-    "audit_calibration",
-    # SIA hourly internal helpers
-    "decide",
-    "mutate_weights",
-    "propose_harness_patch",
-    "evaluate_weight_mutation",
-    "evaluate_harness_patch",
-    # cognition_base internal
-    "_load_cognition_base",
-    "_save_to_disk",
-    # LLM client
-    "get_client",
-    "is_configured",
-    # Backtest
-    "run_backtest",
-    "run_extended_backtest",
-    # Weight store helpers
-    "load_strategy_params",
-    "save_strategy_params",
-    "load_weights",
-    "save_weights",
+    # Data pipeline CLI entry points (called via python -m / __main__)
+    "ingest_all",
+    "fetch_historical_forecast_ensemble",
     # Slippage helpers
     "estimate_slippage",
     "adjust_edge_for_costs",
@@ -488,7 +385,6 @@ ALLOWED_DEAD = {
     "place_all_pending",
     # Calculator internal
     "kelly_criterion",
-    "update_model_weights",
     "get_multi_model_forecast",
     # Evolution job internal (called by run_evolution_cycle)
     "should_run_calibration",
@@ -508,11 +404,8 @@ ALLOWED_DEAD = {
     "get_city_price_comparison",
     # Model blacklist utility (public API for debugging/inspection)
     "get_blacklist_summary",
-    # 5-bet simulation script (analysis/educational, not wired into bot)
-    "simulate_weather_forecast",
-    "run_simulation",
-    "print_worst_case_analysis",
-    "print_profit_distribution",
+    # Import-time overlay of persisted strategy params (runs at settings import)
+    "apply_persisted_strategy_params",
     # Model run detector (public API for latency arbitrage)
     "get_active_model_windows",
     "detect_forecast_delta",

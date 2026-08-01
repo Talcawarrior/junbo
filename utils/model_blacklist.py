@@ -36,9 +36,5 @@ def get_blacklisted_models(city_code: str, metric: str = "temperature_max") -> s
     return out
 
 
-def is_city_blacklisted(city_code: str) -> bool:
-    return city_code in _load().get("city_blacklist", [])
-
-
 def get_blacklist_summary() -> dict:
     return _load()

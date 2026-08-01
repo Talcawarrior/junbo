@@ -145,7 +145,7 @@ class Analysis(Base):
     should_bet = Column(Boolean, default=False)  # Bet açılmalı mı?
     reason = Column(String)  # Neden evet/hayır
 
-    # Per-model predictions for SIA weight optimization.
+    # Per-model predictions.
     # JSON: {"model_temps": {"gfs_seamless": 32.5, ...},
     #        "model_probs": {"gfs_seamless": 0.72, ...}}
     model_predictions = Column(Text, nullable=True)
@@ -228,7 +228,7 @@ class Portfolio(Base):
 
 
 class ModelPerformance(Base):
-    """Model performance tracking for SIA optimization."""
+    """Model performance tracking."""
 
     __tablename__ = "model_performance"
 
@@ -289,7 +289,7 @@ Market = WeatherMarket
 
 
 class HistoricalCalibration(Base):
-    """Historical calibration records for Karpathy search and backtesting."""
+    """Historical calibration records for bias/backtest analysis."""
 
     __tablename__ = "historical_calibrations"
 

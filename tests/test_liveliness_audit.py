@@ -61,7 +61,6 @@ REQUIRED_DIRS = [
     "engine",
     "executor",
     "scrapers",
-    "asi_engine",
     "data_pipeline",
     "database",
     "utils",

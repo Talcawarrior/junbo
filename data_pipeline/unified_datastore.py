@@ -556,7 +556,7 @@ def ingest_all(
     #       (historical-forecast-api.open-meteo.com, free, no key) to
     #       retrieve per-model 0-day-ahead (analysis) forecasts for every
     #       past date in our markets table. This replaces the synthetic
-    #       per-model probability fallback in karpathy_weekly.py.
+    #       per-model probability fallback.
     #   (b) Live ensemble — uses Open-Meteo Forecast API for the next
     #       14 days (still needed for forward-looking markets).
     # ----------------------------------------------------------------
@@ -575,7 +575,7 @@ def ingest_all(
 
         # (a) Historical backfill: derive date range from the markets table
         #     we just wrote in step 1. Covers every past target_date so the
-        #     forecast join in karpathy_weekly has real per-model values.
+        #     forecast join has real per-model values.
         try:
             markets_df_for_range = ds.read_markets()
             date_col = None

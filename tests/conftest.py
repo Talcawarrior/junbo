@@ -117,35 +117,26 @@ def _protect_production_db_function():
 
 
 @pytest.fixture(autouse=True)
-def _reset_karpathy_strategy_params():
-    """Reset Karpathy-search-discovered levers to safe permissive defaults."""
+def _reset_strategy_params():
+    """Reset strategy levers to safe permissive defaults."""
     from config.settings import Config, bot_config
 
-    original_strategy_min_entry = bot_config.strategy.min_entry_price
-    original_strategy_ineff = bot_config.strategy.inefficiency_min
     original_strategy_min_edge = bot_config.strategy.min_edge
     original_strategy_kelly = bot_config.strategy.kelly_fraction
     original_strategy_flat_bet = bot_config.strategy.flat_bet_usd
     original_config_kelly = Config.KELLY_FRACTION
     original_config_max_bet_pct = Config.MAX_BET_PCT
-    original_config_min_entry = Config.MIN_ENTRY_PRICE
 
-    bot_config.strategy.min_entry_price = 0.01
-    bot_config.strategy.inefficiency_min = -1.0
     bot_config.strategy.kelly_fraction = 0.15
     bot_config.strategy.min_edge = 0.05
     bot_config.strategy.flat_bet_usd = 0.0
     Config.KELLY_FRACTION = 0.15
     Config.MAX_BET_PCT = 1.0
-    Config.MIN_ENTRY_PRICE = 0.01
 
     yield
 
-    bot_config.strategy.min_entry_price = original_strategy_min_entry
-    bot_config.strategy.inefficiency_min = original_strategy_ineff
     bot_config.strategy.min_edge = original_strategy_min_edge
     bot_config.strategy.kelly_fraction = original_strategy_kelly
     bot_config.strategy.flat_bet_usd = original_strategy_flat_bet
     Config.KELLY_FRACTION = original_config_kelly
     Config.MAX_BET_PCT = original_config_max_bet_pct
-    Config.MIN_ENTRY_PRICE = original_config_min_entry

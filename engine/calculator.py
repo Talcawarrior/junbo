@@ -22,28 +22,6 @@ from utils.slippage import (
 )
 from utils.model_blacklist import get_blacklisted_models
 
-# Lazy-loaded CalibrationEngine for temperature bias correction (Option A).
-# Loaded once per process to avoid re-reading the JSON on every market analysis.
-from asi_engine.calibration_engine import CalibrationEngine  # noqa: E402
-
-_CALIBRATION_ENGINE: CalibrationEngine | None = None
-
-
-def _get_calibration() -> CalibrationEngine | None:
-    """Return the shared CalibrationEngine singleton, or None on import failure."""
-    global _CALIBRATION_ENGINE  # noqa: PLW0603
-    if _CALIBRATION_ENGINE is not None:
-        return _CALIBRATION_ENGINE
-    try:
-        ce = CalibrationEngine()
-        if ce.bias_map:
-            _CALIBRATION_ENGINE = ce
-        return _CALIBRATION_ENGINE
-    except Exception as exc:
-        logger.debug("Calibration unavailable (ASI bias map not yet built): %s", exc)
-        return None
-
-
 logger = logging.getLogger("ENGINE_CALCULATOR")
 
 # Global rate-limit flag: ilk 429'te 5dk boyunca tüm Open-Meteo isteklerini durdur
@@ -121,30 +99,6 @@ class Calculator:
                 logger.debug(f"Market {market_id}: target_date {market.target_date} already passed, skipping")
                 return None
 
-            # Skip markets with no real liquidity (price too low for paper realism)
-            # The min_entry_price threshold is a Karpathy-search-discovered
-            # lever that filters out long-shot bets (the source of the
-            # asymmetric-payoff bleed where a single low-price loss wipes
-            # out dozens of small wins).
-            market_price = market.yes_price or 0.5
-            min_price = getattr(bot_config.strategy, "min_entry_price", None) or getattr(
-                bot_config, "MIN_ENTRY_PRICE", 0.01
-            )
-            if market_price < min_price:
-                logger.debug(f"Market {market_id}: price {market_price:.4f} < min_entry_price {min_price}, skipping")
-                return None
-
-            # Karpathy-search-discovered inefficiency gate. Only bet when
-            # the market price is mispriced in our favour by at least
-            # `inefficiency_min`. We approximate the "naive fair price" by
-            # the simple average of the YES/NO prices (0.5 midpoint adjusted
-            # by yes_price deviation), and the inefficiency is the residual
-            # after we compute our own estimate_probability below.
-            #
-            # This is a soft gate — we evaluate it AFTER we know our own
-            # estimate, then check the implied market inefficiency.
-            inefficiency_min = getattr(bot_config.strategy, "inefficiency_min", -1.0)
-
             # En son tahminleri al — query by market.metric directly.
             forecasts = (
                 session.query(WeatherForecast)
@@ -159,28 +113,9 @@ class Calculator:
             # Her kaynaktan en son tahmini al + ağırlıkları topla
             latest_by_source = {}
             source_weights = {}
-            cal_engine = _get_calibration()
             for f in forecasts:
                 if f.source not in latest_by_source:
-                    raw_val = f.predicted_value
-                    # Apply ASI temperature bias correction (Option A)
-                    if cal_engine is not None and raw_val is not None:
-                        adjusted = cal_engine.get_calibrated_temperature(
-                            market.city_code or "",
-                            market.metric or "temperature_max",
-                            f.source,
-                            float(raw_val),
-                        )
-                        logger.debug(
-                            "Calibration [%s/%s]: %.2f -> %.2f",
-                            market.city or "?",
-                            f.source,
-                            raw_val,
-                            adjusted,
-                        )
-                        latest_by_source[f.source] = adjusted
-                    else:
-                        latest_by_source[f.source] = raw_val
+                    latest_by_source[f.source] = f.predicted_value
                     source_weights[f.source] = f.model_weight or 0.0
 
             # ── Model blacklist filter ────────────────────────────────────
@@ -277,7 +212,7 @@ class Calculator:
                 range_high=range_high,
             )
 
-            # Per-model probabilities for SIA weight optimization
+            # Per-model probabilities
             model_temps = {src: float(val) for src, val in latest_by_source.items() if val is not None}
             total_std = float(std_val) if std_val is not None else 2.0
             model_probs = {}
@@ -359,27 +294,6 @@ class Calculator:
             ) >= bot_config.strategy.min_liquidity or bot_config.strategy.min_liquidity <= 0
             effective_min_edge = self._compute_effective_min_edge(market, std_val)
 
-            # ── Karpathy-search inefficiency gate ─────────────────────────
-            # The "inefficiency" is the residual between our estimated
-            # probability and the price-implied naive probability. In the
-            # backtest harness this is the same construction (naive ensemble
-            # average + independent noise). In the live system we don't
-            # observe the inefficiency directly, but a good proxy is the
-            # edge itself: an edge of `e` means the market is mispriced by
-            # `e` in our favour. The Karpathy search found that requiring
-            # `inefficiency_min` of -0.124 (i.e. accept even slightly
-            # adverse inefficiency as long as other gates pass) gave the
-            # best risk-adjusted return. We translate that to a *minimum
-            # absolute edge* requirement on top of effective_min_edge.
-            #
-            # For a positive inefficiency_min (e.g. +0.067), we require the
-            # edge to be at least that large. For negative values, the gate
-            # is effectively disabled (we already require min_edge > 0).
-            if inefficiency_min > 0:
-                inefficiency_ok = abs(raw_edge) >= inefficiency_min
-            else:
-                inefficiency_ok = True
-
             # 8-hour pre-settlement guard
             settlement_hours_left = None
             try:
@@ -395,7 +309,6 @@ class Calculator:
             should_bet = (
                 recommended_side == "YES"  # YES-only: asla NO
                 and net_edge >= effective_min_edge
-                and inefficiency_ok
                 and len(forecast_values) >= bot_config.strategy.min_sources
                 and 0 <= days_ahead <= bot_config.strategy.max_days_ahead
                 and liquidity_ok
@@ -410,8 +323,6 @@ class Calculator:
                 reason_parts.append(
                     f"Net edge düşük: {net_edge:.2%} (raw={raw_edge:.2%}, slip={slippage_est.slippage_pct:.2%})"
                 )
-            if not inefficiency_ok:
-                reason_parts.append(f"İnefficiency düşük: edge {net_edge:.2%} < {inefficiency_min:.2%}")
             if len(forecast_values) < bot_config.strategy.min_sources:
                 reason_parts.append(f"Az kaynak: {len(forecast_values)}")
             if days_ahead > bot_config.strategy.max_days_ahead:
@@ -706,6 +617,3 @@ class WeatherEngine:
         except Exception as e:
             logger.error("get_multi_model_forecast error: %s", e)
             return None
-
-    def update_model_weights(self, new_weights: dict):
-        self.model_weights = new_weights
