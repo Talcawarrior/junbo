@@ -222,6 +222,49 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
   isLoading?: boolean;
   cityBets?: CityBetsResponse | null;
 }) {
+  const [sortField, setSortField] = useState<string>("city");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortField(field);
+      setSortDir("asc");
+    }
+  };
+
+  const sortedPositions = useMemo(() => {
+    const arr = [...openPositions];
+    arr.sort((a, b) => {
+      let aVal: string | number = "";
+      let bVal: string | number = "";
+      switch (sortField) {
+        case "city": aVal = a.city || ""; bVal = b.city || ""; break;
+        case "metric": aVal = a.metric || ""; bVal = b.metric || ""; break;
+        case "threshold": aVal = a.threshold || 0; bVal = b.threshold || 0; break;
+        case "placed_at": aVal = a.placed_at || ""; bVal = b.placed_at || ""; break;
+        case "side": aVal = a.side || ""; bVal = b.side || ""; break;
+        case "entry": aVal = a.entry_price || 0; bVal = b.entry_price || 0; break;
+        case "current": aVal = a.current_price || 0; bVal = b.current_price || 0; break;
+        case "edge": aVal = a.edge || 0; bVal = b.edge || 0; break;
+        case "amount": aVal = a.amount || 0; bVal = b.amount || 0; break;
+        case "pnl": aVal = a.pnl || 0; bVal = b.pnl || 0; break;
+        case "settled_at": aVal = a.settled_at || ""; bVal = b.settled_at || ""; break;
+        default: aVal = a.city || ""; bVal = b.city || "";
+      }
+      if (typeof aVal === "string") return sortDir === "asc" ? aVal.localeCompare(bVal as string) : (bVal as string).localeCompare(aVal);
+      return sortDir === "asc" ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
+    });
+    return arr;
+  }, [openPositions, sortField, sortDir]);
+
+  const SortIcon = ({ field }: { field: string }) => (
+    <span className="ml-1 text-[9px]" style={{ color: sortField === field ? TEXT_PRIMARY : TEXT_MUTED }}>
+      {sortField === field ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+    </span>
+  );
+
   const winLossData = [
     { name: "Kazanan", value: kpiData.wins, color: TEAL },
     { name: "Kaybeden", value: kpiData.losses, color: RED },
@@ -381,21 +424,21 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: TEXT_MUTED }}>Şehir</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-center" style={{ color: TEXT_MUTED }}>H/L</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right" style={{ color: TEXT_MUTED }}>°C</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right" style={{ color: TEXT_MUTED }}>Açılış</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: TEXT_MUTED }}>Yön</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right" style={{ color: TEXT_MUTED }}>Giriş</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right" style={{ color: TEXT_MUTED }}>Güncel</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right" style={{ color: TEXT_MUTED }}>Edge</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right" style={{ color: TEXT_MUTED }}>Bet</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right" style={{ color: TEXT_MUTED }}>PnL</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right" style={{ color: TEXT_MUTED }}>Kapanış</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("city")}>Şehir<SortIcon field="city" /></TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-center cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("metric")}>H/L<SortIcon field="metric" /></TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("threshold")}>°C<SortIcon field="threshold" /></TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("placed_at")}>Açılış<SortIcon field="placed_at" /></TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("side")}>Yön<SortIcon field="side" /></TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("entry")}>Giriş<SortIcon field="entry" /></TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("current")}>Güncel<SortIcon field="current" /></TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("edge")}>Edge<SortIcon field="edge" /></TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("amount")}>Bet<SortIcon field="amount" /></TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("pnl")}>PnL<SortIcon field="pnl" /></TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("settled_at")}>Kapanış<SortIcon field="settled_at" /></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {openPositions.map((pos) => (
+                    {sortedPositions.map((pos) => (
                       <TableRow key={pos.id}>
                         <TableCell className="font-medium text-sm" style={{ color: TEXT_PRIMARY }}>{pos.city}</TableCell>
                         <TableCell className="text-center">
