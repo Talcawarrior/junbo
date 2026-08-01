@@ -247,7 +247,7 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
         case "edge": aVal = a.edge || 0; bVal = b.edge || 0; break;
         case "amount": aVal = a.amount || 0; bVal = b.amount || 0; break;
         case "pnl": aVal = a.pnl || 0; bVal = b.pnl || 0; break;
-        case "settled_at": aVal = a.timeLeft || ""; bVal = b.timeLeft || ""; break; break;
+        case "settled_at": aVal = a.timeLeft || ""; bVal = b.timeLeft || ""; break;
         default: aVal = a.city || ""; bVal = b.city || "";
       }
       if (typeof aVal === "string") return sortDir === "asc" ? aVal.localeCompare(bVal as string) : (bVal as string).localeCompare(aVal);
