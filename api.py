@@ -763,9 +763,11 @@ def get_city_bets():
 
     def _resolve_icao(city: str) -> str | None:
         """City name → ICAO code via WeatherMarket."""
-        row = db.query(WeatherMarket.city_code).filter(
-            WeatherMarket.city.ilike(city), WeatherMarket.city_code.isnot(None)
-        ).first()
+        row = (
+            db.query(WeatherMarket.city_code)
+            .filter(WeatherMarket.city.ilike(city), WeatherMarket.city_code.isnot(None))
+            .first()
+        )
         return row[0] if row else None
 
     def _get_forecast_temp(city: str, icao: str, metric: str, target_date: datetime) -> float | None:
@@ -877,10 +879,11 @@ def get_history():
     try:
         from sqlalchemy import case, func
 
-        # True settlement stats: won+lost+settled+closed_early
-        # closed_early bets are real exits â€” their PnL is realized cash.
+        # True settlement stats: won+lost+settled+closed_early+closed
+        # closed_early bets are real exits — their PnL is realized cash.
+        # closed bets (rotation) are also real exits.
         # Excluding them from stats gives a misleadingly small picture.
-        real_settled_statuses = ["settled", "won", "lost", "closed_early"]
+        real_settled_statuses = ["settled", "won", "lost", "closed_early", "closed"]
 
         stats_q = (
             db.query(
@@ -933,8 +936,8 @@ def get_history():
             .all()
         )
 
-        # History list: all settled + closed_early (most recent 300)
-        all_closed_statuses = ["settled", "won", "lost", "closed_early"]
+        # History list: all settled + closed_early + closed (most recent 300)
+        all_closed_statuses = ["settled", "won", "lost", "closed_early", "closed"]
         # Use coalesce(settled_at, closed_at) for correct ordering
         close_date = func.coalesce(Bet.settled_at, Bet.closed_at)
         settled_bets = (
