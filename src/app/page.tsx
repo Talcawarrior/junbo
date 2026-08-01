@@ -408,8 +408,8 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
       )}
 
       {/* Open Positions + Activity Feed — ÜSTTE */}
-      <section className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-        <Card className="lg:col-span-3 shadow-sm py-4 gap-3" style={{ borderColor: BORDER }}>
+      <section className="grid grid-cols-1 lg:grid-cols-6 gap-4">
+        <Card className="lg:col-span-5 shadow-sm py-4 gap-3" style={{ borderColor: BORDER }}>
           <CardHeader className="pb-0 pt-0 px-5">
             <CardTitle className="text-sm font-semibold" style={{ color: TEXT_PRIMARY }}>Açık Pozisyonlar</CardTitle>
           </CardHeader>
