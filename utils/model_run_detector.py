@@ -24,30 +24,31 @@ logger = logging.getLogger(__name__)
 # ── Model run schedules (UTC hours) ─────────────────────────────────
 # Each entry: (model_name, run_hours_utc, latency_hours, window_hours)
 MODEL_RUNS = [
-    ("gfs_seamless",        [0, 6, 12, 18], 3.5, 1.0),
-    ("ecmwf_ifs025",        [0, 12],        7.0, 1.0),
-    ("ecmwf_ifs04",         [0, 12],        7.0, 1.0),
-    ("icon_global",         [0, 12],        5.0, 1.0),
-    ("icon_seamless",       [0, 12],        5.0, 1.0),
-    ("gem_global",          [0, 12],        5.5, 1.0),
-    ("gem_seamless",        [0, 12],        5.5, 1.0),
-    ("jma_seamless",        [0, 12],        8.0, 1.0),
-    ("jma_msm",             [0, 12],        8.0, 1.0),
-    ("cma_grapes_global",   [0, 12],        6.0, 1.0),
-    ("ukmo_seamless",       [0, 12],        6.0, 1.0),
-    ("meteofrance_seamless",[0, 12],        5.0, 1.0),
+    ("gfs_seamless", [0, 6, 12, 18], 3.5, 1.0),
+    ("ecmwf_ifs025", [0, 12], 7.0, 1.0),
+    ("ecmwf_ifs04", [0, 12], 7.0, 1.0),
+    ("icon_global", [0, 12], 5.0, 1.0),
+    ("icon_seamless", [0, 12], 5.0, 1.0),
+    ("gem_global", [0, 12], 5.5, 1.0),
+    ("gem_seamless", [0, 12], 5.5, 1.0),
+    ("jma_seamless", [0, 12], 8.0, 1.0),
+    ("jma_msm", [0, 12], 8.0, 1.0),
+    ("cma_grapes_global", [0, 12], 6.0, 1.0),
+    ("ukmo_seamless", [0, 12], 6.0, 1.0),
+    ("meteofrance_seamless", [0, 12], 5.0, 1.0),
 ]
 
 # Fast scan settings when in a model run window
-MODEL_RUN_FAST_INTERVAL = 60   # 60 seconds between scans
-MODEL_RUN_FAST_WINDOW = 3600   # 1 hour window
+MODEL_RUN_FAST_INTERVAL = 60  # 60 seconds between scans
+MODEL_RUN_FAST_WINDOW = 3600  # 1 hour window
 
 
 class ModelRunWindow(NamedTuple):
     """A detected model run data availability window."""
+
     model: str
     window_start: datetime  # UTC
-    window_end: datetime    # UTC
+    window_end: datetime  # UTC
     run_hour_utc: int
 
 
@@ -103,18 +104,21 @@ def get_active_model_windows(now_utc: datetime | None = None) -> list[ModelRunWi
                     window_start = now_utc.replace(
                         hour=int(window_start_h) % 24,
                         minute=int((window_start_h % 1) * 60),
-                        second=0, microsecond=0,
+                        second=0,
+                        microsecond=0,
                     )
                     # Handle day rollover
                     if window_start_h >= 24:
                         window_start += timedelta(days=1)
                     window_end = window_start + timedelta(hours=window_hours)
-                    active.append(ModelRunWindow(
-                        model=model_name,
-                        window_start=window_start,
-                        window_end=window_end,
-                        run_hour_utc=run_h,
-                    ))
+                    active.append(
+                        ModelRunWindow(
+                            model=model_name,
+                            window_start=window_start,
+                            window_end=window_end,
+                            run_hour_utc=run_h,
+                        )
+                    )
             else:
                 # Window crosses midnight — check both sides
                 pass  # Simplified: skip cross-midnight windows for now
@@ -138,36 +142,6 @@ def get_model_run_fast_interval(now_utc: datetime | None = None) -> int:
     return None
 
 
-def detect_forecast_delta(
-    old_forecast: dict[str, float],
-    new_forecast: dict[str, float],
-    threshold: float = 2.0,
-) -> list[tuple[str, float]]:
-    """Compare two forecast dicts and return significant deltas.
-
-    Parameters
-    ----------
-    old_forecast : dict
-        Previous forecast {model_name: temperature_celsius}
-    new_forecast : dict
-        Updated forecast {model_name: temperature_celsius}
-    threshold : float
-        Minimum absolute change to report (default 2.0°C)
-
-    Returns
-    -------
-    list of (model_name, delta_celsius) tuples where |delta| >= threshold
-    """
-    deltas = []
-    for model, new_temp in new_forecast.items():
-        old_temp = old_forecast.get(model)
-        if old_temp is not None:
-            delta = new_temp - old_temp
-            if abs(delta) >= threshold:
-                deltas.append((model, round(delta, 2)))
-    return deltas
-
-
 def log_model_run_status(now_utc: datetime | None = None):
     """Log the current model run window status for debugging."""
     windows = get_active_model_windows(now_utc)
@@ -181,9 +155,7 @@ def log_model_run_status(now_utc: datetime | None = None):
                 w.window_end.strftime("%H:%M"),
             )
     else:
-        last_run_h, hours_ago = _last_completed_run_hour(
-            now_utc or datetime.now(timezone.utc)
-        )
+        last_run_h, hours_ago = _last_completed_run_hour(now_utc or datetime.now(timezone.utc))
         logger.debug(
             "No active model run windows. Last run: %02d UTC (%.1fh ago)",
             last_run_h,

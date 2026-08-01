@@ -211,7 +211,6 @@ ALLOWED_DEAD = {
     "initialize_modules",
     "_safe_parse_ladder",
     # Scheduler entry called by asyncio task
-    "start_scheduler",
     "run_cycle",
     # Backend / DB (used via SQLAlchemy session, not direct call)
     "get_engine",
@@ -402,13 +401,10 @@ ALLOWED_DEAD = {
     "cleanup_old_snapshots",
     "get_price_history",
     "get_city_price_comparison",
-    # Model blacklist utility (public API for debugging/inspection)
-    "get_blacklist_summary",
     # Import-time overlay of persisted strategy params (runs at settings import)
     "apply_persisted_strategy_params",
     # Model run detector (public API for latency arbitrage)
     "get_active_model_windows",
-    "detect_forecast_delta",
     # Entry time analysis (called from API/CLI on demand)
     "get_entry_time_analysis",
 }

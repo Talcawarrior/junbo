@@ -602,11 +602,6 @@ def run_risk_management(session=None):
         return f"Risk: {closed_count} position(s) closed early, {partial_count} partial TP"
 
 
-def start_scheduler():
-    """Mock/stub for cron scheduler activation."""
-    logger.info("Scheduler initialized in background thread...")
-
-
 def run_cycle():
     """Run one full bot cycle with a SINGLE shared DB session.
 
