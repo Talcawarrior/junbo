@@ -976,6 +976,14 @@ def get_history():
                     exit_type = "TD"
                 else:
                     exit_type = "OT"
+            elif bet.status == "closed" and bet.close_reason:
+                cr = bet.close_reason.lower()
+                if cr == "rotation":
+                    exit_type = "RT"
+                elif cr == "tie_loser":
+                    exit_type = "TL"
+                else:
+                    exit_type = "CL"
             else:
                 exit_type = "ST"  # settlement (Polymarket resolved)
 

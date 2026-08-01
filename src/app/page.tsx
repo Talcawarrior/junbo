@@ -567,7 +567,7 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
 function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: TradeHistoryEntry[]; historyStats: HistoryStats | null; totalPnl: number }) {
   const [filterResult, setFilterResult] = useState<"ALL" | "WIN" | "LOSS" | "PARTIAL_TP">("ALL");
   const [filterSide, setFilterSide] = useState<"ALL" | "YES" | "NO">("ALL");
-  const [filterExit, setFilterExit] = useState<"ALL" | "ST" | "TP" | "SL" | "TS" | "TD">("ALL");
+  const [filterExit, setFilterExit] = useState<"ALL" | "ST" | "TP" | "SL" | "TS" | "TD" | "RT" | "TL" | "CL">("ALL");
   const [filterDate, setFilterDate] = useState<string>("");
   const dateInputRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState("");
@@ -817,14 +817,17 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
                       <TableCell className="text-right font-mono text-sm tabular-nums" style={{ color: TEXT_PRIMARY }}>{t.edge}%</TableCell>
                       <TableCell className="text-center">
                         {(() => {
-                          const exitLabels: Record<string, { label: string; color: string; bg: string }> = {
-                            ST: { label: "ST", color: "#6B7280", bg: "#F3F4F6" },
-                            TP: { label: "TP", color: "#16A34A", bg: "#DCFCE7" },
-                            PT: { label: "PT", color: "#D97706", bg: "#FFF7ED" },
-                            SL: { label: "SL", color: "#DC2626", bg: "#FEE2E2" },
-                            TS: { label: "TS", color: "#D97706", bg: "#FEF3C7" },
-                            TD: { label: "TD", color: "#7C3AED", bg: "#EDE9FE" },
-                          };
+const exitLabels: Record<string, { label: string; color: string; bg: string }> = {
+  ST: { label: "ST", color: "#6B7280", bg: "#F3F4F6" },
+  TP: { label: "TP", color: "#16A34A", bg: "#DCFCE7" },
+  PT: { label: "PT", color: "#D97706", bg: "#FFF7ED" },
+  SL: { label: "SL", color: "#DC2626", bg: "#FEE2E2" },
+  TS: { label: "TS", color: "#D97706", bg: "#FEF3C7" },
+  TD: { label: "TD", color: "#7C3AED", bg: "#EDE9FE" },
+  RT: { label: "RT", color: "#2563EB", bg: "#DBEAFE" },
+  TL: { label: "TL", color: "#9333EA", bg: "#F3E8FF" },
+  CL: { label: "CL", color: "#6B7280", bg: "#F3F4F6" },
+};
                           const e = exitLabels[t.exitType] || exitLabels.ST;
                           return (
                             <Badge className="text-[10px] font-bold px-2 py-0.5 h-5" style={{ backgroundColor: e.bg, color: e.color, border: `1px solid ${e.color}33` }}>
@@ -1073,8 +1076,8 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
 
             {/* Kazanan/Kaybeden Exit Type Donut Charts */}
             {(() => {
-              const exitColors: Record<string, string> = { TP: "#16A34A", SL: "#DC2626", TS: "#D97706", TD: "#7C3AED", ST: "#6B7280" };
-              const exitLabels: Record<string, string> = { TP: "Take Profit", SL: "Stop Loss", TS: "Trailing Stop", TD: "Time Decay", ST: "Settlement" };
+              const exitColors: Record<string, string> = { TP: "#16A34A", SL: "#DC2626", TS: "#D97706", TD: "#7C3AED", ST: "#6B7280", RT: "#2563EB", TL: "#9333EA", CL: "#6B7280" };
+              const exitLabels: Record<string, string> = { TP: "Take Profit", SL: "Stop Loss", TS: "Trailing Stop", TD: "Time Decay", ST: "Settlement", RT: "Rotation", TL: "Tie Loser", CL: "Closed" };
 
               function makePieData(src: Record<string, number>) {
                 return Object.entries(src)
