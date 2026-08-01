@@ -541,65 +541,25 @@ class BetPlacer:
                 if existing_on_market is not None:
                     continue
 
-                # Grupta baska bir markette bet var mi?
-                existing_bet = group_bets[0] if group_bets else None
+                # Grupta birden fazla bet varsa, sadece dusuk fiyatli olanlari kapat
+                if group_bets:
+                    for old_bet in group_bets:
+                        old_mkt = session.query(WeatherMarket).filter_by(id=old_bet.market_id).first()
+                        old_price = float(old_mkt.yes_price or 0) if old_mkt else 0
+                        # Sadece en yuksek fiyatli bet'i birak, digerlerini kapat
+                        if old_price < best_price:
+                            logger.info(
+                                "Rotation: %s %s %s closing bet#%s (price=%.4f < best=%.4f)",
+                                city, str(td.date()), metric, old_bet.id, old_price, best_price,
+                            )
+                            self.close_bet_for_rotation(old_bet, old_price, session)
+                            rotated += 1
 
-                if existing_bet is None:
-                    # Bet yok — ac
-                    bet = self.open_bet_on_market(best_mkt, session)
-                    if bet:
-                        placed += 1
-                        active_by_group[key].append(bet)
-                elif existing_bet.market_id != str(best_mkt.id):
-                    # Ayni grupta farkli market'te bet var — bu market de ayni
-                    # en yuksek fiyata sahipse (tie) ikiz bet olarak da acilir.
-                    old_mkt = (
-                        session.query(WeatherMarket)
-                        .filter_by(
-                            id=existing_bet.market_id,
-                        )
-                        .first()
-                    )
-                    old_price = float(old_mkt.yes_price or 0) if old_mkt else 0
-                    if best_price == old_price:
-                        logger.info(
-                            "Tie open: %s %s %s existing=%s twin=%s (both @%.4f)",
-                            city,
-                            str(td.date()),
-                            metric,
-                            existing_bet.market_id,
-                            best_mkt.id,
-                            best_price,
-                        )
-                        bet = self.open_bet_on_market(best_mkt, session)
-                        if bet:
-                            placed += 1
-                            active_by_group[key].append(bet)
-                    elif best_price - old_price >= bot_config.strategy.rotation_threshold:
-                        logger.info(
-                            "Smart rotation: %s %s %s old_price=%s new_price=%s improvement=%s",
-                            city,
-                            str(td.date()),
-                            metric,
-                            old_price,
-                            best_price,
-                            best_price - old_price,
-                        )
-                        self.close_bet_for_rotation(existing_bet, old_price, session)
-                        rotated += 1
-                        bet = self.open_bet_on_market(best_mkt, session)
-                        if bet:
-                            placed += 1
-                    else:
-                        logger.debug(
-                            "Rotation skipped (improvement=%.4f < %.2f): %s %s %s existing=%s best=%s",
-                            best_price - old_price,
-                            city,
-                            str(td.date()),
-                            metric,
-                            existing_bet.market_id,
-                            best_mkt.id,
-                        )
+                # Yeni bet ac
+                bet = self.open_bet_on_market(best_mkt, session)
+                if bet:
+                    placed += 1
+                    active_by_group[key].append(bet)
 
         logger.info(
             "place_all_pending done: %d placed, %d rotated (smart rotation)",
