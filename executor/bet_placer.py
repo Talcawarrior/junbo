@@ -537,9 +537,7 @@ class BetPlacer:
                 group_bets = active_by_group.get(key, [])
 
                 # Bu markette zaten acik bet var mi?
-                existing_on_market = next(
-                    (b for b in group_bets if b.market_id == str(best_mkt.id)), None
-                )
+                existing_on_market = next((b for b in group_bets if b.market_id == str(best_mkt.id)), None)
                 if existing_on_market is not None:
                     continue
 
@@ -629,11 +627,7 @@ class BetPlacer:
 
         closed = 0
         with get_session() as s:
-            active = (
-                s.query(Bet)
-                .filter(Bet.status.in_(OPEN_BET_STATUSES), Bet.side == "YES")
-                .all()
-            )
+            active = s.query(Bet).filter(Bet.status.in_(OPEN_BET_STATUSES), Bet.side == "YES").all()
             if not active:
                 return 0
 

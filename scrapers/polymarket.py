@@ -20,9 +20,7 @@ logger = logging.getLogger("SCRAPER_POLYMARKET")
 # Market statuses that mean the market is done (resolved/expired/closed).
 # The fetch upsert must never overwrite these back to "open" — doing so
 # would resurrect a settled market and let the bot re-bet / re-settle it.
-_TERMINAL_MARKET_STATUSES = frozenset(
-    {"expired", "settled_win", "settled_loss", "closed_early", "won", "lost"}
-)
+_TERMINAL_MARKET_STATUSES = frozenset({"expired", "settled_win", "settled_loss", "closed_early", "won", "lost"})
 
 
 class PolymarketScraper:
@@ -90,38 +88,100 @@ class PolymarketScraper:
         # City-specific queries to cover ALL Polymarket weather cities
         queries += [
             # US cities
-            "dallas temperature", "miami temperature", "new york temperature",
-            "chicago temperature", "houston temperature", "los angeles temperature",
-            "phoenix temperature", "denver temperature", "seattle temperature",
-            "atlanta temperature", "boston temperature", "san francisco temperature",
-            "washington temperature", "philadelphia temperature", "detroit temperature",
-            "minneapolis temperature", "portland temperature", "las vegas temperature",
-            "nashville temperature", "austin temperature", "charlotte temperature",
-            "indianapolis temperature", "columbus temperature", "san diego temperature",
-            "tampa temperature", "orlando temperature", "sacramento temperature",
-            "pittsburgh temperature", "st louis temperature", "baltimore temperature",
-            "milwaukee temperature", "kansas city temperature", "salt lake city temperature",
+            "dallas temperature",
+            "miami temperature",
+            "new york temperature",
+            "chicago temperature",
+            "houston temperature",
+            "los angeles temperature",
+            "phoenix temperature",
+            "denver temperature",
+            "seattle temperature",
+            "atlanta temperature",
+            "boston temperature",
+            "san francisco temperature",
+            "washington temperature",
+            "philadelphia temperature",
+            "detroit temperature",
+            "minneapolis temperature",
+            "portland temperature",
+            "las vegas temperature",
+            "nashville temperature",
+            "austin temperature",
+            "charlotte temperature",
+            "indianapolis temperature",
+            "columbus temperature",
+            "san diego temperature",
+            "tampa temperature",
+            "orlando temperature",
+            "sacramento temperature",
+            "pittsburgh temperature",
+            "st louis temperature",
+            "baltimore temperature",
+            "milwaukee temperature",
+            "kansas city temperature",
+            "salt lake city temperature",
             # International cities
-            "london temperature", "paris temperature", "tokyo temperature",
-            "seoul temperature", "istanbul temperature", "moscow temperature",
-            "berlin temperature", "madrid temperature", "rome temperature",
-            "barcelona temperature", "amsterdam temperature", "vienna temperature",
-            "prague temperature", "warsaw temperature", "budapest temperature",
-            "lisbon temperature", "copenhagen temperature", "stockholm temperature",
-            "oslo temperature", "helsinki temperature", "dublin temperature",
-            "zurich temperature", "brussels temperature", "munich temperature",
-            "milan temperature", "toronto temperature", "vancouver temperature",
-            "sydney temperature", "melbourne temperature", "bangkok temperature",
-            "singapore temperature", "hong kong temperature", "taipei temperature",
-            "shanghai temperature", "beijing temperature", "mumbai temperature",
-            "delhi temperature", "dubai temperature", "abu dhabi temperature",
-            "johannesburg temperature", "cape town temperature", "cairo temperature",
-            "nairobi temperature", "lagos temperature", "buenos aires temperature",
-            "sao paulo temperature", "rio de janeiro temperature", "mexico city temperature",
-            "bogota temperature", "lima temperature", "santiago temperature",
-            "ankara temperature", "tel aviv temperature", "riyadh temperature",
-            "karachi temperature", "dhaka temperature", "jakarta temperature",
-            "manila temperature", "hanoi temperature", "kuala lumpur temperature",
+            "london temperature",
+            "paris temperature",
+            "tokyo temperature",
+            "seoul temperature",
+            "istanbul temperature",
+            "moscow temperature",
+            "berlin temperature",
+            "madrid temperature",
+            "rome temperature",
+            "barcelona temperature",
+            "amsterdam temperature",
+            "vienna temperature",
+            "prague temperature",
+            "warsaw temperature",
+            "budapest temperature",
+            "lisbon temperature",
+            "copenhagen temperature",
+            "stockholm temperature",
+            "oslo temperature",
+            "helsinki temperature",
+            "dublin temperature",
+            "zurich temperature",
+            "brussels temperature",
+            "munich temperature",
+            "milan temperature",
+            "toronto temperature",
+            "vancouver temperature",
+            "sydney temperature",
+            "melbourne temperature",
+            "bangkok temperature",
+            "singapore temperature",
+            "hong kong temperature",
+            "taipei temperature",
+            "shanghai temperature",
+            "beijing temperature",
+            "mumbai temperature",
+            "delhi temperature",
+            "dubai temperature",
+            "abu dhabi temperature",
+            "johannesburg temperature",
+            "cape town temperature",
+            "cairo temperature",
+            "nairobi temperature",
+            "lagos temperature",
+            "buenos aires temperature",
+            "sao paulo temperature",
+            "rio de janeiro temperature",
+            "mexico city temperature",
+            "bogota temperature",
+            "lima temperature",
+            "santiago temperature",
+            "ankara temperature",
+            "tel aviv temperature",
+            "riyadh temperature",
+            "karachi temperature",
+            "dhaka temperature",
+            "jakarta temperature",
+            "manila temperature",
+            "hanoi temperature",
+            "kuala lumpur temperature",
         ]
 
         gamma_host = urlparse(self.gamma_url).netloc
@@ -167,9 +227,7 @@ class PolymarketScraper:
                     m.setdefault("event_slug", slug)
                     all_events.append(m)
 
-        logger.info(
-            f"Toplam {len(all_events)} market çekildi ({len(seen_slugs)} event, {len(queries)} sorgu)"
-        )
+        logger.info(f"Toplam {len(all_events)} market çekildi ({len(seen_slugs)} event, {len(queries)} sorgu)")
         return all_events
 
     async def fetch_polymarket_events(self, limit: int = 100) -> list[dict]:
@@ -187,16 +245,10 @@ class PolymarketScraper:
         and humidity markets are explicitly rejected.
         """
         question = (
-            market.get("question", "")
-            + " "
-            + market.get("description", "")
-            + " "
-            + market.get("title", "")
+            market.get("question", "") + " " + market.get("description", "") + " " + market.get("title", "")
         ).lower()
         # 1) Must mention a known city (any key from CITY_ICAO_MAP)
-        city_match = any(
-            city_key in question for city_key in config.CITY_ICAO_MAP.keys()
-        )
+        city_match = any(city_key in question for city_key in config.CITY_ICAO_MAP.keys())
         if not city_match:
             return False
         # 2) Must contain a strong weather term (reject sports/politics that
@@ -309,11 +361,7 @@ class PolymarketScraper:
         # Extract city name dynamically from ICAO map keys
         city_name = "Unknown"
         title = raw.get("title", "") or raw.get("question", "")
-        question = (
-            raw.get("question", "")
-            or raw.get("description", "")
-            or raw.get("title", "")
-        )
+        question = raw.get("question", "") or raw.get("description", "") or raw.get("title", "")
         title_lower = (title or "").lower()
         question_lower = (question or "").lower()
         for k in config.CITY_ICAO_MAP.keys():
@@ -336,11 +384,7 @@ class PolymarketScraper:
         threshold, threshold_unit, threshold_low, threshold_high = (
             threshold_result if threshold_result else (0.0, "celsius", None, None)
         )
-        metric = (
-            "temperature_max"
-            if "highest" in question_lower or "above" in question_lower
-            else "temperature_min"
-        )
+        metric = "temperature_max" if "highest" in question_lower or "above" in question_lower else "temperature_min"
         city_code = self._extract_city(question)
         market_type = self._determine_market_type(question)
         coords = self.get_city_coords(city_code) if city_code else None
@@ -406,15 +450,11 @@ class PolymarketScraper:
 
                     # Skip markets with missing target_date or zero threshold
                     if parsed["target_date"] is None:
-                        logger.warning(
-                            f"Skipping market {parsed['id']}: no target_date parsed"
-                        )
+                        logger.warning(f"Skipping market {parsed['id']}: no target_date parsed")
                         continue
                     threshold_c = parsed["threshold"]
                     if threshold_c == 0.0:
-                        logger.warning(
-                            f"Skipping market {parsed['id']}: threshold is 0.0"
-                        )
+                        logger.warning(f"Skipping market {parsed['id']}: threshold is 0.0")
                         continue
                     # Sanity guard: Celsius değer -40..55 aralığında değilse atla
                     if threshold_c < -40 or threshold_c > 55:
@@ -430,13 +470,12 @@ class PolymarketScraper:
 
                     # --- Duplicate prevention ---
                     # Build a strike key: (city, date_str, threshold)
-                    _td_str = parsed["target_date"].strftime("%Y-%m-%d") if hasattr(parsed["target_date"], "strftime") else str(parsed["target_date"])[:10]
+                    _td = parsed["target_date"]
+                    _td_str = _td.strftime("%Y-%m-%d") if hasattr(_td, "strftime") else str(_td)[:10]
                     _strike_key = (parsed["city"], _td_str, parsed["threshold"])
 
                     # Check by Polymarket ID first (fast path)
-                    existing = (
-                        session.query(WeatherMarket).filter_by(id=parsed["id"]).first()
-                    )
+                    existing = session.query(WeatherMarket).filter_by(id=parsed["id"]).first()
                     # Also check in-memory set + DB for cross-event duplicates
                     if not existing and _strike_key in _seen_strikes:
                         # Already processed this strike in this cycle — skip
@@ -585,16 +624,8 @@ class PolymarketScraper:
 
     def _determine_market_type(self, question: str) -> str:
         question_lower = question.lower()
-        if (
-            "above" in question_lower
-            or "higher" in question_lower
-            or "over" in question_lower
-        ):
+        if "above" in question_lower or "higher" in question_lower or "over" in question_lower:
             return "HIGH"
-        if (
-            "below" in question_lower
-            or "lower" in question_lower
-            or "under" in question_lower
-        ):
+        if "below" in question_lower or "lower" in question_lower or "under" in question_lower:
             return "LOW"
         return "RANGE"
