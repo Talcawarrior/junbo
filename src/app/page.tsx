@@ -240,14 +240,14 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
         case "city": aVal = a.city || ""; bVal = b.city || ""; break;
         case "metric": aVal = a.metric || ""; bVal = b.metric || ""; break;
         case "threshold": aVal = a.threshold || 0; bVal = b.threshold || 0; break;
-        case "placed_at": aVal = a.placed_at || ""; bVal = b.placed_at || ""; break;
+        case "placed_at": aVal = a.openedAt || ""; bVal = b.openedAt || ""; break;
         case "side": aVal = a.side || ""; bVal = b.side || ""; break;
-        case "entry": aVal = a.entry_price || 0; bVal = b.entry_price || 0; break;
-        case "current": aVal = a.current_price || 0; bVal = b.current_price || 0; break;
+        case "entry": aVal = a.entryPrice || 0; bVal = b.entryPrice || 0; break;
+        case "current": aVal = a.currentPrice || 0; bVal = b.currentPrice || 0; break;
         case "edge": aVal = a.edge || 0; bVal = b.edge || 0; break;
         case "amount": aVal = a.amount || 0; bVal = b.amount || 0; break;
         case "pnl": aVal = a.pnl || 0; bVal = b.pnl || 0; break;
-        case "settled_at": aVal = a.settled_at || ""; bVal = b.settled_at || ""; break;
+        case "settled_at": aVal = a.timeLeft || ""; bVal = b.timeLeft || ""; break; break;
         default: aVal = a.city || ""; bVal = b.city || "";
       }
       if (typeof aVal === "string") return sortDir === "asc" ? aVal.localeCompare(bVal as string) : (bVal as string).localeCompare(aVal);
