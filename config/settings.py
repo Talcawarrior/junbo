@@ -153,6 +153,9 @@ class StrategyConfig:
     tie_bet_enabled: bool = True
     tie_loser_gap: float = 0.10  # ikiz betlerden biri %10+ one gecerse digerini kapat
 
+    # ── Smart rotation: eski bet'i kapatip yenisini ac ─
+    rotation_threshold: float = 0.05  # %5+ improvement gerekli rotation icin
+
     # ── Max entry price ───────────────────────────────────────────────────
     # 0.99'dan alimi yasakla: bu fiyatta kar marji cok dusuk (0.99 -> 1.0).
     # Fill price bu degerin UZERINE cikarsa (>=) bet acilmaz.

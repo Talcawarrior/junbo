@@ -575,7 +575,7 @@ class BetPlacer:
                         if bet:
                             placed += 1
                             active_by_group[key].append(bet)
-                    elif best_price - old_price >= 0.10:
+                    elif best_price - old_price >= bot_config.strategy.rotation_threshold:
                         logger.info(
                             "Smart rotation: %s %s %s old_price=%s new_price=%s improvement=%s",
                             city,
@@ -592,7 +592,7 @@ class BetPlacer:
                             placed += 1
                     else:
                         logger.debug(
-                            "Rotation skipped (improvement=%.4f < 0.10): %s %s %s existing=%s best=%s",
+                            "Rotation skipped (improvement=%.4f < %.2f): %s %s %s existing=%s best=%s",
                             best_price - old_price,
                             city,
                             str(td.date()),
