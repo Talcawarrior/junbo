@@ -3,7 +3,7 @@
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func
 
@@ -483,7 +483,7 @@ class BetPlacer:
                     WeatherMarket.target_date.isnot(None),
                     WeatherMarket.yes_price.isnot(None),
                     WeatherMarket.yes_price > 0,
-                    WeatherMarket.target_date >= now,
+                    WeatherMarket.target_date > now + timedelta(hours=8),
                     WeatherMarket.city != "Unknown",
                 )
                 .all()
@@ -654,14 +654,13 @@ class BetPlacer:
         # Fill price + slippage
         raw_fill = float(market.yes_price or 0.5)
 
-        # 8-saatlik settlement korumasi
+        # Vadesi gecmis piyasalara bet acma
         if market.target_date:
             _now = datetime.now(timezone.utc).replace(tzinfo=None)
-            _secs_left = (market.target_date - _now).total_seconds()
-            if _secs_left < 8 * 3600:
+            if market.target_date <= _now:
                 logger.info(
-                    "open_bet_on_market: %s target=%s, kalan=%.1fs < 8h - skipped",
-                    market.id, market.target_date, _secs_left,
+                    "open_bet_on_market: %s target=%s GECTI - skipped",
+                    market.id, market.target_date,
                 )
                 return None
 
