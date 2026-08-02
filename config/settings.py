@@ -131,11 +131,10 @@ class StrategyConfig:
     # Other categories use 1.0 (standard quadratic).
     fee_exponent: float = 0.5
 
-    # Bot scope: today + 1 + 2 days ahead (0..2 inclusive).
-    # Tightened from 14 to 2 so the bot only trades near-term markets
-    # where the public weather ensemble (GFS/ECMWF/ICON/...) is still
-    # calibrated. Forecasts degrade past 3 days.
-    max_days_ahead: int = 2
+    # Bot scope: today + 1 + 2 + 3 days ahead (0..3 inclusive).
+    # Forecast reliability degrades past 3 days, but 3-day coverage
+    # gives the bot more opportunities to find edge.
+    max_days_ahead: int = 3
 
     # ── Slippage model ────────────────────────────────────────────────
     # "flat"   — fixed slippage_pct from strategy_params.json
