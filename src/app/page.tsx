@@ -1376,7 +1376,7 @@ export default function DashboardPage() {
     <div className="min-h-screen flex flex-col bg-gray-50/50 dark:bg-gray-900/50" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
       {/* ---- HEADER ---- */}
       <header className="sticky top-0 z-50 bg-white dark:bg-gray-900 border-b" style={{ borderColor: BORDER }}>
-        <div className="max-w-7xl mx-auto flex items-center justify-between px-4 sm:px-6 h-14">
+        <div className="flex items-center justify-between px-4 sm:px-6 h-14">
           <div className="flex items-center gap-3">
             <h1 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100">Junbo</h1>
             <div className="flex items-center gap-1.5">
@@ -1435,7 +1435,7 @@ export default function DashboardPage() {
 
       {/* ---- TAB NAVIGATION ---- */}
       <nav className="bg-white dark:bg-gray-900 border-b sticky top-14 z-40" style={{ borderColor: BORDER }}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="px-4 sm:px-6">
           <div className="flex gap-0 overflow-x-auto">
             {TABS.map((tab) => (
               <button
@@ -1456,7 +1456,7 @@ export default function DashboardPage() {
       </nav>
 
       {/* ---- MAIN CONTENT ---- */}
-      <main className="flex-1 w-full px-4 sm:px-6 py-6">
+      <main className="flex-1 w-full py-6">
         {activeTab === "overview" && (
           <OverviewTab
             isLoading={data.isLoading && !data.status}
