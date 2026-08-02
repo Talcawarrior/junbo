@@ -19,6 +19,7 @@ from utils.formulas import (
 )
 from utils.price_sanity import is_valid_binary_price
 from utils.slippage import check_orderbook_depth, estimate_slippage
+from engine.market_selection import passes_time_gate
 
 logger = logging.getLogger("EXECUTOR_BET_PLACER")
 
@@ -122,6 +123,21 @@ class BetPlacer:
             # discovered min_entry_price filter — long-shot bets are the
             # source of the asymmetric-payoff bleed).
             market_price = float(market.yes_price or 0.5)
+            d.check("max_entry_price", market_price < float(bot_config.strategy.max_entry_price), price=market_price)
+            if not d.should_bet:
+                d.log(logging.DEBUG)
+                return None
+            d.check(
+                "time_gate",
+                passes_time_gate(
+                    market.target_date,
+                    gate_hour_utc=bot_config.strategy.entry_time_gate_hour_utc,
+                ),
+                target_date=str(market.target_date),
+            )
+            if not d.should_bet:
+                d.log(logging.DEBUG)
+                return None
             # Prefer the Karpathy-tuned strategy value; fall back to legacy
             # Config.MIN_ENTRY_PRICE for backwards compatibility.
             strategy_min_price = getattr(self.risk_manager.config, "strategy", None)
@@ -451,6 +467,13 @@ class BetPlacer:
                 l1_amount = ladder_orders[0].get("amount") if isinstance(ladder_orders[0], dict) else None
                 if l1_amount and l1_amount > 0:
                     initial_stake = l1_amount
+                    # Bet.amount/shares represent the filled position, not
+                    # the notional of pending ladder rungs. This keeps
+                    # exposure, cash, and settlement PnL aligned.
+                    bet.amount = round(initial_stake, 2)
+                    bet.stake_amount = round(initial_stake, 2)
+                    bet.shares = float(ladder_orders[0].get("shares", shares))
+                    bet.potential_payout = bet.amount / bet.price if bet.price > 0 else 0
                     # Mark L1 as filled immediately (prevents double-debit in run_update_prices)
                     ladder_orders[0]["status"] = "filled"
                     ladder_orders[0]["filled_at"] = datetime.now(timezone.utc).isoformat()
@@ -526,6 +549,10 @@ class BetPlacer:
             )
             pending = session.query(Analysis).join(subq, Analysis.id == subq.c.max_id).all()
 
+            # Smart rotation: close strictly inferior positions in the same
+            # group before placing a better candidate. Ties are preserved.
+            self._rotate_inferior_group_positions(session, pending)
+
             # Dedup: skip market_ids that already have ANY non-rejected Bet.
             # Previous logic deduped by analysis_id which was useless — SIA
             # creates a new analysis (new ID) each cycle for the same market,
@@ -564,3 +591,42 @@ class BetPlacer:
                 continue
 
         return placed
+
+    def _rotate_inferior_group_positions(self, session, analyses):
+        """Close old group positions only when a strictly higher YES price exists."""
+        from datetime import datetime, timezone
+        from engine.market_selection import market_group_key
+        from utils.accounting import credit_sale
+        from utils.formulas import polymarket_fee
+
+        markets = {m.id: m for m in session.query(WeatherMarket).all()}
+        open_bets = session.query(Bet).filter(Bet.status.in_(self._OPEN_STATUSES)).all()
+        for analysis in analyses:
+            candidate = markets.get(analysis.market_id)
+            if not candidate:
+                continue
+            candidate_key = market_group_key(candidate)
+            candidate_price = float(candidate.yes_price or 0.0)
+            for bet in open_bets:
+                old_market = markets.get(bet.market_id)
+                if not old_market or bet.market_id == candidate.id or market_group_key(old_market) != candidate_key:
+                    continue
+                old_price = float(old_market.yes_price or bet.current_price or bet.entry_price or 0.0)
+                if candidate_price <= old_price:
+                    continue
+                shares = float(bet.shares or 0.0)
+                proceeds = shares * old_price
+                fee = polymarket_fee(shares, old_price, Config.WEATHER_FEE_RATE)
+                entry = float(bet.entry_price or bet.price or 0.0)
+                realized = shares * (old_price - entry) - fee
+                bet.status = "closed_early"
+                bet.close_reason = "smart_rotation"
+                bet.closed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                bet.current_price = old_price
+                bet.unrealized_pnl = 0.0
+                bet.realized_pnl = round(realized, 2)
+                bet.pnl = round(realized, 2)
+                credit_sale(session, round(proceeds - fee, 2), f"rotation:{bet.market_id}")
+                old_market.status = "open"
+                logger.info("Smart rotation: closed %s for better YES price %.4f > %.4f", bet.market_id, candidate_price, old_price)
+        session.flush()

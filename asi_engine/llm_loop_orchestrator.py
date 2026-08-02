@@ -26,7 +26,9 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+
+UTC = timezone.utc
 from typing import Any
 
 from asi_engine.asi_evolve import run_asi_evolve_daily

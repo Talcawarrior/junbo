@@ -132,6 +132,7 @@ async def settlement_loop(state):
     from jobs.scheduler import run_settle
 
     last_cleanup_date = None
+    last_ui_verification = None
 
     while state.is_running:
         try:
@@ -153,6 +154,13 @@ async def settlement_loop(state):
             ):
                 await asyncio.to_thread(state.sia_loop.run_optimization_cycle)
                 state.sia_last_run = datetime.now(timezone.utc).replace(tzinfo=None)
+
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            if last_ui_verification is None or (now - last_ui_verification).total_seconds() >= 7200:
+                from jobs.scheduler import run_ui_market_verification
+
+                await asyncio.to_thread(run_ui_market_verification)
+                last_ui_verification = now
         except Exception as e:
             logger.error("Settle error: %s", e)
         await asyncio.sleep(state.config.SETTLEMENT_INTERVAL)

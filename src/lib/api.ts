@@ -21,6 +21,8 @@ export interface StatusResponse {
     total_roi: number;
     exposure: number;
     max_exposure: number;
+    available_cash: number;
+    max_openable_now: number;
   };
   stats: {
     total_signals: number;
@@ -173,6 +175,7 @@ export interface KpiData {
   // Open positions summary
   openPositionsValue: number;  // Açık pozisyonların toplam stake tutarı
   maxOpenableUsd: number;      // Maksimum açılabilecek USD (gün itibarıyla)
+  availableCash: number;       // Available cash after open exposure
   // Second row metrics
   totalPnlValue: number;       // Total PnL ($)
   realizedPnl: number;         // Kapalı bahislerden realized PnL
@@ -295,6 +298,7 @@ function mapKpiData(
       maxDrawdown: 0,
       openPositionsValue: 0,
       maxOpenableUsd: 0,
+      availableCash: 0,
         totalPnlValue: 0,
         realizedPnl: 0,
         unrealizedPnl: 0,
@@ -361,7 +365,8 @@ function mapKpiData(
     maxDrawdown: status.metrics?.max_drawdown_pct ?? 0,
     // Open positions summary
     openPositionsValue: Math.round(openPositionsValue * 100) / 100,
-    maxOpenableUsd: Math.round(maxExposure * 100) / 100,
+    maxOpenableUsd: Math.round((status.portfolio.max_openable_now ?? maxExposure) * 100) / 100,
+    availableCash: status.portfolio.available_cash ?? 0,
     // Second row
     totalPnlValue,
     realizedPnl,

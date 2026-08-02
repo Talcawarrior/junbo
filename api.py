@@ -257,7 +257,6 @@ def get_status():
 
         initial_capital = state.config.INITIAL_PORTFOLIO
         total_pnl = realized_pnl_db + unrealized_pnl_db
-
         # Total amount staked in settled bets (sum of all bet amounts
         # regardless of win/loss). ROI = PnL / total_stake, NOT PnL / initial.
         total_stake_settled = (
@@ -276,6 +275,15 @@ def get_status():
             )
             .scalar()
         ) or 0.0
+
+        # Canonical cash identity used by entry sizing and the dashboard.
+        available_cash = initial_capital + realized_pnl_db + unrealized_pnl_db - float(exposure_db)
+        max_exposure = max_exposure_cap(
+            initial_capital,
+            realized_before_today,
+            state.config.TOTAL_EXPOSURE_PCT,
+        )
+        max_openable_now = max(0.0, float(max_exposure) - float(exposure_db))
 
         # ROI for CLOSED bets: realized PNL / total stake (bet amounts)
         total_roi = (realized_pnl_db / total_stake_settled) * 100 if total_stake_settled > 0 else 0
@@ -331,14 +339,9 @@ def get_status():
                 "total_pnl": total_pnl,
                 "total_roi": total_roi,
                 "exposure": float(exposure_db),
-                "max_exposure": round(
-                    max_exposure_cap(
-                        initial_capital,
-                        realized_before_today,
-                        state.config.TOTAL_EXPOSURE_PCT,
-                    ),
-                    2,
-                ),
+                "max_exposure": round(float(max_exposure), 2),
+                "available_cash": round(max(0.0, available_cash), 2),
+                "max_openable_now": round(max_openable_now, 2),
             },
             "stats": {
                 "total_signals": total_signals_db,

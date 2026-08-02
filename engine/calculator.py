@@ -21,6 +21,7 @@ from utils.slippage import (
     adjust_kelly_for_slippage,
     estimate_slippage,
 )
+from engine.market_selection import passes_time_gate
 
 logger = logging.getLogger("ENGINE_CALCULATOR")
 
@@ -92,6 +93,14 @@ class Calculator:
             # Skip already-resolved markets (lookahead bias guard)
             if market.target_date <= datetime.now(timezone.utc).replace(tzinfo=None):
                 logger.debug(f"Market {market_id}: target_date {market.target_date} already passed, skipping")
+                return None
+
+            # Requested strategy: YES-only and strict maximum entry price.
+            if (market.yes_price or 0.0) >= bot_config.strategy.max_entry_price:
+                logger.debug("Market %s: yes_price %.4f >= max_entry_price", market_id, market.yes_price)
+                return None
+            if not passes_time_gate(market.target_date, gate_hour_utc=bot_config.strategy.entry_time_gate_hour_utc):
+                logger.debug("Market %s: blocked by 13:00 UTC time gate", market_id)
                 return None
 
             # Skip markets with no real liquidity (price too low for paper realism)
@@ -210,23 +219,9 @@ class Calculator:
             market_implied = market.yes_price or 0.5
             raw_edge = estimated_prob - market_implied
 
-            if raw_edge > 0:
-                # YES tarafı
-                kelly_frac = self.kelly_criterion(estimated_prob, market_implied, bot_config.strategy.kelly_fraction)
-                recommended_side = "YES"
-            else:
-                # NO tarafı
-                no_prob = 1 - estimated_prob
-                no_implied = market.no_price or (1 - market_implied)
-                no_edge = no_prob - no_implied
-
-                if no_edge > 0:
-                    kelly_frac = self.kelly_criterion(no_prob, no_implied, bot_config.strategy.kelly_fraction)
-                    recommended_side = "NO"
-                    raw_edge = no_edge
-                else:
-                    kelly_frac = 0
-                    recommended_side = None
+            # Requested strategy is deliberately YES-only for both HIGH and LOW.
+            recommended_side = "YES"
+            kelly_frac = self.kelly_criterion(estimated_prob, market_implied, bot_config.strategy.kelly_fraction)
 
             # ── Slippage + fee adjusted edge ────────────────────────────
             # Net edge = raw edge − slippage − fee_drag.
@@ -300,7 +295,7 @@ class Calculator:
                 inefficiency_ok = True
 
             should_bet = (
-                abs(net_edge) >= effective_min_edge
+                net_edge >= effective_min_edge
                 and inefficiency_ok
                 and len(forecast_values) >= bot_config.strategy.min_sources
                 and 0 <= days_ahead <= bot_config.strategy.max_days_ahead
@@ -309,7 +304,7 @@ class Calculator:
             )
 
             reason_parts = []
-            if abs(net_edge) < effective_min_edge:
+            if net_edge < effective_min_edge:
                 reason_parts.append(
                     f"Net edge düşük: {net_edge:.2%} (raw={raw_edge:.2%}, slip={slippage_est.slippage_pct:.2%})"
                 )

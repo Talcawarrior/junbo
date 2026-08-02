@@ -187,7 +187,7 @@ class TestProbabilityEstimation:
 # ============================================================================
 
 class TestPortfolioFormulas:
-"""Portfolio formülü invariant'ları."""
+    """Portfolio formülü invariant'ları."""
 
     @given(
         initial=st.floats(min_value=0.0, max_value=100000),
@@ -235,7 +235,7 @@ class TestPortfolioFormulas:
 # ============================================================================
 
 class TestEdgeCalculation:
-"""Edge hesaplama invariant'ları."""
+    """Edge hesaplama invariant'ları."""
 
     @given(
         prob=st.floats(min_value=0.01, max_value=0.99),

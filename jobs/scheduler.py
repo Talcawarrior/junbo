@@ -2,17 +2,36 @@
 
 import json
 import logging
+import subprocess
+import sys
 from datetime import datetime, timezone
 
 from sqlalchemy import func
 
 from database.db import get_session, get_session_or
 from database.models import OPEN_BET_STATUSES, Analysis, Bet, Portfolio, WeatherMarket
+from config.settings import bot_config
+from engine.market_selection import select_highest_yes_candidates
 from utils.formulas import (
     polymarket_fee,
     portfolio_total_value,
     unrealized_pnl as compute_unrealized_pnl,
 )
+
+
+def run_ui_market_verification():
+    """Run the non-mutating UI/DB market verifier every two hours."""
+    script = __import__("pathlib").Path(__file__).resolve().parents[1] / "scripts" / "verify_ui_markets.py"
+    try:
+        result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, timeout=30, check=False)
+        if result.returncode:
+            logger.warning("UI market verification failed: %s", result.stdout.strip() or result.stderr.strip())
+        else:
+            logger.info(result.stdout.strip())
+        return result.returncode
+    except Exception as exc:
+        logger.warning("UI market verification unavailable: %s", exc)
+        return 1
 
 logger = logging.getLogger("JOBS_SCHEDULER")
 
@@ -60,7 +79,14 @@ def run_analyze(session=None):
             )
             .all()
         )
-        market_ids = [m.id for m in markets]
+        # Enforce the group winner rule before forecast analysis. A cheaper
+        # market must not become a bet simply because its forecast signal is
+        # stronger than the highest-YES-price candidate.
+        selected = select_highest_yes_candidates(
+            markets,
+            max_entry_price=bot_config.strategy.max_entry_price,
+        )
+        market_ids = [m.id for m in selected]
 
         for mid in market_ids:
             try:
@@ -129,8 +155,6 @@ def run_update_prices(session=None):
             # so the same (current - entry) * shares formula works for both sides.
             bet.unrealized_pnl = round(compute_unrealized_pnl(shares, current, entry), 2)
 
-            total_unrealized += bet.unrealized_pnl or 0.0
-
             # 2. Ladder fill check — only status=="pending" rungs fill.
             # L1 is already "filled" at open (bet_placer), so safe from double-debit.
             from utils.accounting import debit_stake
@@ -152,11 +176,29 @@ def run_update_prices(session=None):
                                     rung["status"] = "filled"
                                     rung["filled_at"] = datetime.now(timezone.utc).isoformat()
                                     filled_amount += rung_size
+                                    rung_shares = float(rung.get("shares", 0.0) or 0.0)
+                                    prior_amount = float(bet.amount or 0.0)
+                                    prior_shares = float(bet.shares or 0.0)
+                                    # Expand the filled position and keep a
+                                    # weighted average entry for PnL.
+                                    bet.amount = round(prior_amount + rung_size, 2)
+                                    bet.shares = prior_shares + rung_shares
+                                    if bet.shares > 0:
+                                        bet.entry_price = round(
+                                            (prior_shares * entry + rung_shares * trigger_price) / bet.shares,
+                                            6,
+                                        )
                         if filled_amount > 0:
                             bet.ladder_data = json.dumps(ladder)
                             debit_stake(sess, filled_amount, f"ladder_fill:{bet.market_id}")
                 except Exception as e:
                     logger.warning("Ladder parse hatası %s: %s", bet.id, e)
+
+            # Recompute after any rung fills so the same cycle reflects the
+            # newly invested shares and weighted entry price.
+            entry = float(bet.entry_price or bet.price or 0.0)
+            bet.unrealized_pnl = round(compute_unrealized_pnl(float(bet.shares or 0.0), current, entry), 2)
+            total_unrealized += bet.unrealized_pnl or 0.0
 
             updated += 1
             sess.add(bet)

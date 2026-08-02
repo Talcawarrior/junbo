@@ -47,7 +47,9 @@ import random
 import sqlite3
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+
+UTC = timezone.utc
 from typing import Any
 
 import pandas as pd

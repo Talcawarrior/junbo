@@ -34,7 +34,9 @@ import logging
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+
+UTC = timezone.utc
 
 import pandas as pd
 import requests

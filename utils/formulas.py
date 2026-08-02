@@ -85,10 +85,11 @@ def max_exposure_cap(
       - main.py     (API /api/status → portfolio.max_exposure)
       - bet_placer.py (Cap 2)
     """
-    return (
-        conservative_portfolio_value(initial_capital, realized_before_today)
-        * total_exposure_pct
-    )
+    # A losing account cannot create a negative exposure allowance. Clamp the
+    # conservative base before applying the percentage so risk checks and the
+    # dashboard remain meaningful after a large realized loss.
+    conservative_value = max(0.0, conservative_portfolio_value(initial_capital, realized_before_today))
+    return conservative_value * total_exposure_pct
 
 
 # ---------------------------------------------------------------------------

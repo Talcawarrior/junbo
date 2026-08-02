@@ -7,7 +7,9 @@ and calibration dataset.
 
 import logging
 import sqlite3
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+UTC = timezone.utc
 
 import requests
 

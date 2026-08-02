@@ -87,6 +87,8 @@ class StrategyConfig:
     # vig + a thin profit margin in paper mode.  Can be lowered once a
     # private weather feed (e.g. ECMWF-direct) gives a structural edge.
     min_edge: float = 0.05  # 5% edge minimum (must exceed 2% fee_drag + margin)
+    max_entry_price: float = 0.99  # strict: 0.99 and above are never entered
+    entry_time_gate_hour_utc: int = 13
     max_bet_amount: float = 3.0  # Maximum $3 per bet (binde 3 of $1,000)
     max_bet_pct: float = 0.003  # Max bet as % of portfolio (single source of truth)
     min_bet_size: float = 1.0  # Minimum bet size in USD
@@ -430,6 +432,8 @@ class BotConfig:
         s.kelly_fraction = float(os.getenv("KELLY_FRACTION", str(s.kelly_fraction)))
         s.daily_loss_limit = float(os.getenv("DAILY_LOSS_LIMIT", str(s.daily_loss_limit)))
         s.min_entry_price = float(os.getenv("MIN_ENTRY_PRICE", str(s.min_entry_price)))
+        s.max_entry_price = float(os.getenv("MAX_ENTRY_PRICE", str(s.max_entry_price)))
+        s.entry_time_gate_hour_utc = int(os.getenv("ENTRY_TIME_GATE_HOUR_UTC", str(s.entry_time_gate_hour_utc)))
         s.flat_bet_usd = float(os.getenv("FLAT_BET_USD", str(s.flat_bet_usd)))
 
 

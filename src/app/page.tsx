@@ -287,6 +287,27 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
               </Card>
             ))}
           </section>
+          <section className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-2">
+            <Card className="py-3 gap-2 shadow-sm" style={{ borderColor: BORDER }}>
+              <CardContent className="px-3 pb-0 pt-0">
+                <p className="text-[10px] font-medium" style={{ color: TEXT_MUTED }}>Kullanılabilir Nakit</p>
+                <p className="text-lg font-bold tabular-nums mt-1" style={{ color: TEAL }}>{fmtUsd(kpiData.availableCash)}</p>
+                <p className="text-[10px] mt-0.5" style={{ color: TEXT_MUTED }}>Initial + realized + unrealized − exposure</p>
+              </CardContent>
+            </Card>
+            <Card className="py-3 gap-2 shadow-sm" style={{ borderColor: BORDER }}>
+              <CardContent className="px-3 pb-0 pt-0">
+                <p className="text-[10px] font-medium" style={{ color: TEXT_MUTED }}>Açık Bet PnL</p>
+                <p className="text-lg font-bold tabular-nums mt-1" style={{ color: kpiData.unrealizedPnl >= 0 ? TEAL : RED }}>{fmtUsd(kpiData.unrealizedPnl)}</p>
+              </CardContent>
+            </Card>
+            <Card className="py-3 gap-2 shadow-sm" style={{ borderColor: BORDER }}>
+              <CardContent className="px-3 pb-0 pt-0">
+                <p className="text-[10px] font-medium" style={{ color: TEXT_MUTED }}>Şimdi Açılabilir Maksimum</p>
+                <p className="text-lg font-bold tabular-nums mt-1" style={{ color: TEAL }}>{fmtUsd(kpiData.maxOpenableUsd)}</p>
+              </CardContent>
+            </Card>
+          </section>
 
           {/* Summary row - single row with all 4 cards */}
           <section className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2">
