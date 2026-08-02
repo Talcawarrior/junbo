@@ -143,7 +143,6 @@ type TabId = "overview" | "trades" | "models" | "health";
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "overview", label: "Genel Bakış", icon: <BarChart3 className="h-3.5 w-3.5" /> },
   { id: "trades", label: "İşlem Geçmişi", icon: <History className="h-3.5 w-3.5" /> },
-  { id: "models", label: "Model Performansı", icon: <Brain className="h-3.5 w-3.5" /> },
   { id: "health", label: "Sağlık", icon: <HeartPulse className="h-3.5 w-3.5" /> },
 ];
 
@@ -1335,39 +1334,57 @@ export default function DashboardPage() {
     <div className="min-h-screen flex flex-col bg-gray-50/50 dark:bg-gray-900/50" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
       {/* ---- HEADER ---- */}
       <header className="sticky top-0 z-50 bg-white dark:bg-gray-900 border-b" style={{ borderColor: BORDER }}>
-        <div className="flex items-center justify-between px-4 sm:px-6 h-14">
-          <div className="flex items-center gap-3">
-            <h1 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100">Junbo</h1>
-            <div className="flex items-center gap-1.5">
-              {data.isLoading && !data.status ? (
-                <>
-                  <Loader2 className="h-3 w-3 animate-spin" style={{ color: TEXT_MUTED }} />
-                  <span className="text-xs font-medium" style={{ color: TEXT_MUTED }}>Bağlanıyor...</span>
-                </>
-              ) : data.status?.is_running ? (
-                <>
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
-                  </span>
-                  <span className="text-xs font-medium text-green-600 dark:text-green-400">ÇALIŞIYOR</span>
-                </>
-              ) : (
-                <>
-                  <span className="relative flex h-2 w-2">
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-gray-400" />
-                  </span>
-                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400">DURDURULDU</span>
-                </>
-              )}
+        <div className="flex items-center justify-between px-4 sm:px-6 h-12">
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100">Junbo</h1>
+              <div className="flex items-center gap-1.5">
+                {data.isLoading && !data.status ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" style={{ color: TEXT_MUTED }} />
+                    <span className="text-xs font-medium" style={{ color: TEXT_MUTED }}>Bağlanıyor...</span>
+                  </>
+                ) : data.status?.is_running ? (
+                  <>
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+                    </span>
+                    <span className="text-xs font-medium text-green-600 dark:text-green-400">Çalışıyor</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="relative flex h-2 w-2">
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-gray-400" />
+                    </span>
+                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Durduruldu</span>
+                  </>
+                )}
+              </div>
             </div>
+            <nav className="flex gap-0">
+              {TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors whitespace-nowrap"
+                  style={{
+                    borderColor: activeTab === tab.id ? TEAL : "transparent",
+                    color: activeTab === tab.id ? TEAL : TEXT_MUTED,
+                  }}
+                >
+                  {tab.icon}
+                  {tab.label}
+                </button>
+              ))}
+            </nav>
+          </div>
+          <div className="flex items-center gap-3">
             {data.error && (
               <Badge className="text-[10px] px-2 py-0.5 h-5" style={{ backgroundColor: RED_LIGHT, color: RED }}>
                 API Hatası
               </Badge>
             )}
-          </div>
-          <div className="flex items-center gap-2">
             {data.lastUpdated && (
               <span className="text-[10px] tabular-nums text-gray-500 dark:text-gray-400">
                 Son güncelleme: {data.lastUpdated.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
@@ -1392,30 +1409,8 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* ---- TAB NAVIGATION ---- */}
-      <nav className="bg-white dark:bg-gray-900 border-b sticky top-14 z-40" style={{ borderColor: BORDER }}>
-        <div className="px-4 sm:px-6">
-          <div className="flex gap-0 overflow-x-auto">
-            {TABS.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className="flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap"
-                style={{
-                  borderColor: activeTab === tab.id ? TEAL : "transparent",
-                  color: activeTab === tab.id ? TEAL : TEXT_MUTED,
-                }}
-              >
-                {tab.icon}
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </nav>
-
       {/* ---- MAIN CONTENT ---- */}
-      <main className="flex-1 w-full py-6">
+      <main className="flex-1 w-full py-4">
         {activeTab === "overview" && (
           <OverviewTab
             isLoading={data.isLoading && !data.status}
@@ -1427,7 +1422,6 @@ export default function DashboardPage() {
           />
         )}
         {activeTab === "trades" && <TradesTab tradeHistory={data.tradeHistory} historyStats={data.historyStats} totalPnl={data.historyStats?.total_pnl ?? 0} />}
-        {activeTab === "models" && <ModelsTab modelScores={data.modelScores} />}
         {activeTab === "health" && <HealthTab health={data.health} kpiData={data.kpiData} />}
       </main>
 
