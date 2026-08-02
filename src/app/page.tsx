@@ -243,7 +243,6 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
         case "side": aVal = a.side || ""; bVal = b.side || ""; break;
         case "entry": aVal = a.entryPrice || 0; bVal = b.entryPrice || 0; break;
         case "current": aVal = a.currentPrice || 0; bVal = b.currentPrice || 0; break;
-        case "edge": aVal = a.edge || 0; bVal = b.edge || 0; break;
         case "amount": aVal = a.amount || 0; bVal = b.amount || 0; break;
         case "pnl": aVal = a.pnl || 0; bVal = b.pnl || 0; break;
         case "settled_at": aVal = a.timeLeft || ""; bVal = b.timeLeft || ""; break;
@@ -421,7 +420,6 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
                       <TableHead className="text-[11px] font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("side")}>Yön<SortIcon field="side" /></TableHead>
                       <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("entry")}>Giriş<SortIcon field="entry" /></TableHead>
                       <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("current")}>Güncel<SortIcon field="current" /></TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("edge")}>Edge<SortIcon field="edge" /></TableHead>
                       <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("amount")}>Bet<SortIcon field="amount" /></TableHead>
                       <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("pnl")}>PnL<SortIcon field="pnl" /></TableHead>
                       <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("settled_at")}>Kapanış<SortIcon field="settled_at" /></TableHead>
@@ -449,7 +447,6 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
                         </TableCell>
                         <TableCell className="text-right font-mono text-sm tabular-nums" style={{ color: TEXT_PRIMARY }}>{fmtPrice(pos.entryPrice)}</TableCell>
                         <TableCell className="text-right font-mono text-sm tabular-nums" style={{ color: TEXT_PRIMARY }}>{fmtPrice(pos.currentPrice)}</TableCell>
-                        <TableCell className="text-right font-mono text-sm tabular-nums" style={{ color: TEXT_PRIMARY }}>{pos.edge}%</TableCell>
                         <TableCell className="text-right font-mono text-sm tabular-nums" style={{ color: TEXT_PRIMARY }}>{fmtUsd(pos.amount)}</TableCell>
                         <TableCell className="text-right font-mono text-sm font-semibold tabular-nums" style={{ color: pos.pnl >= 0 ? TEAL : RED }}>{fmtUsd(pos.pnl)}</TableCell>
                         <TableCell className="text-right text-[11px] tabular-nums whitespace-nowrap" style={{ color: TEXT_MUTED }}>{pos.timeLeft}</TableCell>
