@@ -536,9 +536,13 @@ class BetPlacer:
                 key = (city, td, metric)
                 group_bets = active_by_group.get(key, [])
 
-                # Grupta birden fazla bet varsa, dusuk fiyatli olanlari kapat
-                # (best_mkt'de bet olsa bile, digerlerini kapat)
-                if len(group_bets) > 1:
+                # Bu markette zaten acik bet var mi?
+                existing_on_market = next((b for b in group_bets if b.market_id == str(best_mkt.id)), None)
+                if existing_on_market is not None:
+                    continue
+
+                # Grupta baska bet var mi? Varsa en yuksek fiyatli degilse kapat
+                if group_bets:
                     for old_bet in group_bets:
                         old_mkt = session.query(WeatherMarket).filter_by(id=old_bet.market_id).first()
                         old_price = float(old_mkt.yes_price or 0) if old_mkt else 0
@@ -549,11 +553,6 @@ class BetPlacer:
                             )
                             self.close_bet_for_rotation(old_bet, old_price, session)
                             rotated += 1
-
-                # Bu markette zaten acik bet var mi?
-                existing_on_market = next((b for b in group_bets if b.market_id == str(best_mkt.id)), None)
-                if existing_on_market is not None:
-                    continue
 
                 # Yeni bet ac
                 bet = self.open_bet_on_market(best_mkt, session)
