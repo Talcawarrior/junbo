@@ -366,7 +366,7 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
       )}
 
       {/* Open Positions + Activity Feed — ÜSTTE */}
-      <section className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+      <section className="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start">
         <Card className="lg:col-span-3 shadow-sm py-4 gap-3" style={{ borderColor: BORDER }}>
           <CardHeader className="pb-0 pt-0 px-5">
             <CardTitle className="text-sm font-semibold" style={{ color: TEXT_PRIMARY }}>Açık Pozisyonlar</CardTitle>
@@ -427,12 +427,12 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
           </CardContent>
         </Card>
 
-        <Card className="lg:col-span-1 shadow-sm py-4 gap-3" style={{ borderColor: BORDER }}>
+        <Card className="lg:col-span-2 shadow-sm py-4 gap-3 h-full" style={{ borderColor: BORDER }}>
           <CardHeader className="pb-0 pt-0 px-5">
             <CardTitle className="text-sm font-semibold" style={{ color: TEXT_PRIMARY }}>Aktivite Akışı</CardTitle>
           </CardHeader>
           <CardContent className="px-4">
-            <div className="space-y-0 max-h-[380px] overflow-y-auto pr-1 custom-scroll">
+            <div className="max-h-[760px] overflow-y-auto pr-1 custom-scroll">
               {activityFeed.length === 0 ? (
                 <div className="text-center py-10 text-sm" style={{ color: TEXT_MUTED }}>Henüz aktivite yok</div>
               ) : (
