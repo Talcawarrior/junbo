@@ -508,9 +508,9 @@ class BetPlacer:
             for (city, td, metric), candidates in by_group.items():
                 best_price = max(p for _, p in candidates)
                 if best_price > 0:
-                    tied = [(m, p) for m, p in candidates if abs(p - best_price) < 1e-9]
-                    for mkt, price in tied[: None if tie_enabled else 1]:
-                        best_markets.append((city, td, metric, mkt, price))
+                    # En yuksek fiyatli marketi bul
+                    best_mkt = next(m for m, p in candidates if abs(p - best_price) < 1e-9)
+                    best_markets.append((city, td, metric, best_mkt, best_price))
 
             logger.info(
                 "place_all_pending: %d groups, %d best markets selected",

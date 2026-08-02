@@ -888,12 +888,12 @@ def get_history():
         stats_q = (
             db.query(
                 func.count(Bet.id),
-                func.sum(case((Bet.pnl > 0, 1), else_=0)),
-                func.sum(case((Bet.pnl <= 0, 1), else_=0)),
+                func.sum(case((Bet.realized_pnl > 0, 1), else_=0)),
+                func.sum(case((Bet.realized_pnl <= 0, 1), else_=0)),
                 func.coalesce(func.sum(Bet.amount), 0.0),
-                func.coalesce(func.sum(Bet.pnl), 0.0),
-                func.coalesce(func.sum(case((Bet.pnl > 0, Bet.pnl), else_=0.0)), 0.0),
-                func.coalesce(func.sum(case((Bet.pnl <= 0, func.abs(Bet.pnl)), else_=0.0)), 0.0),
+                func.coalesce(func.sum(Bet.realized_pnl), 0.0),
+                func.coalesce(func.sum(case((Bet.realized_pnl > 0, Bet.realized_pnl), else_=0.0)), 0.0),
+                func.coalesce(func.sum(case((Bet.realized_pnl <= 0, func.abs(Bet.realized_pnl)), else_=0.0)), 0.0),
             )
             .filter(Bet.status.in_(real_settled_statuses))
             .one()

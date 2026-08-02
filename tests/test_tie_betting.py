@@ -1,8 +1,7 @@
-"""Tests for the tie-betting feature (2026-08-01).
+"""Tests for ONE bet per group feature (updated 2026-08-02).
 
-Tie bet: ayni (city, target_date, metric) grubunda en yuksek fiyata sahip
-TUM marketlere bet acilir. Zaman gecince biri one gecerse digeri
-(close_losing_twin_bets) otomatik kapatilir.
+Yeni mantik: her (city, target_date, metric) grubunda SADECE 1 bet olur.
+Eski bet'ler kapatilir, en yuksek fiyatli piyasada yenisi acilir.
 """
 
 from datetime import datetime, timezone, timedelta
@@ -13,7 +12,7 @@ import pytest
 _COUNTER = 10000
 
 
-def _unique_id(prefix="tie"):
+def _unique_id(prefix="bet"):
     global _COUNTER
     _COUNTER += 1
     return f"{prefix}{_COUNTER}"
@@ -66,11 +65,11 @@ def _add_portfolio(session, cash=5000.0):
         session.add(Portfolio(id=1, cash_balance=cash, total_value=cash))
 
 
-class TestTieOpen:
-    """Tie: ayni max fiyata sahip tum marketlere bet acilir."""
+class TestOneBetPerGroup:
+    """Her grupta SADECE 1 bet olur."""
 
-    def test_two_tied_markets_both_open(self):
-        """Ayni grup, ayni fiyat (%40): iki bet de acilmalı."""
+    def test_one_bet_per_group(self):
+        """Ayni grupta 2 market varsa sadece 1 bet acilmali."""
         from database.db import get_session
         from database.models import Bet
         from executor.bet_placer import BetPlacer
@@ -86,51 +85,31 @@ class TestTieOpen:
 
         with get_session() as s:
             bets = s.query(Bet).filter(Bet.status.in_(("placed", "pending"))).all()
-            assert placed == 2, f"expected 2 placed, got {placed}"
-            assert len(bets) == 2
-            assert len({b.market_id for b in bets}) == 2, "iki farkli markette bet olmali"
+            assert placed == 1, f"expected 1 placed, got {placed}"
+            assert len(bets) == 1
 
-    def test_three_tied_markets_all_open(self):
-        """Uc market ayni fiyata bagliysa ucune de bet acilir."""
+    def test_rotation_closes_old_bet(self):
+        """Eski bet kapatilip yenisini acmali."""
         from database.db import get_session
-        from database.models import Bet
+        from database.models import Bet, WeatherMarket
         from executor.bet_placer import BetPlacer
 
         td = _td()
         with get_session() as s:
             _add_portfolio(s)
-            _add_market(s, _unique_id(), yes_price=0.45, td=td)
-            _add_market(s, _unique_id(), yes_price=0.45, td=td)
-            _add_market(s, _unique_id(), yes_price=0.45, td=td)
+            m1 = _unique_id()
+            m2 = _unique_id()
+            _add_market(s, m1, yes_price=0.30, td=td)
+            _add_market(s, m2, yes_price=0.50, td=td)
             s.commit()
 
         placed = BetPlacer().place_all_pending()
 
         with get_session() as s:
             bets = s.query(Bet).filter(Bet.status.in_(("placed", "pending"))).all()
-            assert placed == 3
-            assert len(bets) == 3
-
-    def test_only_tied_markets_open_not_lower(self):
-        """En yuksek fiyata bagli olmayan (dusuk fiyatli) markete bet acilmaz."""
-        from database.db import get_session
-        from database.models import Bet
-        from executor.bet_placer import BetPlacer
-
-        td = _td()
-        with get_session() as s:
-            _add_portfolio(s)
-            _add_market(s, _unique_id(), yes_price=0.40, td=td)
-            _add_market(s, _unique_id(), yes_price=0.40, td=td)
-            _add_market(s, _unique_id(), yes_price=0.05, td=td)
-            s.commit()
-
-        placed = BetPlacer().place_all_pending()
-
-        with get_session() as s:
-            bets = s.query(Bet).filter(Bet.status.in_(("placed", "pending"))).all()
-            assert placed == 2, f"only 2 tied markets should open, got {placed}"
-            assert len(bets) == 2
+            assert placed == 1, f"expected 1 placed, got {placed}"
+            assert len(bets) == 1
+            assert bets[0].market_id == m2  # en yuksek fiyatli market
 
     def test_rerun_does_not_duplicate(self):
         """Ayni marketlerde zaten bet varsa tekrar acilmaz."""
@@ -147,112 +126,76 @@ class TestTieOpen:
 
         placer = BetPlacer()
         placer.place_all_pending()
-        second = placer.place_all_pending()
+        placer.place_all_pending()  # ikinci kez
 
         with get_session() as s:
             bets = s.query(Bet).filter(Bet.status.in_(("placed", "pending"))).all()
-            assert second == 0, "ikinci calistirmada yeni bet acilmamali"
+            assert len(bets) == 1, "tekrar calistirildiginda bet sayisi artmamali"
+
+
+class TestRotation:
+    """Rotation: eski bet kapatilir, en yuksek fiyatli piyasada yenisi acilir."""
+
+    def test_lower_priced_bet_closed(self):
+        """Dusuk fiyatli bet kapatilmali, yuksek fiyatli kalmali."""
+        from database.db import get_session
+        from database.models import Bet, WeatherMarket
+        from executor.bet_placer import BetPlacer
+
+        td = _td()
+        with get_session() as s:
+            _add_portfolio(s)
+            m_low = _unique_id()
+            m_high = _unique_id()
+            _add_market(s, m_low, yes_price=0.30, td=td)
+            _add_market(s, m_high, yes_price=0.50, td=td)
+            s.commit()
+
+        # Ilk tur: en yuksek fiyatli markete bet ac
+        placed1 = BetPlacer().place_all_pending()
+        with get_session() as s:
+            bets = s.query(Bet).filter(Bet.status.in_(("placed", "pending"))).all()
+            assert len(bets) == 1
+            assert bets[0].market_id == m_high
+
+    def test_same_price_one_bet(self):
+        """Ayni fiyattaki marketlerden sadece 1'ine bet acilmali."""
+        from database.db import get_session
+        from database.models import Bet
+        from executor.bet_placer import BetPlacer
+
+        td = _td()
+        with get_session() as s:
+            _add_portfolio(s)
+            _add_market(s, _unique_id(), yes_price=0.40, td=td)
+            _add_market(s, _unique_id(), yes_price=0.40, td=td)
+            _add_market(s, _unique_id(), yes_price=0.40, td=td)
+            s.commit()
+
+        placed = BetPlacer().place_all_pending()
+
+        with get_session() as s:
+            bets = s.query(Bet).filter(Bet.status.in_(("placed", "pending"))).all()
+            assert placed == 1
+            assert len(bets) == 1
+
+    def test_different_dates_separate_bets(self):
+        """Farkli tarihlerde ayri betler acilmali."""
+        from database.db import get_session
+        from database.models import Bet
+        from executor.bet_placer import BetPlacer
+
+        td1 = _td(2)
+        td2 = _td(3)
+        with get_session() as s:
+            _add_portfolio(s)
+            _add_market(s, _unique_id(), yes_price=0.40, td=td1)
+            _add_market(s, _unique_id(), yes_price=0.40, td=td2)
+            s.commit()
+
+        placed = BetPlacer().place_all_pending()
+
+        with get_session() as s:
+            bets = s.query(Bet).filter(Bet.status.in_(("placed", "pending"))).all()
+            assert placed == 2
             assert len(bets) == 2
-
-
-class TestTwinLoserClose:
-    """Tie ile acilan betlerden geride kalan otomatik kapatilir."""
-
-    def _setup_two_bets(self, leader_price=0.50, loser_price=0.30):
-        from database.db import get_session
-        from executor.bet_placer import BetPlacer
-
-        td = _td()
-        m1 = _unique_id()
-        m2 = _unique_id()
-        with get_session() as s:
-            _add_portfolio(s)
-            _add_market(s, m1, yes_price=0.40, td=td)
-            _add_market(s, m2, yes_price=0.40, td=td)
-            s.commit()
-
-        placer = BetPlacer()
-        placer.place_all_pending()
-        return placer, m1, m2, td
-
-    def test_laggard_closed_when_gap_exceeds(self):
-        """Lider 0.50, gerideki 0.30 (gap 0.20 >= 0.10) -> gerideki kapatilir."""
-        from database.db import get_session
-        from database.models import Bet, WeatherMarket
-
-        placer, m1, m2, td = self._setup_two_bets()
-
-        with get_session() as s:
-            s.query(WeatherMarket).filter_by(id=m1).update({"yes_price": 0.50})
-            s.query(WeatherMarket).filter_by(id=m2).update({"yes_price": 0.30})
-            s.commit()
-
-        closed = placer.close_losing_twin_bets()
-
-        with get_session() as s:
-            bets = s.query(Bet).filter(Bet.market_id.in_([m1, m2])).all()
-            by_mkt = {b.market_id: b for b in bets}
-            assert closed == 1, f"expected 1 closed, got {closed}"
-            assert by_mkt[m1].status in ("placed", "pending"), "lider acik kalir"
-            assert by_mkt[m2].status == "closed", "gerideki kapatilir"
-            assert by_mkt[m2].close_reason == "rotation"
-
-    def test_small_gap_not_closed(self):
-        """Lider 0.45, gerideki 0.40 (gap 0.05 < 0.10) -> hicbiri kapatilmaz."""
-        from database.db import get_session
-        from database.models import Bet, WeatherMarket
-
-        placer, m1, m2, td = self._setup_two_bets()
-
-        with get_session() as s:
-            s.query(WeatherMarket).filter_by(id=m1).update({"yes_price": 0.45})
-            s.query(WeatherMarket).filter_by(id=m2).update({"yes_price": 0.40})
-            s.commit()
-
-        closed = placer.close_losing_twin_bets()
-
-        with get_session() as s:
-            bets = s.query(Bet).filter(Bet.market_id.in_([m1, m2])).all()
-            assert closed == 0
-            assert all(b.status in ("placed", "pending") for b in bets)
-
-    def test_single_bet_never_closed(self):
-        """Grupta tek bet varsa kapatma calismaz."""
-        from database.db import get_session
-        from database.models import WeatherMarket
-
-        td = _td()
-        m1 = _unique_id()
-        with get_session() as s:
-            _add_portfolio(s)
-            _add_market(s, m1, yes_price=0.40, td=td)
-            s.commit()
-
-        from executor.bet_placer import BetPlacer
-
-        placer = BetPlacer()
-        placer.place_all_pending()
-
-        with get_session() as s:
-            s.query(WeatherMarket).filter_by(id=m1).update({"yes_price": 0.70})
-            s.commit()
-
-        closed = placer.close_losing_twin_bets()
-        assert closed == 0
-
-    def test_gap_zero_disables(self):
-        """tie_loser_gap=0 ise kapatma devre disi kalir."""
-        from config.settings import bot_config
-
-        placer, m1, m2, td = self._setup_two_bets()
-        orig = bot_config.strategy.tie_loser_gap
-        try:
-            bot_config.strategy.tie_loser_gap = 0.0
-            closed = placer.close_losing_twin_bets()
-            assert closed == 0
-        finally:
-            bot_config.strategy.tie_loser_gap = orig
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v", "--tb=short"])

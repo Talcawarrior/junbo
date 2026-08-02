@@ -401,7 +401,7 @@ class BotConfig:
     """Combined configurations — single source of truth for ALL config."""
 
     # ── Portfolio ──────────────────────────────────────────────────
-    initial_portfolio: float = 2000.0
+    initial_portfolio: float = 1000.0
     max_exposure_pct: float = 1.0
     city_cap: int = 999  # no city limit - bet all cities
     weather_fee_rate: float = 0.05

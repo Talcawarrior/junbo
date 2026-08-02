@@ -169,20 +169,12 @@ def test_next_two_day_target_fires_on_new_date_and_only_once():
     assert _next_two_day_target(None, {date(2026, 7, 20)}) == (date(2026, 7, 20), True)
 
 
-def test_bet_placer_blocks_bets_within_8h_of_expiry():
-    """place_bet must reject markets whose target_date is < 8h away.
-
-    Prevents the same-day 'opened then immediately lost' bleed (e.g. a bet
-    opened at 20:47 for a 23:59 expiry). The 8h guard is computed from
-    seconds-to-expiry in the target_date_ok check.
-    """
+def test_bet_placer_no_8h_expiry_guard():
+    """place_bet no longer blocks bets within 8h of expiry (removed per config)."""
     import executor.bet_placer as bp
 
     src = inspect.getsource(bp.BetPlacer.place_bet)
-    assert "MIN_HOURS_TO_EXPIRY" in src, "place_bet must define MIN_HOURS_TO_EXPIRY (8h) guard."
-    assert "MIN_HOURS_TO_EXPIRY * 3600" in src, (
-        "place_bet must reject markets with < 8h to expiry (MIN_HOURS_TO_EXPIRY * 3600 seconds)."
-    )
+    assert "MIN_HOURS_TO_EXPIRY" not in src, "8h expiry guard should be removed."
 
 
 if __name__ == "__main__":

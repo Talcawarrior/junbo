@@ -279,72 +279,96 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
         </>
       ) : (
         <>
-          {/* Unified Metric Cards - tek satır */}
-          <section className="grid grid-cols-4 sm:grid-cols-8 gap-2">
+          {/*           {/* Unified Metric Cards - tek satir */}
+          <section className="grid grid-cols-3 sm:grid-cols-6 gap-2">
             {[
-              { 
-                label: "Portföy", 
-                value: `$${kpiData.portfolioValue.toLocaleString("tr-TR", { minimumFractionDigits: 0 })}`, 
-                icon: <Wallet className="h-3 w-3" />, 
-                color: TEAL, 
-                sub: `PnL: ${fmtUsd(kpiData.totalPnl)}`,
-                tooltip: "Nakit + açık pozisyon PnL"
+              {
+                label: "Sermaye",
+                value: `$${kpiData.initial.toLocaleString("tr-TR", { minimumFractionDigits: 0 })}`,
+                icon: <Wallet className="h-3 w-3" />,
+                color: TEAL,
+                sub: "",
+                tooltip: "Baslangic sermayesi"
               },
-              { 
-                label: "Bugünkü", 
-                value: `${kpiData.dailyPnl >= 0 ? "▲" : "▼"} ${fmtUsd(kpiData.dailyPnl)}`, 
-                icon: <TrendingUp className="h-3 w-3" />, 
-                color: kpiData.dailyPnl >= 0 ? "#16A34A" : RED, 
+              {
+                label: "Net kapanmis PnL",
+                value: fmtUsd(kpiData.realizedPnl),
+                icon: <TrendingUp className="h-3 w-3" />,
+                color: kpiData.realizedPnl >= 0 ? "#16A34A" : RED,
+                sub: "",
+                tooltip: "Kapanan betlerden net PnL"
+              },
+              {
+                label: "Toplam sermaye",
+                value: `$${kpiData.initial.toLocaleString("tr-TR", { minimumFractionDigits: 0 })}`,
+                icon: <Wallet className="h-3 w-3" />,
+                color: TEAL,
+                sub: `PnL: ${fmtUsd(kpiData.totalPnl)}`,
+                tooltip: "Baslangic sermayesi + toplam PnL"
+              },
+              {
+                label: "Acik bet toplami",
+                value: fmtUsd(kpiData.openPositionsValue),
+                icon: <Activity className="h-3 w-3" />,
+                color: TEXT_PRIMARY,
+                sub: `${fmtInt(kpiData.openPositions)} bet`,
+                tooltip: "Acik betlerin toplam stake degeri"
+              },
+              {
+                label: "Kullanilabilir",
+                value: fmtUsd(kpiData.availableCash),
+                icon: <Wallet className="h-3 w-3" />,
+                color: TEAL,
+                sub: "",
+                tooltip: "Yeni bet acmak icin kullanilabilir nakit"
+              },
+              {
+                label: "Acik bet PnL",
+                value: fmtUsd(kpiData.unrealizedPnl),
+                icon: <TrendingUp className="h-3 w-3" />,
+                color: kpiData.unrealizedPnl >= 0 ? "#16A34A" : RED,
+                sub: "",
+                tooltip: "Acik pozisyonlarin kagit uzerindeki PnL"
+              },
+              {
+                label: "Kapali+Acik PnL",
+                value: fmtUsd(kpiData.totalPnl),
+                icon: <TrendingUp className="h-3 w-3" />,
+                color: kpiData.totalPnl >= 0 ? "#16A34A" : RED,
+                sub: "",
+                tooltip: "Kapanan + acik pozisyonlarin toplam PnL"
+              },
+              {
+                label: "Bugunku PnL",
+                value: `${kpiData.dailyPnl >= 0 ? "▲" : "▼"} ${fmtUsd(kpiData.dailyPnl)}`,
+                icon: <TrendingUp className="h-3 w-3" />,
+                color: kpiData.dailyPnl >= 0 ? "#16A34A" : RED,
                 sub: "",
                 tooltip: "Son 24 saat PnL"
               },
-              { 
-                label: "Açık", 
-                value: fmtInt(kpiData.openPositions), 
-                icon: <Activity className="h-3 w-3" />, 
-                color: TEXT_PRIMARY, 
-                sub: `Stake: ${fmtUsd(kpiData.openPositionsValue)}`,
-                tooltip: "Açık bahis sayısı"
-              },
-              { 
-                label: "Win%", 
-                value: `%${fmtNum(kpiData.winRate, 0)}`, 
-                icon: <Target className="h-3 w-3" />, 
-                color: TEXT_PRIMARY, 
+              {
+                label: "Win %",
+                value: `%${fmtNum(kpiData.winRate, 0)}`,
+                icon: <Target className="h-3 w-3" />,
+                color: TEXT_PRIMARY,
                 sub: `${fmtInt(kpiData.closedWins)}W/${fmtInt(kpiData.closedLosses)}L`,
-                tooltip: "Kazanma oranı"
+                tooltip: "Kazanma oran"
               },
-              { 
-                label: "ROI", 
-                value: `${kpiData.totalRoi >= 0 ? "+" : ""}${fmtNum(kpiData.totalRoi, 0)}%`, 
-                icon: <TrendingUp className="h-3 w-3" />, 
-                color: kpiData.totalRoi >= 0 ? TEAL : RED, 
+              {
+                label: "ROI",
+                value: `${kpiData.totalRoi >= 0 ? "+" : ""}${fmtNum(kpiData.totalRoi, 0)}%`,
+                icon: <TrendingUp className="h-3 w-3" />,
+                color: kpiData.totalRoi >= 0 ? TEAL : RED,
                 sub: "",
-                tooltip: "Toplam getiri oranı"
+                tooltip: "Toplam getiri oran"
               },
-              { 
-                label: "Kapanan", 
-                value: fmtInt(kpiData.closedBets), 
-                icon: <BarChart3 className="h-3 w-3" />, 
-                color: TEXT_PRIMARY, 
+              {
+                label: "Max acilabilir",
+                value: fmtUsd(kpiData.availableCash),
+                icon: <Activity className="h-3 w-3" />,
+                color: TEAL,
                 sub: "",
-                tooltip: "Toplam kapanan bahis"
-              },
-              { 
-                label: "Max Açılabilir", 
-                value: fmtUsd(kpiData.maxOpenableUsd), 
-                icon: <Activity className="h-3 w-3" />, 
-                color: TEAL, 
-                sub: "",
-                tooltip: "Açılabilecek maksimum tutar"
-              },
-              { 
-                label: "Toplam PnL", 
-                value: fmtUsd(kpiData.totalPnlValue), 
-                icon: <TrendingUp className="h-3 w-3" />, 
-                color: kpiData.totalPnlValue >= 0 ? "#16A34A" : RED, 
-                sub: "",
-                tooltip: "Gerçekleşen toplam PnL"
+                tooltip: "Acilabilecek maksimum tutar"
               },
             ].map((kpi) => (
               <Card key={kpi.label} className="py-2 gap-1 shadow-sm" style={{ borderColor: BORDER }}>
@@ -360,41 +384,6 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
                 </CardContent>
               </Card>
             ))}
-          </section>
-
-          {/* Açık/Kapalı PnL breakdown */}
-          <section className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
-            <Card className="py-2 gap-1 shadow-sm" style={{ borderColor: BORDER }}>
-              <CardContent className="px-2 pb-0 pt-0">
-                <p className="text-[10px] font-semibold" style={{ color: TEXT_MUTED }}>Açık Bet Değeri</p>
-                <p className="text-sm font-bold tabular-nums mt-0.5" style={{ color: TEAL }}>{fmtUsd(kpiData.openPositionsValue)}</p>
-                <p className="text-[10px] mt-0.5 tabular-nums font-medium" style={{ color: TEXT_PRIMARY }}>Max: {fmtUsd(kpiData.maxOpenableUsd)}</p>
-              </CardContent>
-            </Card>
-            <Card className="py-2 gap-1 shadow-sm" style={{ borderColor: BORDER }}>
-              <CardContent className="px-2 pb-0 pt-0">
-                <p className="text-[10px] font-semibold" style={{ color: TEXT_MUTED }}>Toplam PnL</p>
-                <p className="text-sm font-bold tabular-nums mt-0.5" style={{ color: kpiData.totalPnlValue >= 0 ? "#16A34A" : RED }}>{fmtUsd(kpiData.totalPnlValue)}</p>
-                <div className="flex justify-between mt-0.5">
-                  <p className="text-[10px] tabular-nums font-medium" style={{ color: TEXT_PRIMARY }}>Gerçekleşen</p>
-                  <p className="text-[10px] tabular-nums font-medium" style={{ color: kpiData.realizedPnl >= 0 ? TEAL : RED }}>{fmtUsd(kpiData.realizedPnl)}</p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="py-2 gap-1 shadow-sm" style={{ borderColor: BORDER }}>
-              <CardContent className="px-2 pb-0 pt-0">
-                <p className="text-[10px] font-semibold" style={{ color: TEXT_MUTED }}>Açık PnL</p>
-                <p className="text-sm font-bold tabular-nums mt-0.5" style={{ color: kpiData.unrealizedPnl >= 0 ? TEAL : RED }}>{fmtUsd(kpiData.unrealizedPnl)}</p>
-                <p className="text-[10px] mt-0.5 tabular-nums font-medium" style={{ color: TEXT_PRIMARY }}>Unrealized</p>
-              </CardContent>
-            </Card>
-            <Card className="py-2 gap-1 shadow-sm" style={{ borderColor: BORDER }}>
-              <CardContent className="px-2 pb-0 pt-0">
-                <p className="text-[10px] font-semibold" style={{ color: TEXT_MUTED }}>Kapalı Bahis</p>
-                <p className="text-sm font-bold tabular-nums mt-0.5" style={{ color: TEXT_PRIMARY }}>{fmtInt(kpiData.closedBets)}</p>
-                <p className="text-[10px] mt-0.5 tabular-nums font-medium" style={{ color: TEXT_PRIMARY }}>{fmtInt(kpiData.closedWins)}W / {fmtInt(kpiData.closedLosses)}L</p>
-              </CardContent>
-            </Card>
           </section>
         </>
       )}

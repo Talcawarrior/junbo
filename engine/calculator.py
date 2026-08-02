@@ -120,9 +120,7 @@ class Calculator:
 
             # ── Model blacklist filter ────────────────────────────────────
             # Remove unreliable model-city pairs identified by backtest.
-            blacklisted = get_blacklisted_models(
-                market.city_code or "", market.metric or "temperature_max"
-            )
+            blacklisted = get_blacklisted_models(market.city_code or "", market.metric or "temperature_max")
             if blacklisted:
                 removed = []
                 for bl_model in blacklisted:
@@ -308,7 +306,6 @@ class Calculator:
 
             should_bet = (
                 recommended_side == "YES"  # YES-only: asla NO
-                and net_edge >= effective_min_edge
                 and len(forecast_values) >= bot_config.strategy.min_sources
                 and 0 <= days_ahead <= bot_config.strategy.max_days_ahead
                 and liquidity_ok
