@@ -138,11 +138,10 @@ class BetPlacer:
             # Guard: skip resolved markets AND bets too close to expiry.
             # Vadesine 8 saatten az kalansa bahis acilmaz (ani kayiplari onlemek
             # icin - orn. ayni gun acilip hemen loss yazan bahisler).
-            # DISABLED: bet on all markets regardless of time to expiry
             _now = datetime.now(timezone.utc).replace(tzinfo=None)
             MIN_HOURS_TO_EXPIRY = 8
             date_ok = True
-            if False and market.target_date:
+            if market.target_date:
                 secs_left = (market.target_date - _now).total_seconds()
                 if secs_left <= 0:
                     date_ok = False  # vadesi gecmis
