@@ -559,7 +559,7 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
   const [filterDate, setFilterDate] = useState<string>("");
   const dateInputRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<"date" | "pnl" | "edge">("date");
+  const [sortBy, setSortBy] = useState<"date" | "pnl">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   const filtered = useMemo(() => {
@@ -587,7 +587,6 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
       let cmp = 0;
       if (sortBy === "date") cmp = 0;
       else if (sortBy === "pnl") cmp = a.pnl - b.pnl;
-      else if (sortBy === "edge") cmp = a.edge - b.edge;
       return sortDir === "desc" ? -cmp : cmp;
     });
     return data;
@@ -601,12 +600,12 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
   const filteredPnl = filtered.reduce((s, t) => s + t.pnl, 0);
   const winCount = filtered.filter((t) => t.result === "WIN").length;
 
-  function toggleSort(col: "date" | "pnl" | "edge") {
+  function toggleSort(col: "date" | "pnl") {
     if (sortBy === col) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
     else { setSortBy(col); setSortDir("desc"); }
   }
 
-  const SortIcon = ({ col }: { col: "date" | "pnl" | "edge" }) => {
+  const SortIcon = ({ col }: { col: "date" | "pnl" }) => {
     if (sortBy !== col) return <Minus className="h-3 w-3 inline ml-1 opacity-30" />;
     return sortDir === "desc" ? <ArrowDownRight className="h-3 w-3 inline ml-1" /> : <ArrowUpRight className="h-3 w-3 inline ml-1" />;
   };
@@ -694,6 +693,7 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
                 { value: "SL" as const, label: "Stop Loss" },
                 { value: "TS" as const, label: "Trailing Stop" },
                 { value: "TD" as const, label: "Time Decay" },
+                { value: "RT" as const, label: "Rotation" },
               ]).map((v) => (
                 <button key={v.value} onClick={() => setFilterExit(v.value)}
                   className="px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors"
@@ -781,7 +781,6 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right" style={{ color: TEXT_MUTED }}>Çıkış</TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => toggleSort("pnl")}>PnL <SortIcon col="pnl" /></TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: TEXT_MUTED }}>Sonuç</TableHead>
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => toggleSort("edge")}>Edge <SortIcon col="edge" /></TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-center" style={{ color: TEXT_MUTED }}>Neden</TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: TEXT_MUTED }}>Kapanış</TableHead>
                   </TableRow>
@@ -802,7 +801,6 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
                           {t.result === "WIN" ? "✓ WIN" : t.result === "PARTIAL_TP" ? "◐ PT" : "✗ LOSS"}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right font-mono text-sm tabular-nums" style={{ color: TEXT_PRIMARY }}>{t.edge}%</TableCell>
                       <TableCell className="text-center">
                         {(() => {
 const exitLabels: Record<string, { label: string; color: string; bg: string }> = {
