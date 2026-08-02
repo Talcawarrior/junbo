@@ -1151,9 +1151,6 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
                   <div key={i} className="flex items-start gap-2 text-[11px] py-0.5 border-b last:border-0" style={{ borderColor: `${BORDER}60` }}>
                     <span className="tabular-nums shrink-0 pt-0.5 font-mono" style={{ color: TEXT_MUTED, fontSize: 10 }}>{pr.time ? new Date(pr.time).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "?"}</span>
                     <span style={{ color: TEXT_PRIMARY }} className="flex-1">{pr.reason}</span>
-                    <Badge className="text-[9px] px-1.5 py-0 h-4 font-mono shrink-0" style={{ backgroundColor: TEAL_LIGHT, color: TEAL }}>
-                      %{fmtNum(pr.edge_pct, 1)}
-                    </Badge>
                   </div>
                 ))
               )}

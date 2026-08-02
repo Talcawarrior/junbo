@@ -654,6 +654,17 @@ class BetPlacer:
         # Fill price + slippage
         raw_fill = float(market.yes_price or 0.5)
 
+        # 8-saatlik settlement korumasi
+        if market.target_date:
+            _now = datetime.now(timezone.utc).replace(tzinfo=None)
+            _secs_left = (market.target_date - _now).total_seconds()
+            if _secs_left < 8 * 3600:
+                logger.info(
+                    "open_bet_on_market: %s target=%s, kalan=%.1fs < 8h - skipped",
+                    market.id, market.target_date, _secs_left,
+                )
+                return None
+
         # Price gate: 0.99'dan (ve ustunden) alimi yasakla.
         _max_entry = float(getattr(bot_config.strategy, "max_entry_price", 0.99) or 0.99)
         if raw_fill >= _max_entry:
