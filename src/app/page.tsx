@@ -689,11 +689,8 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
               {([
                 { value: "ALL" as const, label: "Tümü" },
                 { value: "ST" as const, label: "Settlement" },
-                { value: "TP" as const, label: "Take Profit" },
-                { value: "SL" as const, label: "Stop Loss" },
-                { value: "TS" as const, label: "Trailing Stop" },
-                { value: "TD" as const, label: "Time Decay" },
                 { value: "RT" as const, label: "Rotation" },
+                { value: "PT" as const, label: "Partial TP" },
               ]).map((v) => (
                 <button key={v.value} onClick={() => setFilterExit(v.value)}
                   className="px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors"
