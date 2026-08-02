@@ -165,58 +165,12 @@ def test_portfolio_cash_decreases_after_bet():
             )
             bet = session.query(Bet).filter(Bet.market_id == "test-faz5-nyc").first()
             assert bet is not None
-            # Level 1 = 50% of recommended, cash -= Level 1 + entry_fee
-            expected_level1 = bet.amount * 0.5
             entry_fee = bet.entry_fee or 0.0
-            expected_cash = round(initial_cash - expected_level1 - entry_fee, 2)
+            # Single-fill execution: cash -= complete stake + entry fee.
+            expected_cash = round(initial_cash - bet.amount - entry_fee, 2)
             assert abs(pf.cash_balance - expected_cash) < 0.1, (
                 f"cash={pf.cash_balance}, expected={expected_cash} "
-                f"(bet={bet.amount}, l1={expected_level1}, fee={entry_fee})"
+                f"(bet={bet.amount}, fee={entry_fee})"
             )
     finally:
         _clean()
-
-
-def test_ladder_data_json():
-    _setup_market_and_forecasts()
-    try:
-        from engine.calculator import Calculator
-
-        calc = Calculator()
-        calc.analyze_market("test-faz5-nyc")
-        from jobs.scheduler import run_place_bets
-
-        run_place_bets()
-        with get_session() as session:
-            bet = session.query(Bet).filter(Bet.market_id == "test-faz5-nyc").first()
-            assert bet is not None
-            ladder = json.loads(bet.ladder_data)
-            assert isinstance(ladder, list), "ladder_data is not a list"
-            assert len(ladder) == 3, f"Expected 3 levels, got {len(ladder)}"
-            for level in ladder:
-                assert "status" in level
-                assert level["status"] in (
-                    "filled",
-                    "pending",
-                ), f"Bad status: {level['status']}"
-            # L1 is immediately 'filled' at placement (Bug B fix — prevents
-            # double-debit in run_update_prices). L2/L3 remain pending.
-            assert ladder[0]["status"] == "filled", (
-                f"Level 1 should be filled: {ladder[0]}"
-            )
-            assert ladder[1]["status"] == "pending", (
-                f"Level 2 should be pending: {ladder[1]}"
-            )
-            assert ladder[2]["status"] == "pending", (
-                f"Level 3 should be pending: {ladder[2]}"
-            )
-            # L1 should also have a filled_at timestamp
-            assert ladder[0].get("filled_at") is not None, "Level 1 missing filled_at"
-    finally:
-        _clean()
-
-
-if __name__ == "__main__":
-    import pytest
-
-    pytest.main([__file__, "-v"])

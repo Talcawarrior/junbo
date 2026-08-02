@@ -622,15 +622,6 @@ def get_bets(status: str = "", limit: int = 100, offset: int = 0):
 # reset, ws, loops, run_cli) exactly as they were.
 
 
-def _safe_parse_ladder(raw):
-    if not raw:
-        return []
-    try:
-        data = json.loads(raw) if isinstance(raw, str) else raw
-        return data if isinstance(data, list) else []
-    except Exception:
-        return []
-
 
 @app.get("/api/signals")
 def get_signals():
@@ -684,7 +675,6 @@ def get_signals():
                     "entry_edge": entry_edge,
                     "live_edge": live_edge,
                     "move_pct": move_pct,
-                    "ladder_orders": _safe_parse_ladder(bet.ladder_data),
                     "placed_at": bet.placed_at.isoformat() if bet.placed_at else None,
                     "resolution_date": res_date.isoformat() if res_date else None,
                     "status": bet.status,
@@ -975,7 +965,7 @@ def get_slippage():
 
 @app.post("/api/cleanup")
 def cleanup_old_data(_key: str = Depends(verify_api_key)):
-    """Cancel stale open bets and refund their stakes (ladder-aware)."""
+    """Cancel stale open bets and refund their single-fill stakes."""
     db = get_db_session()
     try:
         _ts = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -991,16 +981,8 @@ def cleanup_old_data(_key: str = Depends(verify_api_key)):
             bet.status = "cancelled"
             bet.settled_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
-            # Calculate the actual debited amount â€” for ladder bets only
-            # filled rungs were debited; for flat bets the full amount.
             from utils.accounting import credit_sale
-
-            ladder = _safe_parse_ladder(bet.ladder_data)
-            if ladder:
-                filled_amount = sum(float(rung.get("amount", 0)) for rung in ladder if rung.get("status") == "filled")
-                refund_amount = filled_amount if filled_amount > 0 else float(bet.amount or 0)
-            else:
-                refund_amount = float(bet.amount or 0)
+            refund_amount = float(bet.amount or 0)
 
             credit_sale(db, refund_amount, f"cleanup_refund:bet_{bet.id}")
             cancelled += 1

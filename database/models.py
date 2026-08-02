@@ -176,7 +176,6 @@ class Bet(Base):
     side = Column(String)  # YES/NO/HIGH/LOW
     realized_pnl = Column(Float, default=0.0)
     status = Column(String, default=BetStatus.OPEN.value)
-    ladder_data = Column(Text)  # JSON serialized
     result_data = Column(Text)  # JSON serialized
 
     # Blueprint Specific properties

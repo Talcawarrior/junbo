@@ -388,32 +388,7 @@ class BetPlacer:
 
             bet.potential_payout = bet.amount / bet.price if bet.price > 0 else 0
 
-            # Paper ladder: if edge >= 0.05, create a 3-level ladder
-            ladder_orders = []
-            edge_val = float(analysis.edge or 0.0)
-            if abs(edge_val) >= 0.05:
-                for lvl, pct in [(1, 0.50), (2, 0.30), (3, 0.20)]:
-                    lvl_amount = round(proposed_amount * pct, 2)
-                    if lvl == 1:
-                        lvl_price = fill_price
-                    elif lvl == 2:
-                        lvl_price = fill_price * 0.98
-                    else:
-                        lvl_price = fill_price * 0.95
-                    # Clamp price to [0.01, 0.99]
-                    lvl_price = max(0.01, min(0.99, round(lvl_price, 4)))
-                    lvl_shares = round(lvl_amount / lvl_price, 4) if lvl_price > 0 else 0.0
-                    ladder_orders.append(
-                        {
-                            "level": lvl,
-                            "price": lvl_price,
-                            "amount": lvl_amount,
-                            "shares": lvl_shares,
-                            "status": "pending",
-                        }
-                    )
-            bet.ladder_data = json.dumps(ladder_orders) if ladder_orders else "[]"
-
+            # Single-fill execution: no ladder or deferred rungs.
             # Live vs Paper execution logic
             # HARD GUARD: always paper unless LIVE_TRADING_ENABLED=true
             _live_allowed = (not Config.DRY_RUN) and os.getenv("LIVE_TRADING_ENABLED", "false").lower() == "true"
@@ -458,27 +433,10 @@ class BetPlacer:
                     f"({shares:.2f} shares)"
                 )
 
-            # Deduct stake from portfolio cash — via central accounting API.
-            # Ladder: L1 is filled immediately; L2/L3 stay pending.
+            # Deduct the complete single-fill stake from portfolio cash.
             from utils.accounting import debit_stake
 
             initial_stake = proposed_amount
-            if ladder_orders:
-                l1_amount = ladder_orders[0].get("amount") if isinstance(ladder_orders[0], dict) else None
-                if l1_amount and l1_amount > 0:
-                    initial_stake = l1_amount
-                    # Bet.amount/shares represent the filled position, not
-                    # the notional of pending ladder rungs. This keeps
-                    # exposure, cash, and settlement PnL aligned.
-                    bet.amount = round(initial_stake, 2)
-                    bet.stake_amount = round(initial_stake, 2)
-                    bet.shares = float(ladder_orders[0].get("shares", shares))
-                    bet.potential_payout = bet.amount / bet.price if bet.price > 0 else 0
-                    # Mark L1 as filled immediately (prevents double-debit in run_update_prices)
-                    ladder_orders[0]["status"] = "filled"
-                    ladder_orders[0]["filled_at"] = datetime.now(timezone.utc).isoformat()
-                    # Persist updated ladder back to bet.ladder_data
-                    bet.ladder_data = json.dumps(ladder_orders)
             try:
                 debit_stake(session, initial_stake, f"bet_open:{bet.market_id}")
                 # Also debit the Polymarket taker fee paid at match time.

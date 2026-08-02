@@ -1,8 +1,7 @@
 """Tests for utils/accounting.py — centralized cash operations.
 
 Verifies:
-  1. Ladder fill no-double-debit: ``debit_stake`` is idempotent in principle
-     (scheduler skips ``status=="filled"`` rungs).
+  1. Single-fill stake deduction.
   2. Early exit returns principal: ``credit_sale`` of exact stake → cash unchanged.
   3. Early exit with profit: ``credit_sale`` of > stake → cash grows.
   4. Negative cash guard: ``debit_stake`` with insufficient funds raises ValueError.
@@ -50,27 +49,22 @@ def _portfolio_cash() -> float:
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 
-def test_ladder_no_double_debit():
-    """Ladder fill: only ``status=="pending"`` rungs trigger debit_stake.
-
-    If a rung is already ``"filled"``, the scheduler will skip it, so the
-    stake is never debited twice.  This test verifies the accounting function
-    itself is a simple deduction (idempotency lives in the caller).
-    """
+def test_single_fill_deduction():
+    """A single-fill bet deducts its complete stake exactly once."""
     _clean()
     with get_session() as session:
         session.add(Portfolio(id=1, cash_balance=1000.0, total_value=1000.0))
         session.commit()
 
     with get_session() as session:
-        # Simulate filling a single ladder rung of $50
+        # Simulate opening a single-fill bet of $50
         cash_before = _portfolio_cash()
-        debit_stake(session, 50.0, "ladder_fill:test-rung-1")
+        debit_stake(session, 50.0, "bet_open:test-single-fill")
         session.commit()
         first_deduction = cash_before - _portfolio_cash()
 
         # Second call with same reason — would be a double-debit in real code
-        debit_stake(session, 50.0, "ladder_fill:test-rung-1")
+        debit_stake(session, 50.0, "bet_open:test-single-fill")
         session.commit()
         assert _portfolio_cash() == 900.0, (
             f"Expected 900.0 after two $50 debits, got {_portfolio_cash()}"

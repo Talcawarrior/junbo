@@ -39,11 +39,9 @@ class SimpleSignal:
     edge: float = 0.0
     probability: float = 0.5
     bet_size: float = 0.0
-    ladder_orders: list = None  # type: ignore[assignment]
     side: str = "YES"
 
     def __init__(self, **kwargs):
-        self.ladder_orders = []
         for k, v in kwargs.items():
             setattr(self, k, v)
 
@@ -612,38 +610,6 @@ class BettingEngine:
             "side": side,
         }
 
-    def create_ladder_orders(self, signal: dict, bet_size: float) -> list[dict]:
-        """Create 3-level ladder orders. All start as PENDING."""
-        edge = signal.get("edge", 0)
-        if edge < 0.05:
-            return []
-
-        current_price = signal["market_price"]
-        ladder = [
-            {
-                "level": 1,
-                "price": round(current_price, 4),  # Level 1 = market price
-                "size": round(bet_size * 0.5, 2),
-                "status": "pending",
-                "filled_at": None,
-            },
-            {
-                "level": 2,
-                "price": max(0.01, round(current_price * 0.98, 4)),
-                "size": round(bet_size * 0.3, 2),
-                "status": "pending",
-                "filled_at": None,
-            },
-            {
-                "level": 3,
-                "price": max(0.01, round(current_price * 0.95, 4)),
-                "size": round(bet_size * 0.2, 2),
-                "status": "pending",
-                "filled_at": None,
-            },
-        ]
-        return ladder
-
     def calculate_position_size(
         self, signal: dict, portfolio_value: float, risk_manager
     ) -> float:
@@ -755,12 +721,8 @@ class BettingEngine:
             edge=signal_dict.get("edge", 0),
             probability=model_prob,
             bet_size=bet_size,
-            ladder_orders=[],
             side=side,
         )
-
-        if sig.edge > 0.05:
-            sig.ladder_orders = self.create_ladder_orders(signal_dict, sig.bet_size)
 
         return sig
 
@@ -809,11 +771,6 @@ class BettingEngine:
                 side=getattr(signal, "side", "YES"),
                 status="active",
                 placed_at=datetime.now(timezone.utc),
-                ladder_data=(
-                    json.dumps(getattr(signal, "ladder_orders", []))
-                    if hasattr(signal, "ladder_orders")
-                    else None
-                ),
             )
             if self.db:
                 self.db.add(bet)

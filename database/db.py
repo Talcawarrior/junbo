@@ -67,6 +67,9 @@ def init_db():
     _migrate_add_column("historical_calibrations", "bias", "FLOAT")
     # Migration: add entry_fee to bets (Polymarket taker fee at entry time)
     _migrate_add_column("bets", "entry_fee", "FLOAT")
+    # Ladder execution was removed. Drop the legacy column from existing
+    # SQLite databases so the schema cannot silently resurrect it.
+    _migrate_drop_column("bets", "ladder_data")
 
     _DB_INITIALIZED = True
     logger.info("Database initialized at %s with WAL mode", DB_PATH)
@@ -87,6 +90,17 @@ def _migrate_add_column(table: str, column: str, col_type: str) -> None:
             conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
             conn.commit()
             logger.info("Migration: added column %s.%s (%s)", table, column, col_type)
+
+
+def _migrate_drop_column(table: str, column: str) -> None:
+    """Idempotently remove a retired SQLite column."""
+    with engine.connect() as conn:
+        row = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+        existing = [r[1] for r in row]
+        if column in existing:
+            conn.execute(text(f"ALTER TABLE {table} DROP COLUMN {column}"))
+            conn.commit()
+            logger.info("Migration: removed retired column %s.%s", table, column)
 
 
 @contextmanager

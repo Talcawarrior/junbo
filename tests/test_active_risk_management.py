@@ -32,7 +32,6 @@ def make_mock_bet(**kwargs):
     bet.realized_pnl = kwargs.get("realized_pnl", 0.0)
     bet.pnl = kwargs.get("pnl", 0.0)
     bet.status = kwargs.get("status", "placed")
-    bet.ladder_data = kwargs.get("ladder_data", None)
     bet.result_data = kwargs.get("result_data", None)
     bet.close_reason = kwargs.get("close_reason", None)
     bet.closed_at = kwargs.get("closed_at", None)

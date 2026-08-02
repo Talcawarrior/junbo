@@ -8,7 +8,7 @@
 
 ## 1. Proje Nedir
 
-Junbo, Polymarket uzerinde hava durumu kaynakli piyasalarda otomatik alim-satim yapan bir Python botudur. Bot, 8 farkli hava durumu modelinden (GFS, ECMWF, GEM, ICON, JMA, CMA, UKMO, MeteoFrance) tahminleri agirlikli olarak birlestirir, Polymarket'teki fiyatlari karsilastirir ve deger avantaji (edge) tespit ettiginde kademeli (ladder) bahisler acar.
+Junbo, Polymarket uzerinde hava durumu kaynakli piyasalarda otomatik alim-satim yapan bir Python botudur. Bot, 8 farkli hava durumu modelinden (GFS, ECMWF, GEM, ICON, JMA, CMA, UKMO, MeteoFrance) tahminleri agirlikli olarak birlestirir, Polymarket'teki fiyatlari karsilastirir ve deger avantaji (edge) tespit ettiginde tek dolumlu bahisler acar.
 
 Botu sifirdan kuran birinin bilmesi gereken temel ozellikler:
 
@@ -45,7 +45,7 @@ Junbo/
     market_parser.py      # Piyasa sorularini cozumleme (HIGH/LOW/RANGE), sehir eslesmesi
     decision.py           # BetDecision sinifi
   executor/
-    bet_placer.py         # Bahis yerlestirme (kagit ve canli mod), ladder order
+    bet_placer.py         # Bahis yerlestirme (kagit ve canli mod), tek dolum
     settler.py            # Gamma API uzerinden sonuc kontrolu ve karsilama
   utils/
     kelly.py              # Kelly katsayisi hesaplama
@@ -247,7 +247,7 @@ Dashboard Next.js 16 + shadcn/ui + Recharts ile yapilmis modern bir web arayuzud
 
 - Bot durum rozeti (RUNNING/STOPPED)
 - Portfoy kartlari: Net Sermaye, Acik Bahis sayisi, Acik/Kapali/Toplam PnL, Gunluk ROI
-- Aktif Sinyaller tablosu: Giris fiyati, guncel fiyat, edge, PnL, ladder durumu
+- Aktif Sinyaller tablosu: Giris fiyati, guncel fiyat, edge ve PnL
 - Global Market Watch: Piyasadaki tum hava durumu bahisleri
 - Gecmis Bahisler: Kazanilan/kaybedilen bahisler, exit tipi (TP/SL/TS/TD/ST)
 - Analytics: Portfolio grafigi, kazanma orani
@@ -394,12 +394,10 @@ Acik pozisyonlar icin surekli risk kontrolu:
 | Time Decay (TD) | 24 saat | Kapanis tarihi yaklasirken, %10 zarardaysa kapat |
 | Model Reversal | - | Model tahmini tersine donerse pozisyon kapatilir |
 
-### 8.4 Ladder Order
+### 8.4 Emir Yürütme
 
-Birden fazla fiyat kademesinde kademeli bahis:
-- Fiyat dustukce ek bahisler acilir
-- Her kademe icin ayri fiyat hedefi belirlenir
-- Toplam exposure siniri korunur
+Her pozisyon tek bir dolumla açılır. Fiyat düştükçe ek emir veya ek kademe
+açılmaz; `amount`, `shares`, nakit ve PnL aynı tek dolum pozisyonunu temsil eder.
 
 ### 8.5 Red Flags (Otomatik Uyarilar)
 
@@ -442,7 +440,7 @@ SQLite veritabani `data/bot.db` dosyasinda saklanir. WAL (Write-Ahead Logging) m
 - id, market_id, analysis_id, city_code, city, outcome, stake, stake_amount
 - entry_price, shares, current_price, pnl, unrealized_pnl
 - fair_value, expected_value, strike_temp, bet_type, side
-- realized_pnl, status, ladder_data (JSON), result_data (JSON)
+- realized_pnl, status, result_data (JSON)
 - amount, price, potential_payout, order_id, tx_hash, error_message
 - entry_fee, placed_at, settled_at, close_reason, closed_at
 

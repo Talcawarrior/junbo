@@ -166,24 +166,6 @@ def test_sia_brier_input():
     print("✅ Test 5: SIALoop uses per-model probability for Brier score")
 
 
-def test_ladder_pending():
-    """Test 6: Ladder orders start as PENDING."""
-    from engine.strategy import BettingEngine
-
-    be = BettingEngine()
-    signal = {"market_price": 0.35, "edge": 0.06}
-    ladder = be.create_ladder_orders(signal, 30.0)
-    assert len(ladder) == 3, f"Expected 3 levels, got {len(ladder)}"
-    for lvl in ladder:
-        assert lvl["status"] == "pending", (
-            f"Level {lvl['level']} status is '{lvl['status']}', expected 'pending'"
-        )
-        assert "filled_at" in lvl, f"Level {lvl['level']} missing 'filled_at'"
-    print(
-        f"✅ Test 6: Ladder pending OK — {ladder[0]['price']}, {ladder[1]['price']}, {ladder[2]['price']}"
-    )
-
-
 def test_exposure_query():
     """Test 7: RiskManager.get_total_exposure uses Bet.amount."""
     import inspect
@@ -244,7 +226,6 @@ if __name__ == "__main__":
     test_kelly_bankroll()
     test_sia_status()
     test_sia_brier_input()
-    test_ladder_pending()
     test_exposure_query()
     test_risk_manager_init()
     test_betting_engine_ev_full()

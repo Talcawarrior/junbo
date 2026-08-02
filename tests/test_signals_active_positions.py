@@ -1,10 +1,4 @@
-"""Tests for /api/signals active positions — verifies the b.ladder_data fix.
-
-These tests ensure that:
-1. /api/signals returns active bets without NameError
-2. Bad ladder_data JSON does not crash the endpoint
-3. status.total_bets and signals.count are consistent
-"""
+"""Tests for /api/signals active positions."""
 
 import pytest
 
@@ -32,10 +26,6 @@ def test_signals_returns_active_bet_without_error(client):
     # If there are active bets, validate their shape
     for sig in body["signals"]:
         assert "id" in sig
-        assert "ladder_orders" in sig
-        assert isinstance(sig["ladder_orders"], list), (
-            f"ladder_orders should be list, got {type(sig['ladder_orders'])}"
-        )
 
 
 def test_signals_no_error_on_any_bet(client):
@@ -63,18 +53,4 @@ def test_status_signals_consistency(client):
     if total_bets > 0:
         assert signals_count > 0, (
             f"Consistency violation: status.total_bets={total_bets} but signals.count={signals_count}"
-        )
-
-
-def test_signals_ladder_orders_is_list_for_each_bet(client):
-    """Every bet in /api/signals must have ladder_orders as a list."""
-    resp = client.get("/api/signals")
-    assert resp.status_code == 200
-    body = resp.json()
-    if "error" in body:
-        pytest.fail(f"/api/signals returned error: {body['error']}")
-    for sig in body.get("signals", []):
-        lo = sig.get("ladder_orders")
-        assert isinstance(lo, list), (
-            f"Bet {sig.get('id')}: ladder_orders={type(lo)}, expected list"
         )

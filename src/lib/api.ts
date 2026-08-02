@@ -67,7 +67,6 @@ export interface Signal {
   entry_edge: number | null;
   live_edge: number | null;
   move_pct: number | null;
-  ladder_orders: unknown[];
   placed_at: string | null;
   resolution_date: string | null;
   status: string;

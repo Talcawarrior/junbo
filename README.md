@@ -436,7 +436,6 @@ unrealized_pnl        REAL
 entry_fee             REAL (polymarket fee at bet time)
 settled_at            TEXT
 closed_at             TEXT
-ladder_data           TEXT
 ```
 
 #### Portfolio
@@ -1039,7 +1038,6 @@ cp config/settings.py config/settings.py.backup
       "unrealized_pnl": 0.6,
       "fair_value": 0.65,
       "edge": 0.13,
-      "ladder_orders": [],
       "status": "active"
     }
   ],

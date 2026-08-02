@@ -1,8 +1,7 @@
 """
-Faz 4 tests: price update, ladder fill, unrealized PnL, portfolio total_value.
+Faz 4 tests: price update, unrealized PnL, portfolio total_value.
 """
 
-import json
 import os
 import tempfile
 
@@ -61,34 +60,6 @@ def _setup():
         )
         session.add(market)
 
-        ladder_data = json.dumps(
-            [
-                {
-                    "level": 1,
-                    "price": 0.35,
-                    "size": 5.0,
-                    "amount": 5.0,
-                    "shares": 14.29,
-                    "status": "filled",
-                },
-                {
-                    "level": 2,
-                    "price": 0.343,
-                    "size": 3.0,
-                    "amount": 3.0,
-                    "shares": 8.75,
-                    "status": "pending",
-                },
-                {
-                    "level": 3,
-                    "price": 0.3325,
-                    "size": 2.0,
-                    "amount": 2.0,
-                    "shares": 6.02,
-                    "status": "pending",
-                },
-            ]
-        )
         bet = Bet(
             market_id="test-faz4-ladder",
             side="YES",
@@ -99,7 +70,6 @@ def _setup():
             shares=28.57,
             status="placed",
             unrealized_pnl=0.0,
-            ladder_data=ladder_data,
         )
         session.add(bet)
 
@@ -126,7 +96,6 @@ def _setup():
             shares=57.14,
             status="placed",
             unrealized_pnl=0.0,
-            ladder_data="[]",
         )
         session.add(bet2)
         session.commit()
@@ -138,50 +107,6 @@ def _teardown_module():
         os.unlink(_db_path)
     except Exception:
         pass
-
-
-def test_ladder_price_drops_trigger_fill():
-    """YES bet + market price drops -> level 2 should fill (trigger at 0.343, current 0.34)."""
-    _setup()
-    try:
-        from jobs.scheduler import run_update_prices
-
-        result = run_update_prices()
-        assert "güncellendi" in result, f"Unexpected result: {result}"
-
-        with get_session() as session:
-            bet = session.query(Bet).filter(Bet.market_id == "test-faz4-ladder").first()
-            assert bet is not None
-            # Price updated
-            assert bet.current_price == 0.34, f"Expected 0.34, got {bet.current_price}"
-            # Unrealized PnL: 28.57 * (0.34 - 0.35) = -0.2857 ~ -0.29
-            assert bet.unrealized_pnl is not None
-            assert bet.unrealized_pnl < 0, (
-                f"Expected negative PnL, got {bet.unrealized_pnl}"
-            )
-
-            # Ladder: level 2 should be filled (trigger 0.343 >= current 0.34)
-            ladder = json.loads(bet.ladder_data)
-            assert ladder[1]["status"] == "filled", f"Level 2 not filled: {ladder[1]}"
-            assert ladder[2]["status"] == "pending", (
-                f"Level 3 should still be pending: {ladder[2]}"
-            )
-            assert "filled_at" in ladder[1], "Level 2 missing filled_at"
-
-            # Level 2 amount 3.0 deducted from cash (990 - 3 = 987)
-            pf = session.query(Portfolio).filter(Portfolio.id == 1).first()
-            assert pf is not None
-            assert pf.cash_balance == 987.0, f"Expected 987.0, got {pf.cash_balance}"
-
-            # total_value = cash + open_exposure + unrealized
-            # cash=987, exposure=10(YES)+20(NO)=30, unrealized~-0.29
-            # total = 987 + 30 + (-0.29) = 1016.71
-            assert pf.total_value is not None
-            assert abs(pf.total_value - 1016.71) < 0.5, (
-                f"total_value={pf.total_value}, expected ~1016.71"
-            )
-    finally:
-        _clean()
 
 
 def test_no_side_unrealized_pnl():
@@ -212,40 +137,6 @@ def test_no_side_unrealized_pnl():
             assert bet.unrealized_pnl < 0, (
                 f"Expected negative PnL for NO, got {bet.unrealized_pnl}"
             )
-    finally:
-        _clean()
-
-
-def test_ladder_no_price_change_no_fill():
-    """Price unchanged -> no ladder fills."""
-    _setup()
-    try:
-        with get_session() as session:
-            m = (
-                session.query(WeatherMarket)
-                .filter(WeatherMarket.id == "test-faz4-ladder")
-                .first()
-            )
-            m.yes_price = 0.35  # Same as entry
-            session.commit()
-
-        from jobs.scheduler import run_update_prices
-
-        run_update_prices()
-
-        with get_session() as session:
-            bet = session.query(Bet).filter(Bet.market_id == "test-faz4-ladder").first()
-            ladder = json.loads(bet.ladder_data)
-            assert ladder[1]["status"] == "pending", (
-                f"Level 2 should be pending: {ladder[1]}"
-            )
-            assert ladder[2]["status"] == "pending", (
-                f"Level 3 should be pending: {ladder[2]}"
-            )
-            # Cash unchanged
-            pf = session.query(Portfolio).filter(Portfolio.id == 1).first()
-            assert pf is not None
-            assert pf.cash_balance == 990.0, f"Expected 990.0, got {pf.cash_balance}"
     finally:
         _clean()
 

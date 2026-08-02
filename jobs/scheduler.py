@@ -1,6 +1,5 @@
 """Independent scheduled job executors."""
 
-import json
 import logging
 import subprocess
 import sys
@@ -111,7 +110,7 @@ def run_place_bets():
 
 def run_update_prices(session=None):
     """
-    Refresh `current_price`, fill ladder orders, and update `unrealized_pnl`
+    Refresh `current_price` and update `unrealized_pnl`
     on every open bet. Updates Portfolio.total_value at the end.
     Optional session for batched cycles.
     """
@@ -155,49 +154,6 @@ def run_update_prices(session=None):
             # so the same (current - entry) * shares formula works for both sides.
             bet.unrealized_pnl = round(compute_unrealized_pnl(shares, current, entry), 2)
 
-            # 2. Ladder fill check — only status=="pending" rungs fill.
-            # L1 is already "filled" at open (bet_placer), so safe from double-debit.
-            from utils.accounting import debit_stake
-
-            if bet.ladder_data:
-                try:
-                    ladder = json.loads(bet.ladder_data) if isinstance(bet.ladder_data, str) else bet.ladder_data
-                    if isinstance(ladder, list):
-                        filled_amount = 0.0
-                        for rung in ladder:
-                            if rung.get("status") == "pending":
-                                trigger_price = float(rung.get("price", 0))
-                                rung_size = float(rung.get("size", rung.get("amount", 0)))
-                                # current is already in bet's side terms
-                                # (YES side = yes_price, NO side = 1 - yes_price)
-                                # Fill when current side price drops to/below trigger
-                                should_fill = current <= trigger_price
-                                if should_fill and rung_size > 0:
-                                    rung["status"] = "filled"
-                                    rung["filled_at"] = datetime.now(timezone.utc).isoformat()
-                                    filled_amount += rung_size
-                                    rung_shares = float(rung.get("shares", 0.0) or 0.0)
-                                    prior_amount = float(bet.amount or 0.0)
-                                    prior_shares = float(bet.shares or 0.0)
-                                    # Expand the filled position and keep a
-                                    # weighted average entry for PnL.
-                                    bet.amount = round(prior_amount + rung_size, 2)
-                                    bet.shares = prior_shares + rung_shares
-                                    if bet.shares > 0:
-                                        bet.entry_price = round(
-                                            (prior_shares * entry + rung_shares * trigger_price) / bet.shares,
-                                            6,
-                                        )
-                        if filled_amount > 0:
-                            bet.ladder_data = json.dumps(ladder)
-                            debit_stake(sess, filled_amount, f"ladder_fill:{bet.market_id}")
-                except Exception as e:
-                    logger.warning("Ladder parse hatası %s: %s", bet.id, e)
-
-            # Recompute after any rung fills so the same cycle reflects the
-            # newly invested shares and weighted entry price.
-            entry = float(bet.entry_price or bet.price or 0.0)
-            bet.unrealized_pnl = round(compute_unrealized_pnl(float(bet.shares or 0.0), current, entry), 2)
             total_unrealized += bet.unrealized_pnl or 0.0
 
             updated += 1
@@ -311,32 +267,11 @@ def run_risk_management(session=None):
             if should_exit:
                 from utils.accounting import credit_sale
 
-                # Calculate proceeds: for ladder bets, sum ONLY filled rungs
+                # Single-fill position: all recorded shares are executable.
                 entry = float(bet.entry_price or bet.price or 0.0)
                 exit_shares = float(bet.shares or 0.0)
                 raw_pnl = round(compute_unrealized_pnl(exit_shares, current_price, entry), 2)
-                proceeds = round(exit_shares * current_price, 2)  # principal + PnL
-
-                # Ladder: only filled rungs were debited, so only filled
-                # rung shares can be sold.  Pending rungs are cancelled.
-                if bet.ladder_data:
-                    try:
-                        ladder = json.loads(bet.ladder_data) if isinstance(bet.ladder_data, str) else bet.ladder_data
-                        if isinstance(ladder, list):
-                            filled_shares = sum(
-                                float(r.get("shares", r.get("size", r.get("amount", 0))))
-                                for r in ladder
-                                if r.get("status") == "filled"
-                            )
-                            if filled_shares > 0:
-                                exit_shares = filled_shares
-                                proceeds = round(exit_shares * current_price, 2)
-                                raw_pnl = round(
-                                    compute_unrealized_pnl(exit_shares, current_price, entry),
-                                    2,
-                                )
-                    except Exception:
-                        pass  # fall back to simple calculation
+                proceeds = round(exit_shares * current_price, 2)
 
                 # Polymarket taker fee on early exit (sell order).
                 fee_rate = 0.05  # Weather category rate
