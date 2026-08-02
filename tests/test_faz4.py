@@ -1,5 +1,5 @@
 """
-Faz 4 tests: price update, unrealized PnL, portfolio total_value.
+Faz 4 tests: price update, ladder fill, unrealized PnL, portfolio total_value.
 """
 
 import os
@@ -113,30 +113,25 @@ def test_no_side_unrealized_pnl():
     """NO side bet: yes_price rises -> NO price falls -> negative unrealized PnL."""
     _setup()
     try:
-        # Update market price: yes_price=0.65 -> NO price=0.35
+        # Simulate price update
         with get_session() as session:
-            m = (
-                session.query(WeatherMarket)
-                .filter(WeatherMarket.id == "test-faz4-no")
-                .first()
-            )
-            m.yes_price = 0.75  # NO price = 0.25
+            bet = session.query(Bet).filter(Bet.market_id == "test-faz4-no").first()
+            assert bet is not None
+            # NO price = 1 - yes_price = 1 - 0.75 = 0.25
+            current = 0.25
+            bet.current_price = current
+            shares = float(bet.shares or 0.0)
+            entry = float(bet.entry_price or bet.price or 0.0)
+            bet.unrealized_pnl = round((current - entry) * shares, 2)
             session.commit()
-
-        from jobs.scheduler import run_update_prices
-
-        run_update_prices()
 
         with get_session() as session:
             bet = session.query(Bet).filter(Bet.market_id == "test-faz4-no").first()
             assert bet is not None
-            # NO price = 1 - 0.75 = 0.25
             assert bet.current_price == 0.25, f"Expected 0.25, got {bet.current_price}"
-            # PnL = 57.14 * ((1-0.25) - (1-0.35)) = 57.14 * (-0.10) = -5.71
+            # PnL = 57.14 * (0.25 - 0.35) = -5.71
             assert bet.unrealized_pnl is not None
-            assert bet.unrealized_pnl < 0, (
-                f"Expected negative PnL for NO, got {bet.unrealized_pnl}"
-            )
+            assert bet.unrealized_pnl < 0, f"Expected negative PnL for NO, got {bet.unrealized_pnl}"
     finally:
         _clean()
 

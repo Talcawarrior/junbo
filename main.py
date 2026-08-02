@@ -25,7 +25,7 @@ from database.models import Analysis, Bet, Portfolio
 setup_logging()
 
 # Import app, state, and loop functions from split modules.
-from api import app, scan_and_bet_loop, settlement_loop, state  # noqa: E402
+from api import app, price_poller_loop, scan_and_bet_loop, settlement_loop, snapshot_loop, state  # noqa: E402
 
 logger = __import__("logging").getLogger(__name__)
 
@@ -123,6 +123,15 @@ def run_cli():
     parser = argparse.ArgumentParser()
     parser.add_argument("command")
     args = parser.parse_args()
+
+    # Bot başlamadan önce DB backup al
+    try:
+        from db_backup import create_backup
+
+        create_backup("startup")
+    except Exception:
+        pass
+
     init_db()
     ensure_initial_portfolio()
     from jobs.scheduler import (
@@ -177,7 +186,9 @@ def run_cli():
             state.locked = False
             state.tasks["scan_and_bet"] = asyncio.create_task(scan_and_bet_loop(state))
             state.tasks["settlement"] = asyncio.create_task(settlement_loop(state))
-            logger.info("Bot loops started (scan_and_bet + settlement)")
+            state.tasks["price_poller"] = asyncio.create_task(price_poller_loop(state))
+            state.tasks["snapshot"] = asyncio.create_task(snapshot_loop(state))
+            logger.info("Bot loops started (scan_and_bet + settlement + price_poller + snapshot)")
             yield
             # Shutdown
             logger.info("LIFESPAN SHUTDOWN - Stopping bot loops")
@@ -214,6 +225,20 @@ def run_cli():
         _ensure_port_free(config.PORT, config.HOST)
         uvicorn.run(app, host=config.HOST, port=config.PORT)
     elif args.command == "reset":
+        # Silmeden ÖNCE backup al
+        try:
+            from db_backup import create_backup
+
+            create_backup("pre_reset_cli")
+        except Exception:
+            pass
+        # Bets ve portfolio'yu parquet'a arşivle
+        try:
+            from database.db_cleanup import archive_bets_and_portfolio
+
+            archive_bets_and_portfolio()
+        except Exception:
+            pass
         db = get_db_session()
         db.query(Bet).update({"status": "cancelled"})
         db.query(Analysis).delete()

@@ -49,6 +49,7 @@ import {
 import {
   TrendingUp,
   Moon,
+  Sun,
   Wallet,
   Activity,
   Target,
@@ -142,7 +143,6 @@ type TabId = "overview" | "trades" | "models" | "health";
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "overview", label: "Genel Bakış", icon: <BarChart3 className="h-3.5 w-3.5" /> },
   { id: "trades", label: "İşlem Geçmişi", icon: <History className="h-3.5 w-3.5" /> },
-  { id: "models", label: "Model Performansı", icon: <Brain className="h-3.5 w-3.5" /> },
   { id: "health", label: "Sağlık", icon: <HeartPulse className="h-3.5 w-3.5" /> },
 ];
 
@@ -218,6 +218,48 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
   edgeDistribution: EdgeBucket[];
   isLoading?: boolean;
 }) {
+  const [sortField, setSortField] = useState<string>("city");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortField(field);
+      setSortDir("asc");
+    }
+  };
+
+  const sortedPositions = useMemo(() => {
+    const arr = [...openPositions];
+    arr.sort((a, b) => {
+      let aVal: string | number = "";
+      let bVal: string | number = "";
+      switch (sortField) {
+        case "city": aVal = a.city || ""; bVal = b.city || ""; break;
+        case "metric": aVal = a.metric || ""; bVal = b.metric || ""; break;
+        case "threshold": aVal = a.threshold || 0; bVal = b.threshold || 0; break;
+        case "placed_at": aVal = a.openedAt || ""; bVal = b.openedAt || ""; break;
+        case "side": aVal = a.side || ""; bVal = b.side || ""; break;
+        case "entry": aVal = a.entryPrice || 0; bVal = b.entryPrice || 0; break;
+        case "current": aVal = a.currentPrice || 0; bVal = b.currentPrice || 0; break;
+        case "amount": aVal = a.amount || 0; bVal = b.amount || 0; break;
+        case "pnl": aVal = a.pnl || 0; bVal = b.pnl || 0; break;
+        case "settled_at": aVal = a.timeLeft || ""; bVal = b.timeLeft || ""; break;
+        default: aVal = a.city || ""; bVal = b.city || "";
+      }
+      if (typeof aVal === "string") return sortDir === "asc" ? aVal.localeCompare(bVal as string) : (bVal as string).localeCompare(aVal);
+      return sortDir === "asc" ? (aVal as number) - (bVal as number) : (bVal as number) - (aVal as number);
+    });
+    return arr;
+  }, [openPositions, sortField, sortDir]);
+
+  const SortIcon = ({ field }: { field: string }) => (
+    <span className="ml-1 text-[9px]" style={{ color: sortField === field ? TEXT_PRIMARY : TEXT_MUTED }}>
+      {sortField === field ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+    </span>
+  );
+
   const winLossData = [
     { name: "Kazanan", value: kpiData.wins, color: TEAL },
     { name: "Kaybeden", value: kpiData.losses, color: RED },
@@ -237,146 +279,108 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
         </>
       ) : (
         <>
-          {/* Unified Metric Cards - first row */}
-          <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {/*           {/* Unified Metric Cards - tek satir */}
+          <section className="grid grid-cols-3 sm:grid-cols-6 gap-2">
             {[
-              { 
-                label: "Portföy Değeri", 
-                value: `$${kpiData.portfolioValue.toLocaleString("tr-TR", { minimumFractionDigits: 2 })}`, 
-                icon: <Wallet className="h-4 w-4" />, 
-                color: TEAL, 
-                sub: `Toplam: ${fmtUsd(kpiData.totalPnl)}`,
-                tooltip: "Nakit + açık pozisyon PnL = güncel portföy değeri"
-              },
-              { 
-                label: "Bugünkü PnL", 
-                value: `${kpiData.dailyPnl >= 0 ? "▲" : "▼"} ${fmtUsd(kpiData.dailyPnl)}`, 
-                icon: <TrendingUp className="h-4 w-4" />, 
-                color: kpiData.dailyPnl >= 0 ? "#16A34A" : RED, 
+              {
+                label: "Sermaye",
+                value: `$${kpiData.initial.toLocaleString("tr-TR", { minimumFractionDigits: 0 })}`,
+                icon: <Wallet className="h-3 w-3" />,
+                color: TEAL,
                 sub: "",
-                tooltip: "Son 24 saatteki gerçekleşen + iri PnL"
+                tooltip: "Baslangic sermayesi"
               },
-              { 
-                label: "Açık Bahisler", 
-                value: fmtInt(kpiData.openPositions), 
-                icon: <Activity className="h-4 w-4" />, 
-                color: TEXT_PRIMARY, 
+              {
+                label: "Net kapanmis PnL",
+                value: fmtUsd(kpiData.realizedPnl),
+                icon: <TrendingUp className="h-3 w-3" />,
+                color: kpiData.realizedPnl >= 0 ? "#16A34A" : RED,
                 sub: "",
-                tooltip: "Henüz çözülmemiş (open/pending) bahis sayısı"
+                tooltip: "Kapanan betlerden net PnL"
               },
-              { 
-                label: "Win Rate", 
-                value: `%${fmtNum(kpiData.winRate, 1)}`, 
-                icon: <Target className="h-4 w-4" />, 
-                color: TEXT_PRIMARY, 
-                sub: `${fmtInt(kpiData.closedWins)}W / ${fmtInt(kpiData.closedLosses)}L`,
-                tooltip: "Kapanan bahislerde kazanan oranı (closed_early dahil). Örn: 30W/20L = %60"
-              }, 
-            ].map((kpi) => (
-              <Card key={kpi.label} className="py-3 gap-2 shadow-sm" style={{ borderColor: BORDER }}>
-                <CardContent className="px-3 pb-0 pt-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="text-[10px] font-medium" style={{ color: TEXT_MUTED }} title={kpi.tooltip}>{kpi.label}</p>
-                    <span style={{ color: kpi.color }}>{kpi.icon}</span>
-                  </div>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-lg font-bold tabular-nums" style={{ color: kpi.color }}>{kpi.value}</span>
-                  </div>
-                  {kpi.sub && <p className="text-[10px] mt-0.5 tabular-nums" style={{ color: kpi.color }}>{kpi.sub}</p>}
-                </CardContent>
-              </Card>
-            ))}
-          </section>
-          <section className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-2">
-            <Card className="py-3 gap-2 shadow-sm" style={{ borderColor: BORDER }}>
-              <CardContent className="px-3 pb-0 pt-0">
-                <p className="text-[10px] font-medium" style={{ color: TEXT_MUTED }}>Kullanılabilir Nakit</p>
-                <p className="text-lg font-bold tabular-nums mt-1" style={{ color: TEAL }}>{fmtUsd(kpiData.availableCash)}</p>
-                <p className="text-[10px] mt-0.5" style={{ color: TEXT_MUTED }}>Initial + realized + unrealized − exposure</p>
-              </CardContent>
-            </Card>
-            <Card className="py-3 gap-2 shadow-sm" style={{ borderColor: BORDER }}>
-              <CardContent className="px-3 pb-0 pt-0">
-                <p className="text-[10px] font-medium" style={{ color: TEXT_MUTED }}>Açık Bet PnL</p>
-                <p className="text-lg font-bold tabular-nums mt-1" style={{ color: kpiData.unrealizedPnl >= 0 ? TEAL : RED }}>{fmtUsd(kpiData.unrealizedPnl)}</p>
-              </CardContent>
-            </Card>
-            <Card className="py-3 gap-2 shadow-sm" style={{ borderColor: BORDER }}>
-              <CardContent className="px-3 pb-0 pt-0">
-                <p className="text-[10px] font-medium" style={{ color: TEXT_MUTED }}>Şimdi Açılabilir Maksimum</p>
-                <p className="text-lg font-bold tabular-nums mt-1" style={{ color: TEAL }}>{fmtUsd(kpiData.maxOpenableUsd)}</p>
-              </CardContent>
-            </Card>
-          </section>
-
-          {/* Summary row - single row with all 4 cards */}
-          <section className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2">
-            <Card className="py-3 gap-2 shadow-sm" style={{ borderColor: BORDER }}>
-              <CardContent className="px-3 pb-0 pt-0">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-[10px] font-medium" style={{ color: TEXT_MUTED }} title="Tüm açık pozisyonların toplam stake tutarı (toplam kilitli nakit)">Açık Bet Toplam Değeri</p>
-                  <span style={{ color: TEAL }}><Activity className="h-4 w-4" /></span>
-                </div>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="text-lg font-bold tabular-nums" style={{ color: TEAL }}>{fmtUsd(kpiData.openPositionsValue)}</span>
-                </div>
-                <p className="text-[10px] mt-0.5 tabular-nums" style={{ color: TEXT_MUTED }}>Max: {fmtUsd(kpiData.maxOpenableUsd)}</p>
-              </CardContent>
-            </Card>
-            {/* Total PnL — custom card with breakdown */}
-            <Card className="py-3 gap-1 shadow-sm" style={{ borderColor: BORDER }}>
-              <CardContent className="px-4 pb-0 pt-0">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-[10px] font-medium" style={{ color: TEXT_MUTED }}>Toplam PnL</p>
-                  <span style={{ color: kpiData.totalPnlValue >= 0 ? "#16A34A" : RED }}><TrendingUp className="h-4 w-4" /></span>
-                </div>
-                <p className="text-lg font-bold tabular-nums" style={{ color: kpiData.totalPnlValue >= 0 ? "#16A34A" : RED }}>
-                  {fmtUsd(kpiData.totalPnlValue)}
-                </p>
-                <div className="flex flex-col gap-0.5 mt-1 text-[10px] tabular-nums">
-                  <div className="flex justify-between">
-                    <span style={{ color: TEXT_MUTED }}>Kapalı (Realized)</span>
-                    <span style={{ color: kpiData.realizedPnl >= 0 ? TEAL : RED }}>
-                      {fmtUsd(kpiData.realizedPnl)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span style={{ color: TEXT_MUTED }}>Açık (Unrealized)</span>
-                    <span style={{ color: kpiData.unrealizedPnl >= 0 ? TEAL : RED }}>
-                      {fmtUsd(kpiData.unrealizedPnl)}
-                    </span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            {[
-              { 
-                label: "Total ROI", 
-                value: `${kpiData.totalRoi >= 0 ? "+" : ""}${fmtNum(kpiData.totalRoi)}%`, 
-                icon: <TrendingUp className="h-4 w-4" />, 
-                color: kpiData.totalRoi >= 0 ? TEAL : RED, 
+              {
+                label: "Toplam sermaye",
+                value: `$${kpiData.initial.toLocaleString("tr-TR", { minimumFractionDigits: 0 })}`,
+                icon: <Wallet className="h-3 w-3" />,
+                color: TEAL,
+                sub: `PnL: ${fmtUsd(kpiData.totalPnl)}`,
+                tooltip: "Baslangic sermayesi + toplam PnL"
+              },
+              {
+                label: "Acik bet toplami",
+                value: fmtUsd(kpiData.openPositionsValue),
+                icon: <Activity className="h-3 w-3" />,
+                color: TEXT_PRIMARY,
+                sub: `${fmtInt(kpiData.openPositions)} bet`,
+                tooltip: "Acik betlerin toplam stake degeri"
+              },
+              {
+                label: "Kullanilabilir",
+                value: fmtUsd(kpiData.availableCash),
+                icon: <Wallet className="h-3 w-3" />,
+                color: TEAL,
                 sub: "",
-                tooltip: "Toplam yatırıma oranlı getiri. Formül: Total PnL / Toplam Stake × 100. Örn: +36.31% = her $100 için $36 kar"
+                tooltip: "Yeni bet acmak icin kullanilabilir nakit"
               },
-              { 
-                label: "Kapalı Bahis", 
-                value: fmtInt(kpiData.closedBets), 
-                icon: <BarChart3 className="h-4 w-4" />, 
-                color: TEXT_PRIMARY, 
-                sub: `${fmtInt(kpiData.closedWins)}W / ${fmtInt(kpiData.closedLosses)}L`,
-                tooltip: "Sonuçlanan toplam bahis (won+lost+closed_early). 50 = 30 kazanan + 20 kaybeden"
+              {
+                label: "Acik bet PnL",
+                value: fmtUsd(kpiData.unrealizedPnl),
+                icon: <TrendingUp className="h-3 w-3" />,
+                color: kpiData.unrealizedPnl >= 0 ? "#16A34A" : RED,
+                sub: "",
+                tooltip: "Acik pozisyonlarin kagit uzerindeki PnL"
+              },
+              {
+                label: "Kapali+Acik PnL",
+                value: fmtUsd(kpiData.totalPnl),
+                icon: <TrendingUp className="h-3 w-3" />,
+                color: kpiData.totalPnl >= 0 ? "#16A34A" : RED,
+                sub: "",
+                tooltip: "Kapanan + acik pozisyonlarin toplam PnL"
+              },
+              {
+                label: "Bugunku PnL",
+                value: `${kpiData.dailyPnl >= 0 ? "▲" : "▼"} ${fmtUsd(kpiData.dailyPnl)}`,
+                icon: <TrendingUp className="h-3 w-3" />,
+                color: kpiData.dailyPnl >= 0 ? "#16A34A" : RED,
+                sub: "",
+                tooltip: "Son 24 saat PnL"
+              },
+              {
+                label: "Win %",
+                value: `%${fmtNum(kpiData.winRate, 0)}`,
+                icon: <Target className="h-3 w-3" />,
+                color: TEXT_PRIMARY,
+                sub: `${fmtInt(kpiData.closedWins)}W/${fmtInt(kpiData.closedLosses)}L`,
+                tooltip: "Kazanma oran"
+              },
+              {
+                label: "ROI",
+                value: `${kpiData.totalRoi >= 0 ? "+" : ""}${fmtNum(kpiData.totalRoi, 0)}%`,
+                icon: <TrendingUp className="h-3 w-3" />,
+                color: kpiData.totalRoi >= 0 ? TEAL : RED,
+                sub: "",
+                tooltip: "Toplam getiri oran"
+              },
+              {
+                label: "Max acilabilir",
+                value: fmtUsd(kpiData.availableCash),
+                icon: <Activity className="h-3 w-3" />,
+                color: TEAL,
+                sub: "",
+                tooltip: "Acilabilecek maksimum tutar"
               },
             ].map((kpi) => (
-              <Card key={kpi.label} className="py-3 gap-2 shadow-sm" style={{ borderColor: BORDER }}>
-                <CardContent className="px-3 pb-0 pt-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="text-[10px] font-medium" style={{ color: TEXT_MUTED }} title={kpi.tooltip}>{kpi.label}</p>
+              <Card key={kpi.label} className="py-2 gap-1 shadow-sm" style={{ borderColor: BORDER }}>
+                <CardContent className="px-2 pb-0 pt-0">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-semibold" style={{ color: TEXT_MUTED }} title={kpi.tooltip}>{kpi.label}</p>
                     <span style={{ color: kpi.color }}>{kpi.icon}</span>
                   </div>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-lg font-bold tabular-nums" style={{ color: kpi.color }}>{kpi.value}</span>
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <span className="text-sm font-bold tabular-nums" style={{ color: kpi.color }}>{kpi.value}</span>
                   </div>
-                  {kpi.sub && <p className="text-[10px] mt-0.5 tabular-nums" style={{ color: kpi.color }}>{kpi.sub}</p>}
+                  {kpi.sub && <p className="text-[10px] mt-0.5 tabular-nums font-medium" style={{ color: TEXT_PRIMARY }}>{kpi.sub}</p>}
                 </CardContent>
               </Card>
             ))}
@@ -384,7 +388,93 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
         </>
       )}
 
-      {/* Portfolio Chart + Win/Loss Donut */}
+      {/* Open Positions + Activity Feed — ÜSTTE */}
+      <section className="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start">
+        <Card className="lg:col-span-3 shadow-sm py-4 gap-3" style={{ borderColor: BORDER }}>
+          <CardHeader className="pb-0 pt-0 px-5">
+            <CardTitle className="text-sm font-semibold" style={{ color: TEXT_PRIMARY }}>Açık Pozisyonlar</CardTitle>
+          </CardHeader>
+          <CardContent className="px-3">
+            <div className="max-h-[760px] overflow-y-auto custom-scroll">
+              {openPositions.length === 0 ? (
+                <div className="text-center py-10 text-sm" style={{ color: TEXT_MUTED }}>Açık pozisyon yok</div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("city")}>Şehir<SortIcon field="city" /></TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-center cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("metric")}>H/L<SortIcon field="metric" /></TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("threshold")}>°C<SortIcon field="threshold" /></TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("placed_at")}>Açılış<SortIcon field="placed_at" /></TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("side")}>Yön<SortIcon field="side" /></TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("entry")}>Giriş<SortIcon field="entry" /></TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("current")}>Güncel<SortIcon field="current" /></TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("amount")}>Bet<SortIcon field="amount" /></TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("pnl")}>PnL<SortIcon field="pnl" /></TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => handleSort("settled_at")}>Kapanış<SortIcon field="settled_at" /></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sortedPositions.map((pos) => (
+                      <TableRow key={pos.id}>
+                        <TableCell className="font-medium text-sm" style={{ color: TEXT_PRIMARY }}>{pos.city}</TableCell>
+                        <TableCell className="text-center">
+                          {pos.metric ? (
+                            <Badge className="text-[10px] font-bold px-2 py-0.5 h-5" style={{
+                              backgroundColor: pos.metric === "temperature_max" ? "#FEF3C7" : "#DBEAFE",
+                              color: pos.metric === "temperature_max" ? "#D97706" : "#2563EB",
+                              border: `1px solid ${pos.metric === "temperature_max" ? "#F59E0B40" : "#3B82F640"}`
+                            }}>{pos.metric === "temperature_max" ? "H" : "L"}</Badge>
+                          ) : <span style={{ color: TEXT_MUTED }}>—</span>}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-sm tabular-nums" style={{ color: TEXT_PRIMARY }}>
+                          {pos.threshold != null ? `${pos.threshold}°` : "—"}
+                        </TableCell>
+                        <TableCell className="text-right text-[11px] tabular-nums whitespace-nowrap" style={{ color: TEXT_MUTED }}>{pos.openedAt}</TableCell>
+                        <TableCell>
+                          <Badge className="text-[10px] font-bold px-2 py-0.5 h-5" style={{ backgroundColor: pos.side === "YES" ? TEAL_LIGHT : RED_LIGHT, color: pos.side === "YES" ? TEAL : RED, border: `1px solid ${pos.side === "YES" ? TEAL : RED}33` }}>{pos.side}</Badge>
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-sm tabular-nums" style={{ color: TEXT_PRIMARY }}>{fmtPrice(pos.entryPrice)}</TableCell>
+                        <TableCell className="text-right font-mono text-sm tabular-nums" style={{ color: TEXT_PRIMARY }}>{fmtPrice(pos.currentPrice)}</TableCell>
+                        <TableCell className="text-right font-mono text-sm tabular-nums" style={{ color: TEXT_PRIMARY }}>{fmtUsd(pos.amount)}</TableCell>
+                        <TableCell className="text-right font-mono text-sm font-semibold tabular-nums" style={{ color: pos.pnl >= 0 ? TEAL : RED }}>{fmtUsd(pos.pnl)}</TableCell>
+                        <TableCell className="text-right text-[11px] tabular-nums whitespace-nowrap" style={{ color: TEXT_MUTED }}>{pos.timeLeft}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2 shadow-sm py-4 gap-3 h-full" style={{ borderColor: BORDER }}>
+          <CardHeader className="pb-0 pt-0 px-5">
+            <CardTitle className="text-sm font-semibold" style={{ color: TEXT_PRIMARY }}>Aktivite Akışı</CardTitle>
+          </CardHeader>
+          <CardContent className="px-4">
+            <div className="max-h-[760px] overflow-y-auto pr-1 custom-scroll">
+              {activityFeed.length === 0 ? (
+                <div className="text-center py-10 text-sm" style={{ color: TEXT_MUTED }}>Henüz aktivite yok</div>
+              ) : (
+                activityFeed.map((item) => (
+                  <div key={item.id} className="flex gap-3 py-2.5 border-b last:border-0" style={{ borderColor: `${BORDER}80` }}>
+                    <div className="flex flex-col items-center gap-1 pt-1 shrink-0">
+                      <div className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: dotColorMap[item.color] }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs leading-relaxed" style={{ color: TEXT_PRIMARY }}>{item.message}</p>
+                    </div>
+                    <span className="text-[10px] tabular-nums shrink-0 pt-0.5" style={{ color: TEXT_MUTED }}>{item.time}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      {/* Portfolio Chart + Win/Loss Donut — AŞAĞIDA */}
       <section className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         <Card className="lg:col-span-3 shadow-sm py-4 gap-3" style={{ borderColor: BORDER }}>
           <CardHeader className="pb-0 pt-0 px-5">
@@ -444,113 +534,6 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
         </Card>
       </section>
 
-      {/* Open Positions + Activity Feed */}
-      <section className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-        <Card className="lg:col-span-3 shadow-sm py-4 gap-3" style={{ borderColor: BORDER }}>
-          <CardHeader className="pb-0 pt-0 px-5">
-            <CardTitle className="text-sm font-semibold" style={{ color: TEXT_PRIMARY }}>Açık Pozisyonlar</CardTitle>
-          </CardHeader>
-          <CardContent className="px-3">
-            <div className="max-h-[380px] overflow-y-auto custom-scroll">
-              {openPositions.length === 0 ? (
-                <div className="text-center py-10 text-sm" style={{ color: TEXT_MUTED }}>Açık pozisyon yok</div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent">
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: TEXT_MUTED }}>Şehir</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-center" style={{ color: TEXT_MUTED }}>H/L</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right" style={{ color: TEXT_MUTED }}>°C</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right" style={{ color: TEXT_MUTED }}>Açılış</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: TEXT_MUTED }}>Yön</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right" style={{ color: TEXT_MUTED }}>Giriş</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right" style={{ color: TEXT_MUTED }}>Güncel</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right" style={{ color: TEXT_MUTED }}>Edge</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right" style={{ color: TEXT_MUTED }}>Bet</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right" style={{ color: TEXT_MUTED }}>PnL</TableHead>
-                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right" style={{ color: TEXT_MUTED }}>Kapanış</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {openPositions.map((pos) => (
-                      <TableRow key={pos.id}>
-                        <TableCell className="font-medium text-sm" style={{ color: TEXT_PRIMARY }}>{pos.city}</TableCell>
-                        <TableCell className="text-center">
-                          {pos.metric ? (
-                            <Badge className="text-[10px] font-bold px-2 py-0.5 h-5" style={{
-                              backgroundColor: pos.metric === "temperature_max" ? "#FEF3C7" : "#DBEAFE",
-                              color: pos.metric === "temperature_max" ? "#D97706" : "#2563EB",
-                              border: `1px solid ${pos.metric === "temperature_max" ? "#F59E0B40" : "#3B82F640"}`
-                            }}>{pos.metric === "temperature_max" ? "H" : "L"}</Badge>
-                          ) : <span style={{ color: TEXT_MUTED }}>—</span>}
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-sm tabular-nums" style={{ color: TEXT_PRIMARY }}>
-                          {pos.threshold != null ? `${pos.threshold}°` : "—"}
-                        </TableCell>
-                        <TableCell className="text-right text-[11px] tabular-nums whitespace-nowrap" style={{ color: TEXT_MUTED }}>{pos.openedAt}</TableCell>
-                        <TableCell>
-                          <Badge className="text-[10px] font-bold px-2 py-0.5 h-5" style={{ backgroundColor: pos.side === "YES" ? TEAL_LIGHT : RED_LIGHT, color: pos.side === "YES" ? TEAL : RED, border: `1px solid ${pos.side === "YES" ? TEAL : RED}33` }}>{pos.side}</Badge>
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-sm tabular-nums" style={{ color: TEXT_PRIMARY }}>{fmtPrice(pos.entryPrice)}</TableCell>
-                        <TableCell className="text-right font-mono text-sm tabular-nums" style={{ color: TEXT_PRIMARY }}>{fmtPrice(pos.currentPrice)}</TableCell>
-                        <TableCell className="text-right font-mono text-sm tabular-nums" style={{ color: TEXT_PRIMARY }}>{pos.edge}%</TableCell>
-                        <TableCell className="text-right font-mono text-sm tabular-nums" style={{ color: TEXT_PRIMARY }}>{fmtUsd(pos.amount)}</TableCell>
-                        <TableCell className="text-right font-mono text-sm font-semibold tabular-nums" style={{ color: pos.pnl >= 0 ? TEAL : RED }}>{fmtUsd(pos.pnl)}</TableCell>
-                        <TableCell className="text-right text-[11px] tabular-nums whitespace-nowrap" style={{ color: TEXT_MUTED }}>{pos.timeLeft}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="lg:col-span-2 shadow-sm py-4 gap-3" style={{ borderColor: BORDER }}>
-          <CardHeader className="pb-0 pt-0 px-5">
-            <CardTitle className="text-sm font-semibold" style={{ color: TEXT_PRIMARY }}>Aktivite Akışı</CardTitle>
-          </CardHeader>
-          <CardContent className="px-4">
-            <div className="space-y-0 max-h-[380px] overflow-y-auto pr-1 custom-scroll">
-              {activityFeed.length === 0 ? (
-                <div className="text-center py-10 text-sm" style={{ color: TEXT_MUTED }}>Henüz aktivite yok</div>
-              ) : (
-                activityFeed.map((item) => (
-                  <div key={item.id} className="flex gap-3 py-2.5 border-b last:border-0" style={{ borderColor: `${BORDER}80` }}>
-                    <div className="flex flex-col items-center gap-1 pt-1 shrink-0">
-                      <div className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: dotColorMap[item.color] }} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs leading-relaxed" style={{ color: TEXT_PRIMARY }}>{item.message}</p>
-                    </div>
-                    <span className="text-[10px] tabular-nums shrink-0 pt-0.5" style={{ color: TEXT_MUTED }}>{item.time}</span>
-                  </div>
-                ))
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </section>
-
-      {/* Edge Distribution */}
-      <Card className="shadow-sm py-4 gap-3" style={{ borderColor: BORDER }}>
-        <CardHeader className="pb-0 pt-0 px-5">
-          <CardTitle className="text-sm font-semibold" style={{ color: TEXT_PRIMARY }}>Edge Dağılımı</CardTitle>
-        </CardHeader>
-        <CardContent className="px-4">
-          <ChartWrapper height={220}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={edgeDistribution} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={BORDER} vertical={false} />
-                <XAxis dataKey="range" tick={{ fontSize: 11, fill: TEXT_MUTED }} axisLine={{ stroke: BORDER }} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: TEXT_MUTED }} axisLine={false} tickLine={false} width={30} />
-                <Tooltip content={<EdgeTooltip />} cursor={{ fill: "rgba(0,0,0,0.04)" }} />
-                <Bar dataKey="count" fill={GREEN} radius={[4, 4, 0, 0]} barSize={40} />
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartWrapper>
-        </CardContent>
-      </Card>
     </div>
   );
 }
@@ -559,13 +542,13 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
 // TRADE HISTORY TAB
 // ==========================================
 function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: TradeHistoryEntry[]; historyStats: HistoryStats | null; totalPnl: number }) {
-  const [filterResult, setFilterResult] = useState<"ALL" | "WIN" | "LOSS">("ALL");
+  const [filterResult, setFilterResult] = useState<"ALL" | "WIN" | "LOSS" | "PARTIAL_TP">("ALL");
   const [filterSide, setFilterSide] = useState<"ALL" | "YES" | "NO">("ALL");
-  const [filterExit, setFilterExit] = useState<"ALL" | "ST" | "TP" | "SL" | "TS" | "TD">("ALL");
+  const [filterExit, setFilterExit] = useState<"ALL" | "ST" | "TP" | "SL" | "TS" | "TD" | "RT" | "TL" | "CL">("ALL");
   const [filterDate, setFilterDate] = useState<string>("");
   const dateInputRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<"date" | "pnl" | "edge">("date");
+  const [sortBy, setSortBy] = useState<"date" | "pnl">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   const filtered = useMemo(() => {
@@ -574,6 +557,7 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
     const tenDaysAgo = new Date();
     tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
     data = data.filter((t) => {
+      if (t.result === "PARTIAL_TP") return true; // Açık pozisyonlar her zaman göster
       if (!t.closedAtISO) return false;
       return new Date(t.closedAtISO) >= tenDaysAgo;
     });
@@ -592,7 +576,6 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
       let cmp = 0;
       if (sortBy === "date") cmp = 0;
       else if (sortBy === "pnl") cmp = a.pnl - b.pnl;
-      else if (sortBy === "edge") cmp = a.edge - b.edge;
       return sortDir === "desc" ? -cmp : cmp;
     });
     return data;
@@ -606,12 +589,12 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
   const filteredPnl = filtered.reduce((s, t) => s + t.pnl, 0);
   const winCount = filtered.filter((t) => t.result === "WIN").length;
 
-  function toggleSort(col: "date" | "pnl" | "edge") {
+  function toggleSort(col: "date" | "pnl") {
     if (sortBy === col) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
     else { setSortBy(col); setSortDir("desc"); }
   }
 
-  const SortIcon = ({ col }: { col: "date" | "pnl" | "edge" }) => {
+  const SortIcon = ({ col }: { col: "date" | "pnl" }) => {
     if (sortBy !== col) return <Minus className="h-3 w-3 inline ml-1 opacity-30" />;
     return sortDir === "desc" ? <ArrowDownRight className="h-3 w-3 inline ml-1" /> : <ArrowUpRight className="h-3 w-3 inline ml-1" />;
   };
@@ -664,7 +647,7 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
             <div className="flex items-center gap-1.5">
               <Filter className="h-3.5 w-3.5" style={{ color: TEXT_MUTED }} />
               <span className="text-[11px] font-medium" style={{ color: TEXT_MUTED }}>Sonuç:</span>
-              {(["ALL", "WIN", "LOSS"] as const).map((v) => (
+              {(["ALL", "WIN", "PARTIAL_TP", "LOSS"] as const).map((v) => (
                 <button key={v} onClick={() => setFilterResult(v)}
                   className="px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors"
                   style={{
@@ -672,7 +655,7 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
                     backgroundColor: filterResult === v ? TEAL_LIGHT : "transparent",
                     color: filterResult === v ? TEAL : TEXT_MUTED,
                   }}>
-                  {v === "ALL" ? "Tümü" : v === "WIN" ? "Kazanan" : "Kaybeden"}
+                  {v === "ALL" ? "Tümü" : v === "WIN" ? "Kazanan" : v === "PARTIAL_TP" ? "◐ PT" : "Kaybeden"}
                 </button>
               ))}
             </div>
@@ -695,10 +678,8 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
               {([
                 { value: "ALL" as const, label: "Tümü" },
                 { value: "ST" as const, label: "Settlement" },
-                { value: "TP" as const, label: "Take Profit" },
-                { value: "SL" as const, label: "Stop Loss" },
-                { value: "TS" as const, label: "Trailing Stop" },
-                { value: "TD" as const, label: "Time Decay" },
+                { value: "RT" as const, label: "Rotation" },
+                { value: "PT" as const, label: "Partial TP" },
               ]).map((v) => (
                 <button key={v.value} onClick={() => setFilterExit(v.value)}
                   className="px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors"
@@ -786,7 +767,6 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right" style={{ color: TEXT_MUTED }}>Çıkış</TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => toggleSort("pnl")}>PnL <SortIcon col="pnl" /></TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: TEXT_MUTED }}>Sonuç</TableHead>
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => toggleSort("edge")}>Edge <SortIcon col="edge" /></TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-center" style={{ color: TEXT_MUTED }}>Neden</TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: TEXT_MUTED }}>Kapanış</TableHead>
                   </TableRow>
@@ -803,20 +783,23 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
                       <TableCell className="text-right font-mono text-sm tabular-nums" style={{ color: TEXT_PRIMARY }}>{fmtPrice(t.exitPrice)}</TableCell>
                       <TableCell className="text-right font-mono text-sm font-semibold tabular-nums" style={{ color: t.pnl >= 0 ? TEAL : RED }}>{fmtUsd(t.pnl)}</TableCell>
                       <TableCell>
-                        <Badge className="text-[10px] font-bold px-2 py-0.5 h-5" style={{ backgroundColor: t.result === "WIN" ? GREEN_LIGHT : RED_LIGHT, color: t.result === "WIN" ? "#16A34A" : RED, border: `1px solid ${t.result === "WIN" ? "#16A34A" : RED}33` }}>
-                          {t.result === "WIN" ? "✓ WIN" : "✗ LOSS"}
+                        <Badge className="text-[10px] font-bold px-2 py-0.5 h-5" style={{ backgroundColor: t.result === "WIN" ? GREEN_LIGHT : t.result === "PARTIAL_TP" ? "#FFF7ED" : RED_LIGHT, color: t.result === "WIN" ? "#16A34A" : t.result === "PARTIAL_TP" ? "#D97706" : RED, border: `1px solid ${t.result === "WIN" ? "#16A34A" : t.result === "PARTIAL_TP" ? "#D97706" : RED}33` }}>
+                          {t.result === "WIN" ? "✓ WIN" : t.result === "PARTIAL_TP" ? "◐ PT" : "✗ LOSS"}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right font-mono text-sm tabular-nums" style={{ color: TEXT_PRIMARY }}>{t.edge}%</TableCell>
                       <TableCell className="text-center">
                         {(() => {
-                          const exitLabels: Record<string, { label: string; color: string; bg: string }> = {
-                            ST: { label: "ST", color: "#6B7280", bg: "#F3F4F6" },
-                            TP: { label: "TP", color: "#16A34A", bg: "#DCFCE7" },
-                            SL: { label: "SL", color: "#DC2626", bg: "#FEE2E2" },
-                            TS: { label: "TS", color: "#D97706", bg: "#FEF3C7" },
-                            TD: { label: "TD", color: "#7C3AED", bg: "#EDE9FE" },
-                          };
+const exitLabels: Record<string, { label: string; color: string; bg: string }> = {
+  ST: { label: "ST", color: "#6B7280", bg: "#F3F4F6" },
+  TP: { label: "TP", color: "#16A34A", bg: "#DCFCE7" },
+  PT: { label: "PT", color: "#D97706", bg: "#FFF7ED" },
+  SL: { label: "SL", color: "#DC2626", bg: "#FEE2E2" },
+  TS: { label: "TS", color: "#D97706", bg: "#FEF3C7" },
+  TD: { label: "TD", color: "#7C3AED", bg: "#EDE9FE" },
+  RT: { label: "RT", color: "#2563EB", bg: "#DBEAFE" },
+  TL: { label: "TL", color: "#9333EA", bg: "#F3E8FF" },
+  CL: { label: "CL", color: "#6B7280", bg: "#F3F4F6" },
+};
                           const e = exitLabels[t.exitType] || exitLabels.ST;
                           return (
                             <Badge className="text-[10px] font-bold px-2 py-0.5 h-5" style={{ backgroundColor: e.bg, color: e.color, border: `1px solid ${e.color}33` }}>
@@ -969,6 +952,7 @@ function ModelsTab({ modelScores }: { modelScores: ModelScore[] }) {
 // HEALTH TAB
 // ==========================================
 function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData?: KpiData }) {
+  const pnlScrollRef = useRef<HTMLDivElement>(null);
   const h = health ?? {
     verdict: "healthy" as const,
     verdict_text: "Veri bekleniyor",
@@ -993,16 +977,29 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
     info: { bg: "rgba(59,130,246,0.1)", color: "#3b82f6", icon: <Info className="h-3.5 w-3.5" /> },
   };
 
-  function PnlTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number; payload?: { trades: number } }>; label?: string }) {
+  function PnlTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number; payload?: { wins?: number; losses?: number; total?: number; stake?: number; win_rate?: number; roi?: number } }>; label?: string }) {
     if (!active || !payload?.length) return null;
-    const trades = payload[0].payload?.trades ?? 0;
+    const p = payload[0].payload ?? {};
+    const total = p.total ?? 0;
+    const wins = p.wins ?? 0;
+    const losses = p.losses ?? 0;
+    const winRate = p.win_rate ?? 0;
+    const roi = p.roi ?? 0;
+    const stake = p.stake ?? 0;
     return (
-      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-lg text-xs">
+      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-lg text-xs space-y-1">
         <p className="font-medium text-gray-500 mb-1">{label}</p>
         <p className="font-mono font-semibold" style={{ color: payload[0].value >= 0 ? TEAL : RED }}>
-          {fmtUsd(payload[0].value)}
+          {fmtUsd(payload[0].value)} PnL
         </p>
-        <p className="text-gray-400">{fmtInt(trades)} işlem</p>
+        {total > 0 && (
+          <>
+            <p className="text-gray-400">{fmtInt(total)} işlem ({fmtInt(wins)}W / {fmtInt(losses)}L)</p>
+            <p className="text-gray-400">Win rate: %{winRate} &middot; ROI: %{roi}</p>
+            {stake > 0 && <p className="text-gray-400">Stake: ${stake.toFixed(2)}</p>}
+          </>
+        )}
+        {total === 0 && <p className="text-gray-400">İşlem yok</p>}
       </div>
     );
   }
@@ -1051,8 +1048,8 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
 
             {/* Kazanan/Kaybeden Exit Type Donut Charts */}
             {(() => {
-              const exitColors: Record<string, string> = { TP: "#16A34A", SL: "#DC2626", TS: "#D97706", TD: "#7C3AED", ST: "#6B7280" };
-              const exitLabels: Record<string, string> = { TP: "Take Profit", SL: "Stop Loss", TS: "Trailing Stop", TD: "Time Decay", ST: "Settlement" };
+              const exitColors: Record<string, string> = { TP: "#16A34A", SL: "#DC2626", TS: "#D97706", TD: "#7C3AED", ST: "#6B7280", RT: "#2563EB", TL: "#9333EA", CL: "#6B7280" };
+              const exitLabels: Record<string, string> = { TP: "Take Profit", SL: "Stop Loss", TS: "Trailing Stop", TD: "Time Decay", ST: "Settlement", RT: "Rotation", TL: "Tie Loser", CL: "Closed" };
 
               function makePieData(src: Record<string, number>) {
                 return Object.entries(src)
@@ -1130,7 +1127,7 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
               <div className="py-1 px-2 rounded" style={{ backgroundColor: `${TEAL_LIGHT}80` }}>
                 <p className="text-[10px]" style={{ color: TEXT_MUTED }}>Son Tarama</p>
                 <p className="text-xs font-mono tabular-nums" style={{ color: TEAL }}>
-                  {h.activity_24h.pass_reasons[0]?.time ? new Date(h.activity_24h.pass_reasons[0].time).toLocaleString("tr-TR", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "—"}
+                  {h.activity_24h.pass_reasons[0]?.time ? new Date(h.activity_24h.pass_reasons[0].time).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "—"}
                 </p>
               </div>
             )}
@@ -1143,9 +1140,6 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
                   <div key={i} className="flex items-start gap-2 text-[11px] py-0.5 border-b last:border-0" style={{ borderColor: `${BORDER}60` }}>
                     <span className="tabular-nums shrink-0 pt-0.5 font-mono" style={{ color: TEXT_MUTED, fontSize: 10 }}>{pr.time ? new Date(pr.time).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "?"}</span>
                     <span style={{ color: TEXT_PRIMARY }} className="flex-1">{pr.reason}</span>
-                    <Badge className="text-[9px] px-1.5 py-0 h-4 font-mono shrink-0" style={{ backgroundColor: TEAL_LIGHT, color: TEAL }}>
-                      %{fmtNum(pr.edge_pct, 1)}
-                    </Badge>
                   </div>
                 ))
               )}
@@ -1190,15 +1184,15 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
                     label: "Sharpe Ratio", 
                     value: kpiData ? fmtNum(kpiData.sharpeRatio) : "—",
                     target: "> 1.0 İyi, > 2.0 Mükemmel",
-                    color: TEXT_PRIMARY,
-                    tooltip: "Risk-başına getiri. Formül: (Ort. Getiri - Risk-Free) / Std Sapma. <0.5 zayıf, 0.5-1 orta, >1 iyi, >2 mükemmel"
+                    color: kpiData ? (kpiData.sharpeRatio < 0.5 ? RED : kpiData.sharpeRatio < 1.0 ? "#eab308" : kpiData.sharpeRatio < 2.0 ? "#22c55e" : "#16a34a") : TEXT_PRIMARY,
+                    tooltip: "Risk-başına getiri. <0.5 zayıf, 0.5-1 orta, >1 iyi, >2 mükemmel"
                   },
                   { 
                     label: "Max Drawdown", 
                     value: kpiData ? `%${fmtNum(kpiData.maxDrawdown)}` : "—",
                     target: "< 5% Mükemmel, < 15% Kabul",
-                    color: RED,
-                    tooltip: "Zirveden dipine en büyük düşüş. <5% mükemmel, 5-15% kabul edilebilir, >20% riskli"
+                    color: kpiData ? (kpiData.maxDrawdown < 5 ? "#22c55e" : kpiData.maxDrawdown < 15 ? "#eab308" : RED) : TEXT_PRIMARY,
+                    tooltip: "Zirveden dipine en büyük düşüş. <5% mükemmel, 5-15% kabul edilebilir, >15% riskli"
                   },
                   { 
                     label: "Expectancy", 
@@ -1238,7 +1232,7 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
         </Card>
       </section>
 
-      {/* Daily PnL Timeline */}
+      {/* Daily PnL Timeline — scrollable */}
       <Card className="shadow-sm py-4 gap-3" style={{ borderColor: BORDER }}>
         <CardHeader className="pb-0 pt-0 px-5">
           <div className="flex items-center gap-2">
@@ -1251,19 +1245,26 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
             {h.daily_pnl_timeline.length === 0 ? (
               <div className="flex items-center justify-center h-full text-sm" style={{ color: TEXT_MUTED }}>Henüz veri yok</div>
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={h.daily_pnl_timeline} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={BORDER} vertical={false} />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: TEXT_MUTED }} axisLine={{ stroke: BORDER }} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: TEXT_MUTED }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `$${v}`} width={50} />
-                  <Tooltip content={<PnlTooltip />} cursor={{ fill: "rgba(0,0,0,0.04)" }} />
-                  <Bar dataKey="pnl" radius={[4, 4, 0, 0]} barSize={36}>
-                    {h.daily_pnl_timeline.map((entry, i) => (
-                      <Cell key={i} fill={entry.pnl >= 0 ? TEAL : RED} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <div className="relative">
+                {/* Scrollable chart container */}
+                <div ref={pnlScrollRef} className="overflow-x-auto custom-scroll pb-1" style={{ scrollBehavior: "smooth" }}>
+                  <div style={{ width: Math.max(h.daily_pnl_timeline.length * 64, 500) }}>
+                    <ResponsiveContainer width="100%" height={260}>
+                      <BarChart data={h.daily_pnl_timeline} margin={{ top: 5, right: 12, left: 10, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={BORDER} vertical={false} />
+                        <XAxis dataKey="date" tick={{ fontSize: 11, fill: TEXT_MUTED }} axisLine={{ stroke: BORDER }} tickLine={false} interval={0} angle={-20} textAnchor="end" height={40} />
+                        <YAxis tick={{ fontSize: 11, fill: TEXT_MUTED }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `$${v}`} width={50} />
+                        <Tooltip content={<PnlTooltip />} cursor={{ fill: "rgba(0,0,0,0.04)" }} />
+                        <Bar dataKey="pnl" radius={[4, 4, 0, 0]} barSize={36}>
+                          {h.daily_pnl_timeline.map((entry, i) => (
+                            <Cell key={i} fill={entry.pnl >= 0 ? TEAL : RED} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
             )}
           </ChartWrapper>
         </CardContent>
@@ -1314,90 +1315,115 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
           )}
         </CardContent>
       </Card>
+
     </div>
   );
-}
+};
 
 // ==========================================
 // MAIN DASHBOARD
 // ==========================================
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("darkMode") === "true";
+    }
+    return false;
+  });
   const data = useApiData();
 
+  useEffect(() => {
+    const root = document.documentElement;
+    if (darkMode) {
+      root.classList.add("dark");
+    } else {
+      root.classList.remove("dark");
+    }
+    localStorage.setItem("darkMode", String(darkMode));
+  }, [darkMode]);
+
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50/50" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+    <div className="min-h-screen flex flex-col bg-gray-50/50 dark:bg-gray-900/50" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
       {/* ---- HEADER ---- */}
-      <header className="sticky top-0 z-50 bg-white border-b" style={{ borderColor: BORDER }}>
-        <div className="max-w-7xl mx-auto flex items-center justify-between px-4 sm:px-6 h-14">
-          <div className="flex items-center gap-3">
-            <h1 className="text-lg font-bold tracking-tight" style={{ color: TEXT_PRIMARY }}>Junbo</h1>
-            <div className="flex items-center gap-1.5">
-              {data.isLoading && !data.status ? (
-                <>
-                  <Loader2 className="h-3 w-3 animate-spin" style={{ color: TEXT_MUTED }} />
-                  <span className="text-xs font-medium" style={{ color: TEXT_MUTED }}>Bağlanıyor...</span>
-                </>
-              ) : data.status?.is_running ? (
-                <>
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
-                  </span>
-                  <span className="text-xs font-medium text-green-600">ÇALIŞIYOR</span>
-                </>
-              ) : (
-                <>
-                  <span className="relative flex h-2 w-2">
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-gray-400" />
-                  </span>
-                  <span className="text-xs font-medium" style={{ color: TEXT_MUTED }}>DURDURULDU</span>
-                </>
-              )}
+      <header className="sticky top-0 z-50 bg-white dark:bg-gray-900 border-b" style={{ borderColor: BORDER }}>
+        <div className="flex items-center justify-between px-4 sm:px-6 h-12">
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-100">Junbo</h1>
+              <div className="flex items-center gap-1.5">
+                {data.isLoading && !data.status ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" style={{ color: TEXT_MUTED }} />
+                    <span className="text-xs font-medium" style={{ color: TEXT_MUTED }}>Bağlanıyor...</span>
+                  </>
+                ) : data.status?.is_running ? (
+                  <>
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+                    </span>
+                    <span className="text-xs font-medium text-green-600 dark:text-green-400">Çalışıyor</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="relative flex h-2 w-2">
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-gray-400" />
+                    </span>
+                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Durduruldu</span>
+                  </>
+                )}
+              </div>
             </div>
+            <nav className="flex gap-0">
+              {TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors whitespace-nowrap"
+                  style={{
+                    borderColor: activeTab === tab.id ? TEAL : "transparent",
+                    color: activeTab === tab.id ? TEAL : TEXT_MUTED,
+                  }}
+                >
+                  {tab.icon}
+                  {tab.label}
+                </button>
+              ))}
+            </nav>
+          </div>
+          <div className="flex items-center gap-3">
             {data.error && (
               <Badge className="text-[10px] px-2 py-0.5 h-5" style={{ backgroundColor: RED_LIGHT, color: RED }}>
                 API Hatası
               </Badge>
             )}
-          </div>
-          <div className="flex items-center gap-2">
             {data.lastUpdated && (
-              <span className="text-[10px] tabular-nums" style={{ color: TEXT_MUTED }}>
+              <span className="text-[10px] tabular-nums text-gray-500 dark:text-gray-400">
                 Son güncelleme: {data.lastUpdated.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
               </span>
             )}
-            <button className="p-2 rounded-md hover:bg-gray-100 transition-colors" aria-label="Dark mode">
-              <Moon className="h-4 w-4 text-gray-500" />
-            </button>
+            {data.health?.activity_24h?.pass_reasons?.[0]?.time && (
+              <span className="text-[10px] tabular-nums" style={{ color: TEAL }}>
+                Son Tarama: {new Date(data.health.activity_24h.pass_reasons[0].time).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            )}
+            <button
+                className="p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                onClick={() => setDarkMode((d) => !d)}
+              >
+                {darkMode ? (
+                  <Sun className="h-4 w-4 text-yellow-400" />
+                ) : (
+                  <Moon className="h-4 w-4 text-gray-500" />
+                )}
+              </button>
           </div>
         </div>
       </header>
 
-      {/* ---- TAB NAVIGATION ---- */}
-      <nav className="bg-white border-b sticky top-14 z-40" style={{ borderColor: BORDER }}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6">
-          <div className="flex gap-0 overflow-x-auto">
-            {TABS.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className="flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap"
-                style={{
-                  borderColor: activeTab === tab.id ? TEAL : "transparent",
-                  color: activeTab === tab.id ? TEAL : TEXT_MUTED,
-                }}
-              >
-                {tab.icon}
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </nav>
-
       {/* ---- MAIN CONTENT ---- */}
-      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-6">
+      <main className="flex-1 w-full py-4">
         {activeTab === "overview" && (
           <OverviewTab
             isLoading={data.isLoading && !data.status}
@@ -1409,13 +1435,12 @@ export default function DashboardPage() {
           />
         )}
         {activeTab === "trades" && <TradesTab tradeHistory={data.tradeHistory} historyStats={data.historyStats} totalPnl={data.historyStats?.total_pnl ?? 0} />}
-        {activeTab === "models" && <ModelsTab modelScores={data.modelScores} />}
         {activeTab === "health" && <HealthTab health={data.health} kpiData={data.kpiData} />}
       </main>
 
       {/* ---- FOOTER ---- */}
       <footer className="mt-auto py-4 text-center">
-        <p className="text-xs" style={{ color: TEXT_MUTED }}>
+        <p className="text-xs text-gray-500 dark:text-gray-400">
           Junbo — Polymarket Hava Ticaret Botu - SIA Modeli ile Otomatik İşlem
         </p>
       </footer>

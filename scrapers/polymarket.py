@@ -19,6 +19,11 @@ from utils.retry import retry
 
 logger = logging.getLogger("SCRAPER_POLYMARKET")
 
+# Market statuses that mean the market is done (resolved/expired/closed).
+# The fetch upsert must never overwrite these back to "open" — doing so
+# would resurrect a settled market and let the bot re-bet / re-settle it.
+_TERMINAL_MARKET_STATUSES = frozenset({"expired", "settled_win", "settled_loss", "closed_early", "won", "lost"})
+
 
 class PolymarketScraper:
     """Scrapes weather prediction markets from Polymarket Gamma API."""
@@ -54,10 +59,14 @@ class PolymarketScraper:
         today = datetime.now(UTC).replace(tzinfo=None)
         # Generate date strings in multiple formats to match Polymarket titles
         # which use "June 7" (no zero-pad), "June 07" (zero-pad), or "Jun 7".
+        # Cover a few days *back* as well: Polymarket keeps temperature markets
+        # open/tradable for a day or two after the target date, and we hold
+        # positions in them until settlement — so their prices must keep
+        # refreshing instead of freezing the moment the date rolls over.
         import calendar
 
         date_strs = []
-        for i in range(3):
+        for i in range(-2, 3):
             d = today + timedelta(days=i)
             month_name = calendar.month_name[d.month]  # "June"
             month_abbr = calendar.month_abbr[d.month]  # "Jun"
@@ -78,10 +87,9 @@ class PolymarketScraper:
             "temperature",
             "weather temperature",
         ]
-        # Also add 5 city-specific queries to broaden coverage beyond
-        # the public-search top results.
+        # City-specific queries to cover ALL Polymarket weather cities
         queries += [
-            # Top US markets (highest volume on Polymarket)
+            # US cities
             "dallas temperature",
             "miami temperature",
             "new york temperature",
@@ -89,12 +97,93 @@ class PolymarketScraper:
             "houston temperature",
             "los angeles temperature",
             "phoenix temperature",
-            # International (frequent on Polymarket)
+            "denver temperature",
+            "seattle temperature",
+            "atlanta temperature",
+            "boston temperature",
+            "san francisco temperature",
+            "washington temperature",
+            "philadelphia temperature",
+            "detroit temperature",
+            "minneapolis temperature",
+            "portland temperature",
+            "las vegas temperature",
+            "nashville temperature",
+            "austin temperature",
+            "charlotte temperature",
+            "indianapolis temperature",
+            "columbus temperature",
+            "san diego temperature",
+            "tampa temperature",
+            "orlando temperature",
+            "sacramento temperature",
+            "pittsburgh temperature",
+            "st louis temperature",
+            "baltimore temperature",
+            "milwaukee temperature",
+            "kansas city temperature",
+            "salt lake city temperature",
+            # International cities
             "london temperature",
             "paris temperature",
             "tokyo temperature",
             "seoul temperature",
             "istanbul temperature",
+            "moscow temperature",
+            "berlin temperature",
+            "madrid temperature",
+            "rome temperature",
+            "barcelona temperature",
+            "amsterdam temperature",
+            "vienna temperature",
+            "prague temperature",
+            "warsaw temperature",
+            "budapest temperature",
+            "lisbon temperature",
+            "copenhagen temperature",
+            "stockholm temperature",
+            "oslo temperature",
+            "helsinki temperature",
+            "dublin temperature",
+            "zurich temperature",
+            "brussels temperature",
+            "munich temperature",
+            "milan temperature",
+            "toronto temperature",
+            "vancouver temperature",
+            "sydney temperature",
+            "melbourne temperature",
+            "bangkok temperature",
+            "singapore temperature",
+            "hong kong temperature",
+            "taipei temperature",
+            "shanghai temperature",
+            "beijing temperature",
+            "mumbai temperature",
+            "delhi temperature",
+            "dubai temperature",
+            "abu dhabi temperature",
+            "johannesburg temperature",
+            "cape town temperature",
+            "cairo temperature",
+            "nairobi temperature",
+            "lagos temperature",
+            "buenos aires temperature",
+            "sao paulo temperature",
+            "rio de janeiro temperature",
+            "mexico city temperature",
+            "bogota temperature",
+            "lima temperature",
+            "santiago temperature",
+            "ankara temperature",
+            "tel aviv temperature",
+            "riyadh temperature",
+            "karachi temperature",
+            "dhaka temperature",
+            "jakarta temperature",
+            "manila temperature",
+            "hanoi temperature",
+            "kuala lumpur temperature",
         ]
 
         gamma_host = urlparse(self.gamma_url).netloc
@@ -103,7 +192,7 @@ class PolymarketScraper:
         items = [
             (
                 f"{self.gamma_url}/public-search",
-                {"q": q, "limit_per_type": 50},
+                {"q": q, "limit_per_type": 100},
                 gamma_host,
             )
             for q in queries
@@ -140,9 +229,7 @@ class PolymarketScraper:
                     m.setdefault("event_slug", slug)
                     all_events.append(m)
 
-        logger.info(
-            f"Toplam {len(all_events)} market çekildi ({len(seen_slugs)} event, {len(queries)} sorgu)"
-        )
+        logger.info(f"Toplam {len(all_events)} market çekildi ({len(seen_slugs)} event, {len(queries)} sorgu)")
         return all_events
 
     async def fetch_polymarket_events(self, limit: int = 100) -> list[dict]:
@@ -160,16 +247,10 @@ class PolymarketScraper:
         and humidity markets are explicitly rejected.
         """
         question = (
-            market.get("question", "")
-            + " "
-            + market.get("description", "")
-            + " "
-            + market.get("title", "")
+            market.get("question", "") + " " + market.get("description", "") + " " + market.get("title", "")
         ).lower()
         # 1) Must mention a known city (any key from CITY_ICAO_MAP)
-        city_match = any(
-            city_key in question for city_key in config.CITY_ICAO_MAP.keys()
-        )
+        city_match = any(city_key in question for city_key in config.CITY_ICAO_MAP.keys())
         if not city_match:
             return False
         # 2) Must contain a strong weather term (reject sports/politics that
@@ -207,28 +288,44 @@ class PolymarketScraper:
 
     def _parse_market(self, raw: dict) -> dict:
         """Ham marketi yapılandırılmış veriye çevir."""
-        # 1) YES/NO price — handle both /markets (tokens[]) and
-        #    /public-search (lastTradePrice / bestBid / bestAsk) formats.
+        # 1) outcomePrices — CANONICAL source (Gamma API v2 format).
+        #    Tokens[] often returns broken prices (e.g. both sides 0.75),
+        #    while outcomePrices reflects actual trade prices.
         yes_price = None
         no_price = None
-        for token in raw.get("tokens", []) or []:
-            outcome = (token.get("outcome", "") or "").upper()
+        op = raw.get("outcomePrices", "")
+        if op:
             try:
-                p = float(token.get("price", 0) or 0)
-            except (TypeError, ValueError):
-                p = None
-            if outcome == "YES" and p is not None:
-                yes_price = p
-            elif outcome == "NO" and p is not None:
-                no_price = p
-        # Fallback: public-search fields
+                parsed_op = json.loads(op) if isinstance(op, str) else op
+                if isinstance(parsed_op, list) and len(parsed_op) >= 2:
+                    yes_price = float(parsed_op[0]) if parsed_op[0] else None
+                    no_price = float(parsed_op[1]) if parsed_op[1] else None
+            except (json.JSONDecodeError, ValueError, TypeError):
+                pass
+
+        # 2) Tokens[] — supplement/fallback only if outcomePrices missing
+        if yes_price is None or no_price is None:
+            for token in raw.get("tokens", []) or []:
+                outcome = (token.get("outcome", "") or "").upper()
+                try:
+                    p = float(token.get("price", 0) or 0)
+                except (TypeError, ValueError):
+                    p = None
+                if outcome == "YES" and p is not None and yes_price is None:
+                    yes_price = p
+                elif outcome == "NO" and p is not None and no_price is None:
+                    no_price = p
+
+        # 3) Fallback: public-search fields
         if yes_price is None:
             for key in ("lastTradePrice", "bestBid", "yes_price", "yesPrice"):
                 v = raw.get(key)
                 if v is not None:
                     try:
-                        yes_price = float(v)
-                        break
+                        p = float(v)
+                        if p > 0:
+                            yes_price = p
+                            break
                     except (TypeError, ValueError):
                         pass
         if no_price is None:
@@ -236,12 +333,28 @@ class PolymarketScraper:
                 v = raw.get(key)
                 if v is not None:
                     try:
-                        no_price = float(v)
-                        break
+                        p = float(v)
+                        if p < 1:
+                            no_price = p
+                            break
                     except (TypeError, ValueError):
                         pass
-        if no_price is None and yes_price is not None:
+
+        # 4) Binary invariant: no_price = 1 - yes_price
+        #    This is the fundamental invariant for binary YES/NO markets.
+        if yes_price is not None and no_price is None:
             no_price = max(0.0, min(1.0, 1.0 - yes_price))
+        elif no_price is not None and yes_price is None:
+            yes_price = max(0.0, min(1.0, 1.0 - no_price))
+
+        # 5) Enforce binary invariant: if sum deviates, trust the canonical side
+        #    (yes_price from outcomePrices) and recompute the other.
+        if yes_price is not None and no_price is not None:
+            total = yes_price + no_price
+            if abs(total - 1.0) > 0.02:
+                # Binary market invariant violated — recompute no from yes
+                no_price = max(0.0, min(1.0, 1.0 - yes_price))
+
         if yes_price is None:
             yes_price = 0.5
         if no_price is None:
@@ -250,11 +363,7 @@ class PolymarketScraper:
         # Extract city name dynamically from ICAO map keys
         city_name = "Unknown"
         title = raw.get("title", "") or raw.get("question", "")
-        question = (
-            raw.get("question", "")
-            or raw.get("description", "")
-            or raw.get("title", "")
-        )
+        question = raw.get("question", "") or raw.get("description", "") or raw.get("title", "")
         title_lower = (title or "").lower()
         question_lower = (question or "").lower()
         for k in config.CITY_ICAO_MAP.keys():
@@ -277,11 +386,7 @@ class PolymarketScraper:
         threshold, threshold_unit, threshold_low, threshold_high = (
             threshold_result if threshold_result else (0.0, "celsius", None, None)
         )
-        metric = (
-            "temperature_max"
-            if "highest" in question_lower or "above" in question_lower
-            else "temperature_min"
-        )
+        metric = "temperature_max" if "highest" in question_lower or "above" in question_lower else "temperature_min"
         city_code = self._extract_city(question)
         market_type = self._determine_market_type(question)
         coords = self.get_city_coords(city_code) if city_code else None
@@ -314,16 +419,21 @@ class PolymarketScraper:
         }
 
     def fetch_and_save(self) -> int:
-        """Ana fonksiyon: Çek -> Filtrele -> Kaydet."""
+        """Ana fonksiyon: Cek -> Filtrele -> Kaydet."""
         try:
             raw_markets = self._fetch_raw_markets()
         except Exception as e:
-            raise Exception(f"Polymarket API hatası: {e}")
+            raise Exception(f"Polymarket API hatasi: {e}")
 
         weather_markets = [m for m in raw_markets if self._is_weather_market(m)]
         logger.info(f"{len(weather_markets)} hava durumu marketi bulundu")
 
         saved = 0
+        # Track (city, date_str, threshold) to prevent duplicates within
+        # this fetch cycle.  Different Polymarket events can track the
+        # same strike — we only keep the first one encountered.
+        _seen_strikes: set[tuple] = set()
+
         with get_session() as session:
             for raw in weather_markets:
                 try:
@@ -340,22 +450,13 @@ class PolymarketScraper:
                             (parsed.get("question") or "")[:80],
                         )
 
-                    # Upsert
-                    existing = (
-                        session.query(WeatherMarket).filter_by(id=parsed["id"]).first()
-                    )
-
                     # Skip markets with missing target_date or zero threshold
                     if parsed["target_date"] is None:
-                        logger.warning(
-                            f"Skipping market {parsed['id']}: no target_date parsed"
-                        )
+                        logger.warning(f"Skipping market {parsed['id']}: no target_date parsed")
                         continue
                     threshold_c = parsed["threshold"]
                     if threshold_c == 0.0:
-                        logger.warning(
-                            f"Skipping market {parsed['id']}: threshold is 0.0"
-                        )
+                        logger.warning(f"Skipping market {parsed['id']}: threshold is 0.0")
                         continue
                     # Sanity guard: Celsius değer -40..55 aralığında değilse atla
                     if threshold_c < -40 or threshold_c > 55:
@@ -368,6 +469,36 @@ class PolymarketScraper:
                         continue
 
                     status = "no_coords" if not has_coords else "open"
+
+                    # --- Duplicate prevention ---
+                    # Build a strike key: (city, date_str, threshold)
+                    _td = parsed["target_date"]
+                    _td_str = _td.strftime("%Y-%m-%d") if hasattr(_td, "strftime") else str(_td)[:10]
+                    _strike_key = (parsed["city"], _td_str, parsed["threshold"])
+
+                    # Check by Polymarket ID first (fast path)
+                    existing = session.query(WeatherMarket).filter_by(id=parsed["id"]).first()
+                    # Also check in-memory set + DB for cross-event duplicates
+                    if not existing and _strike_key in _seen_strikes:
+                        # Already processed this strike in this cycle — skip
+                        continue
+                    if not existing:
+                        existing = (
+                            session.query(WeatherMarket)
+                            .filter(
+                                WeatherMarket.city == parsed["city"],
+                                WeatherMarket.threshold == parsed["threshold"],
+                                WeatherMarket.target_date.isnot(None),
+                                # Filter by same date (string comparison in DB)
+                                WeatherMarket.target_date.like(f"{_td_str}%"),
+                            )
+                            .first()
+                        )
+                        # Verify same date
+                        if existing:
+                            ex_str = str(existing.target_date)[:10] if existing.target_date else ""
+                            if ex_str != _td_str:
+                                existing = None
 
                     if existing:
                         existing.yes_price = parsed["yes_price"]
@@ -386,6 +517,11 @@ class PolymarketScraper:
                         existing.status = status
                         existing.threshold_low = parsed.get("threshold_low")
                         existing.threshold_high = parsed.get("threshold_high")
+                        # Never resurrect a settled/expired market: keep its
+                        # terminal status so the bot does not re-bet or
+                        # re-settle it. Open/no_coords markets keep tracking.
+                        if existing.status not in _TERMINAL_MARKET_STATUSES:
+                            existing.status = status
                     else:
                         market = WeatherMarket(
                             id=parsed["id"],
@@ -411,6 +547,7 @@ class PolymarketScraper:
                         )
                         session.add(market)
                     saved += 1
+                    _seen_strikes.add(_strike_key)
 
                 except Exception as e:
                     logger.error(f"Market parse hatası {raw.get('id')}: {e}")
@@ -487,46 +624,10 @@ class PolymarketScraper:
                 return icao_code
         return ""
 
-    def _extract_strike(self, question: str) -> float:
-        if not question:
-            return 0.0
-        patterns = [
-            r"(\d+)\s*\°\s*C",
-            r"(\d+)\s*\°\s*F",
-            r"(\d+)\s*degrees?\s*[CF]?",
-            r"above\s+(\d+)",
-            r"below\s+(\d+)",
-            r"be\s+(\d+)\s*\°?",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, question, re.IGNORECASE)
-            if match:
-                try:
-                    strike = float(match.group(1))
-                    if "F" in question.upper() or "FAHRENHEIT" in question.upper():
-                        strike = (strike - 32) * 5 / 9
-                    return round(strike, 1)
-                except ValueError:
-                    continue
-        return 0.0
-
     def _determine_market_type(self, question: str) -> str:
         question_lower = question.lower()
-        if (
-            "above" in question_lower
-            or "higher" in question_lower
-            or "over" in question_lower
-        ):
+        if "above" in question_lower or "higher" in question_lower or "over" in question_lower:
             return "HIGH"
-        if (
-            "below" in question_lower
-            or "lower" in question_lower
-            or "under" in question_lower
-        ):
+        if "below" in question_lower or "lower" in question_lower or "under" in question_lower:
             return "LOW"
-        if "or below" in question_lower or "or higher" in question_lower:
-            if "or below" in question_lower:
-                return "LOW"
-            if "or higher" in question_lower:
-                return "HIGH"
         return "RANGE"

@@ -32,8 +32,10 @@ def test_no_literal_open_status_tuples():
     }
 
     for root, _dirs, files in os.walk(project_root):
-        # Skip venv and __pycache__
+        # Skip venv, __pycache__, .git, backup dirs
         if "venv" in root or "__pycache__" in root or ".git" in root:
+            continue
+        if "_backups" in root or "_test_backups" in root:
             continue
         for fname in files:
             if not fname.endswith(".py"):

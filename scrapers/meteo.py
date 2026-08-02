@@ -13,7 +13,6 @@ import requests
 from config.settings import bot_config, config
 from database.db import get_session
 from database.models import WeatherForecast, WeatherMarket
-from scrapers.async_client import AsyncHttpClient
 from utils.retry import retry
 
 logger = logging.getLogger("SCRAPER_METEO")
@@ -26,13 +25,8 @@ logger = logging.getLogger("SCRAPER_METEO")
 _FETCH_CACHE: dict[tuple[float, float, str, str], tuple] = {}
 _FETCH_CACHE_LOCK = threading.Lock()
 
-# Successes live for 30 minutes; failures for 5 minutes. The original
-# cache remembered failures for the lifetime of the process, which
-# made the scraper silently stop working after the first 429 hit: the
-# (lat, lon, date, source) tuple was stored as None and every later
-# call returned the cached failure forever. With TTL the bot recovers
-# on its own and only re-issues requests every few minutes.
-_SUCCESS_TTL_S = 30.0 * 60.0
+# Successes live for 60 minutes (Open-Meteo updates hourly); failures for 5 minutes.
+_SUCCESS_TTL_S = 60.0 * 60.0
 _FAILURE_TTL_S = 5.0 * 60.0
 
 
@@ -64,13 +58,20 @@ def _cache_clear() -> None:
 # Per-host request throttle to keep us under Open-Meteo's free-tier burst
 # limits. Open-Meteo enforces an undocumented per-IP request rate; without
 # spacing we trip 429s whenever the same city is hit by many markets.
-# 3s interval is very safe for grouped requests.
-_MIN_INTERVAL_S = 3.0
+_MIN_INTERVAL_S = 1.0
 _LAST_CALL_AT: dict[str, float] = {}
 _THROTTLE_LOCK = threading.Lock()
 
+# Global rate-limit flag — 429'da tüm API isteklerini durdur
+import time as _time  # noqa: E402
+
+_RATE_LIMITED_UNTIL = 0.0  # monotonic timestamp
+
 
 def _throttle(host: str) -> None:
+    """Sync per-host spacing. This is a blocking, synchronous function
+    (called from requests-based fetchers), so it must use time.sleep —
+    it must never try to drive an event loop."""
     while True:
         with _THROTTLE_LOCK:
             now = time.monotonic()
@@ -79,12 +80,62 @@ def _throttle(host: str) -> None:
             if wait <= 0:
                 _LAST_CALL_AT[host] = now
                 return
-        # Use asyncio.sleep if running in an event loop, else time.sleep
-        try:
-            loop = asyncio.get_running_loop()
-            loop.run_until_complete(asyncio.sleep(wait))
-        except RuntimeError:
-            time.sleep(wait)
+        time.sleep(wait)
+
+
+def _upsert_forecast(
+    session,
+    market_id: str,
+    city: str,
+    lat: float,
+    lon: float,
+    target_date: datetime,
+    metric: str,
+    source_name: str,
+    predicted_value: float,
+    raw_data,
+) -> bool:
+    """Insert a forecast row, or update the existing one for the same
+    (market_id, source, target_date, metric) instead of duplicating it.
+
+    Without this, every hourly fetch appends a new row per source, so the
+    weather_forecasts table grows unbounded and the calculator's
+    latest-by-source logic must wade through stale duplicates.
+    """
+    existing = (
+        session.query(WeatherForecast)
+        .filter(
+            WeatherForecast.market_id == market_id,
+            WeatherForecast.source == source_name,
+            WeatherForecast.target_date == target_date,
+            WeatherForecast.metric == metric,
+        )
+        .first()
+    )
+    now = datetime.now(UTC).replace(tzinfo=None)
+    if existing:
+        existing.predicted_value = predicted_value
+        existing.city = city
+        existing.lat = lat
+        existing.lon = lon
+        existing.fetched_at = now
+        existing.raw_data = str(raw_data)
+        return False
+    session.add(
+        WeatherForecast(
+            market_id=market_id,
+            city=city,
+            lat=lat,
+            lon=lon,
+            target_date=target_date,
+            metric=metric,
+            source=source_name,
+            predicted_value=predicted_value,
+            fetched_at=now,
+            raw_data=str(raw_data),
+        )
+    )
+    return True
 
 
 class MeteoFetcher:
@@ -100,9 +151,8 @@ class MeteoFetcher:
             await client.aclose()
 
     @retry(max_attempts=3, delay=3, exceptions=(requests.RequestException,))
-    def _fetch_open_meteo(
-        self, lat: float, lon: float, target_date: str
-    ) -> dict | None:
+    def _fetch_open_meteo(self, lat: float, lon: float, target_date: str) -> dict | None:
+        global _RATE_LIMITED_UNTIL
         """Open-Meteo API (Ã¼cretsiz, key gerekmez).
 
         Results are cached in-process keyed by (lat, lon, date, source) so
@@ -115,6 +165,11 @@ class MeteoFetcher:
         cached = _cache_get(cache_key)
         if cached is not None or cache_key in _FETCH_CACHE:
             return cached
+
+        # Global rate-limit kontrolü
+        if _time.monotonic() < _RATE_LIMITED_UNTIL:
+            logger.debug("Rate-limited, skipping Open-Meteo for (%s,%s)", lat, lon)
+            return None
 
         _throttle("open-meteo.com")
         try:
@@ -132,8 +187,8 @@ class MeteoFetcher:
                 timeout=15,
             )
             if resp.status_code == 429:
-                logger.warning("Open-Meteo 429 Rate Limit! Waiting 30s...")
-                time.sleep(30)
+                _RATE_LIMITED_UNTIL = _time.monotonic() + 300  # 5dk
+                logger.warning("Open-Meteo 429 — all requests paused for 5min")
                 return None
             resp.raise_for_status()
             data = resp.json()
@@ -142,7 +197,7 @@ class MeteoFetcher:
             raise
 
         daily = data.get("daily", {})
-        if daily.get("temperature_2m_max"):
+        if daily.get("temperature_2m_max") and daily["temperature_2m_max"][0] is not None:
             result = {
                 "source": "openmeteo",
                 "temperature_max": daily["temperature_2m_max"][0],
@@ -155,9 +210,7 @@ class MeteoFetcher:
         return None
 
     @retry(max_attempts=3, delay=3, exceptions=(requests.RequestException,))
-    def _fetch_weatherapi(
-        self, lat: float, lon: float, target_date: str
-    ) -> dict | None:
+    def _fetch_weatherapi(self, lat: float, lon: float, target_date: str) -> dict | None:
         """WeatherAPI.com."""
         if not bot_config.meteo.weatherapi_key:
             return None
@@ -197,9 +250,7 @@ class MeteoFetcher:
         _cache_set(cache_key, None)
         return None
 
-    def fetch_for_markets(
-        self, market_ids: list[str], city: str, target_date: datetime, metric: str
-    ) -> int:
+    def fetch_for_markets(self, market_ids: list[str], city: str, target_date: datetime, metric: str) -> int:
         """Fetch weather data for a group of markets sharing the same city/date/metric.
 
         Coordinate resolution: city name → CITY_ICAO_MAP → ICAO_COORDS.
@@ -224,6 +275,12 @@ class MeteoFetcher:
         ]
 
         total_saved = 0
+        # Open-Meteo'dan 8 farklı model çek (ensemble) — min_sources=2 için
+        openmeteo_models = [
+            "gfs_seamless", "ecmwf_ifs025", "gem_global", "icon_global",
+            "jma_seamless", "cma_grapes_global", "ukmo_seamless", "meteofrance_seamless"
+        ]
+
         for source_name, fetch_func in sources:
             try:
                 result = fetch_func(lat, lon, date_str)
@@ -231,19 +288,18 @@ class MeteoFetcher:
                     predicted_value = result[metric]
                     with get_session() as session:
                         for mid in market_ids:
-                            forecast = WeatherForecast(
-                                market_id=mid,
-                                city=city,
-                                lat=lat,
-                                lon=lon,
-                                target_date=target_date,
-                                metric=metric,
-                                source=source_name,
-                                predicted_value=predicted_value,
-                                fetched_at=datetime.now(UTC).replace(tzinfo=None),
-                                raw_data=str(result),
+                            _upsert_forecast(
+                                session,
+                                mid,
+                                city,
+                                lat,
+                                lon,
+                                target_date,
+                                metric,
+                                source_name,
+                                predicted_value,
+                                result,
                             )
-                            session.add(forecast)
                         session.commit()
                     total_saved += len(market_ids)
                     logger.info(
@@ -254,11 +310,45 @@ class MeteoFetcher:
                 logger.error(f"[{source_name}] group fetch error: {e}")
                 continue
 
+        # Open-Meteo ensemble — her modeli ayrı kaynak olarak çek
+        try:
+            from config.settings import bot_config
+            for model in openmeteo_models:
+                try:
+                    result = self._fetch_open_meteo_model(lat, lon, date_str, model)
+                    if result and metric in result:
+                        predicted_value = result[metric]
+                        with get_session() as session:
+                            for mid in market_ids:
+                                forecast = WeatherForecast(
+                                    market_id=mid,
+                                    city=city,
+                                    lat=lat,
+                                    lon=lon,
+                                    target_date=target_date,
+                                    metric=metric,
+                                    source=f"openmeteo_{model}",
+                                    predicted_value=predicted_value,
+                                    fetched_at=datetime.now(UTC).replace(tzinfo=None),
+                                    raw_data=str(result),
+                                )
+                                session.add(forecast)
+                            session.commit()
+                        total_saved += len(market_ids)
+                        logger.info(
+                            f"[openmeteo_{model}] Persisted for {len(market_ids)} markets: "
+                            f"{city} {date_str} {metric}={predicted_value}"
+                        )
+                except Exception as e:
+                    logger.error(f"[openmeteo_{model}] error: {e}")
+                    continue
+        except Exception as e:
+            logger.error(f"Ensemble fetch error: {e}")
+
         return total_saved
 
     def fetch_all_markets(self) -> int:
         """Fetch ensemble forecast for all open markets with deduplication."""
-        import asyncio
         from collections import defaultdict
 
         from engine.calculator import WeatherEngine
@@ -315,7 +405,8 @@ class MeteoFetcher:
 
                     try:
                         for metric, mids in mids_by_metric.items():
-                            # 1. Try Ensemble (8-model)
+                            # 1. Try Ensemble (8-model tek istek)
+                            result = None
                             try:
                                 result = loop.run_until_complete(
                                     we.get_multi_model_forecast(
@@ -328,23 +419,31 @@ class MeteoFetcher:
                                         metric=metric,
                                     )
                                 )
-
-                                if result and result.get("model_count", 0) >= 3:
-                                    total += result["model_count"] * len(mids)
-                                    continue
                             except Exception as e:
-                                logger.debug(
-                                    "Ensemble failed for group %s %s: %s",
-                                    key,
-                                    metric,
-                                    e,
-                                )
+                                logger.debug("Ensemble failed for %s: %s", key, e)
 
-                            # 2. Fallback to Backup (Open-Meteo + WeatherAPI)
-                            count = self.fetch_for_markets(
-                                mids, city, target_date, metric
-                            )
-                            total += count
+                            if result and result.get("model_count", 0) >= 3:
+                                total += result["model_count"] * len(mids)
+                                continue
+
+                            # Ensemble başarısız (429 veya diğer) → DB fallback
+                            # API fallback KALDIRILDI — 429'da 8x fazla istek yapıyordu
+                            cached_count = 0
+                            for mid in mids[:1]:
+                                existing = (
+                                    session.query(WeatherForecast)
+                                    .filter(
+                                        WeatherForecast.market_id == mid,
+                                        WeatherForecast.source.isnot(None),
+                                    )
+                                    .order_by(WeatherForecast.fetched_at.desc())
+                                    .first()
+                                )
+                                if existing:
+                                    cached_count += 1
+                            if cached_count > 0:
+                                total += cached_count
+                                logger.debug("DB fallback: cached forecast for %s", key)
 
                     except Exception as e:
                         logger.error("Group %s bucket error: %s", key, e)
@@ -353,61 +452,3 @@ class MeteoFetcher:
                 loop.close()
 
         return total
-
-    def _parallel_fetch_sources(
-        self, lat: float, lon: float, target_date: str
-    ) -> dict[str, dict | None]:
-        """Fetch Open-Meteo + WeatherAPI concurrently via AsyncHttpClient.
-
-        Returns a dict keyed by source name with the same shape as the
-        legacy ``_fetch_open_meteo`` / ``_fetch_weatherapi`` return
-        values (or ``None`` on a per-source failure). On aiohttp-less
-        installs the AsyncHttpClient falls back to a sequential
-        ``requests`` path so behavior is preserved.
-        """
-        if not hasattr(self, "_async_client") or self._async_client is None:
-            self._async_client = AsyncHttpClient()
-        # Delegate to the existing per-source cache-aware methods so
-        # cache + throttle + retry behavior stays in one place.
-        return {
-            "openmeteo": self._fetch_open_meteo(lat, lon, target_date),
-            "weatherapi": self._fetch_weatherapi(lat, lon, target_date),
-        }
-
-    # ------------------------------------------------------------------
-    # Backward-compatibility alias
-    # ------------------------------------------------------------------
-    # Older callers (and tests/test_meteo.py) expected a method named
-    # `fetch_weather_data` on this class. The refactor that introduced
-    # `fetch_for_market` / `fetch_all_markets` dropped the legacy name
-    # without keeping an alias, which broke the test contract.
-    # This thin shim satisfies `hasattr(fetcher, "fetch_weather_data")`
-    # and delegates to the modern per-market entry point.
-    def fetch_weather_data(self, *args, **kwargs):  # noqa: D401 - compat shim
-        """Deprecated: use :meth:`fetch_for_market` instead.
-
-        Kept for backward compatibility with the pre-refactor public API
-        and with ``tests/test_meteo.py::test_meteo_fetch``.
-        """
-        # If called as fetch_weather_data(market_id, city, target_date, metric)
-        # forward to the modern API. Otherwise return 0 to keep the legacy
-        # contract observable.
-        if len(args) >= 4:
-            return self.fetch_for_market(args[0], args[1], args[2], args[3])
-        if {"market_id", "city", "target_date", "metric"}.issubset(kwargs):
-            return self.fetch_for_market(
-                kwargs["market_id"],
-                kwargs["city"],
-                kwargs["target_date"],
-                kwargs["metric"],
-            )
-        return 0
-
-    def fetch_for_market(
-        self, market_id: str, city: str, target_date: datetime, metric: str
-    ) -> int:
-        """Backward-compat shim: fetch weather for a single market.
-
-        Delegates to :meth:`fetch_for_markets` with a single-element list.
-        """
-        return self.fetch_for_markets([market_id], city, target_date, metric)

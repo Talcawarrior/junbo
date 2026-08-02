@@ -1,7 +1,7 @@
 """Slippage estimation for paper/live bet execution.
 
 Provides three slippage models of increasing fidelity:
-  1. ``flat``      — single fixed % (legacy, matches karpathy_weekly.py)
+  1. ``flat``      — single fixed %
   2. ``tiered``    — 3-tier based on entry price (proxy for book depth)
   3. ``orderbook`` — real depth-based slippage from ResolvedMarkets API
 
@@ -19,7 +19,7 @@ from config.settings import bot_config
 logger = logging.getLogger("UTIL_SLIPPAGE")
 
 # ---------------------------------------------------------------------------
-# Default cost constants (mirrors strategy_params.json / karpathy_weekly.py)
+# Default cost constants
 # ---------------------------------------------------------------------------
 FEE_PCT: float = 0.05  # Polymarket Weather category taker fee rate (5 %)
 # Correct formula: fee = C × feeRate × p × (1-p) = stake × feeRate × (1-p)
@@ -41,9 +41,6 @@ class SlippageEstimate:
 def _tiered_slippage(entry_price: float) -> float:
     """3-tier adaptive slippage based on entry price (liquidity proxy).
 
-    Mirrors the model in ``karpathy_weekly.py`` so backtest ↔ paper are
-    consistent.
-
     * < 0.05  → 3 %  (thin book, penny markets)
     * 0.05–0.10 → 1 %  (moderate)
     * > 0.10  → 0.5 % (deep book)
@@ -55,9 +52,7 @@ def _tiered_slippage(entry_price: float) -> float:
     return 0.005
 
 
-def _vwap_from_asks(
-    asks: list[dict], stake_usd: float, fallback_price: float
-) -> tuple[float, float]:
+def _vwap_from_asks(asks: list[dict], stake_usd: float, fallback_price: float) -> tuple[float, float]:
     """Walk orderbook ask levels, compute VWAP fill and total depth.
 
     Returns (fill_vwap, depth_usd).
@@ -112,9 +107,7 @@ def _orderbook_slippage(
 
         ob = ResolvedMarketsClient().get_live_orderbook(condition_id)
         if not ob or ("asks" not in ob and "bids" not in ob):
-            logger.warning(
-                "Orderbook empty for %s, falling back to tiered", condition_id
-            )
+            logger.warning("Orderbook empty for %s, falling back to tiered", condition_id)
             return _tiered_fallback(entry_price, "orderbook: empty_book")
 
         asks = ob.get("asks", [])
@@ -135,9 +128,7 @@ def _orderbook_slippage(
             model_used="orderbook",
         )
     except Exception as exc:
-        logger.warning(
-            "Orderbook slippage fetch failed, falling back to tiered: %s", exc
-        )
+        logger.warning("Orderbook slippage fetch failed, falling back to tiered: %s", exc)
         return _tiered_fallback(entry_price, f"orderbook_error: {exc}")
 
 
@@ -225,7 +216,7 @@ def adjust_edge_for_costs(
         # Since edge is measured in price/probability units (same as p),
         # the fee drag in edge units = feeRate × p × (1-p).
         if entry_price > 0:
-            fee_drag = FEE_PCT * entry_price * (1.0 - entry_price)
+            fee_drag = bot_config.strategy.current_fee_rate * entry_price * (1.0 - entry_price)
         else:
             fee_drag = 0.0
         cost += fee_drag
@@ -307,7 +298,7 @@ def check_orderbook_depth(
         from data_pipeline.resolvedmarkets_ingest import ResolvedMarketsClient
 
         client = ResolvedMarketsClient()
-        ob = client.fetch_historical_orderbook(condition_id)
+        ob = client.get_live_orderbook(condition_id)
         if not ob:
             return True, 0.0
 

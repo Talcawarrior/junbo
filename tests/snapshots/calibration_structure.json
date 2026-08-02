@@ -1,0 +1,13 @@
+{
+  "required_keys": [
+    "city",
+    "date",
+    "bias",
+    "actual_value",
+    "city_code",
+    "metric",
+    "predicted_value",
+    "model"
+  ],
+  "version": "1.0"
+}

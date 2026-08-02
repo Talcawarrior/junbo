@@ -10,7 +10,7 @@ Two modes:
     truth labels for backtest / Brier scoring
   - historical-forecast (backfill): per-model 0-day-ahead analysis
     forecasts for past dates — replaces synthetic per-model probabilities
-    in the karpathy_weekly forecast join.
+    in the forecast join.
 
 Models supported (matching Junbo's ensemble):
   gfs_seamless, ecmwf_ifs025, gem_global, icon_global,

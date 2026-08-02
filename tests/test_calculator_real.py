@@ -7,7 +7,6 @@ file (`test_calculator.py`) which only checked that P(T>25 | mean=25,
 std=1) ≈ 0.5.
 """
 
-from engine.calculator import WeatherEngine
 from utils.probability import estimate_probability, normal_cdf
 
 
@@ -111,34 +110,25 @@ class TestEstimateProbability:
         assert 0.01 <= extreme_low <= 0.99
 
 
-class TestWeatherEngineProbabilities:
-    def setup_method(self):
-        self.engine = WeatherEngine()
+class TestEstimateProbabilityEdgeCases:
+    """Edge cases for estimate_probability from utils.probability."""
 
-    def test_above_at_mean_returns_half(self):
-        consensus = {"weighted_mean": 25.0, "weighted_std": 1.0}
-        p = self.engine.calculate_probability_above(25.0, consensus)
-        assert 0.45 <= p <= 0.55
-
-    def test_below_at_mean_returns_half(self):
-        consensus = {"weighted_mean": 25.0, "weighted_std": 1.0}
-        p = self.engine.calculate_probability_below(25.0, consensus)
-        assert 0.45 <= p <= 0.55
-
-    def test_above_and_below_are_complementary(self):
-        # P(T >= X) + P(T <= X) ≈ 1 (overlap at exactly X is negligible).
-        consensus = {"weighted_mean": 30.0, "weighted_std": 2.0}
-        p_above = self.engine.calculate_probability_above(28.0, consensus)
-        p_below = self.engine.calculate_probability_below(28.0, consensus)
-        assert abs((p_above + p_below) - 1.0) < 0.05
-
-    def test_missing_consensus_returns_half(self):
-        # When consensus is None and no DB lookup succeeds, returns 0.5.
-        # (WeatherEngine._db_consensus returns None when no factory is set.)
-        p = self.engine.calculate_probability_above(
-            25.0, consensus=None, market_id="nonexistent"
+    def test_high_and_low_are_complementary(self):
+        # P(T >= X) + P(T < X) ≈ 1 (HIGH and LOW for the same threshold).
+        p_high = estimate_probability(
+            mean=30.0, std=2.0, threshold=28.0, market_type="HIGH"
         )
-        assert p == 0.5
+        p_low = estimate_probability(
+            mean=30.0, std=2.0, threshold=28.0, market_type="LOW"
+        )
+        assert abs((p_high + p_low) - 1.0) < 0.05
+
+    def test_extreme_threshold_high_clamps(self):
+        # Very extreme threshold values should clamp to [0.01, 0.99].
+        p = estimate_probability(
+            mean=25.0, std=1.0, threshold=100.0, market_type="HIGH"
+        )
+        assert p == 0.01
 
 
 class TestTimezoneFallback:

@@ -152,18 +152,6 @@ class TestParseMarket(unittest.TestCase):
         self.assertEqual(code, "")
         print(f"City extraction unknown OK: -> '{code}'")
 
-    def test_strike_fahrenheit(self):
-        """F to C conversion: 90F -> 32.2C"""
-        strike = self.scraper._extract_strike("Will NYC temp be above 90F?")
-        self.assertAlmostEqual(strike, 32.2, delta=0.1)
-        print(f"Strike F->C OK: 90F -> {strike:.1f}C")
-
-    def test_strike_celsius(self):
-        """Direct C: 35C -> 35.0"""
-        strike = self.scraper._extract_strike("Will Tokyo temp be above 35C?")
-        self.assertAlmostEqual(strike, 35.0, delta=0.1)
-        print(f"Strike C OK: 35C -> {strike:.1f}C")
-
     def test_no_city_rejects_no_market(self):
         """Market without a known city should be rejected."""
         raw = {

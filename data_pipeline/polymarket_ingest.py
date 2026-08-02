@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -80,6 +81,10 @@ class PolymarketIngest:
     def __init__(self, cfg: PolymarketIngestConfig | None = None):
         self.cfg = cfg or PolymarketIngestConfig()
         self._session = requests.Session()
+        from config.settings import bot_config
+        proxies = bot_config.polymarket.get_proxies()
+        if proxies:
+            self._session.proxies.update(proxies)
 
     # -- Low-level --------------------------------------------------------
 
@@ -243,7 +248,18 @@ class PolymarketIngest:
             ascending=False,
         )
         os.makedirs(self.cfg.cache_dir, exist_ok=True)
-        df.to_csv(CLOSED_MARKETS_CACHE, index=False)
+        # L11: Atomic CSV write — temp file then os.replace()
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".csv", dir=self.cfg.cache_dir)
+        try:
+            with os.fdopen(tmp_fd, "w") as tmp_f:
+                df.to_csv(tmp_f, index=False)
+            os.replace(tmp_path, CLOSED_MARKETS_CACHE)
+        except Exception:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
         logger.info("Cached %d closed markets to %s", len(df), CLOSED_MARKETS_CACHE)
         return df
 

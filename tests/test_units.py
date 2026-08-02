@@ -12,14 +12,10 @@ Test cases:
 """
 
 import pytest
-from decimal import Decimal
-import asyncio
-from datetime import datetime, timezone
-from unittest.mock import Mock, patch, MagicMock
-import numpy as np
+from unittest.mock import Mock
 
 # Eklenecek modüller
-from engine.calculator import Calculator, WeatherEngine
+from engine.calculator import Calculator
 from utils.formulas import (
     max_bet_cap,
     max_exposure_cap,
@@ -35,12 +31,13 @@ from utils.formulas import (
     win_rate_pct,
     daily_pnl,
 )
-from config.settings import Config, bot_config
+from config.settings import bot_config
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 # 1. CALCULATOR - Olasılık ve Kelly Kriteri Testleri
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
 
 class TestCalculatorEstimateProbability:
     """Tahmin olasılık hesaplama testleri."""
@@ -85,7 +82,7 @@ class TestCalculatorEstimateProbability:
             days_ahead=1,
         )
 
-        prob_low = calc.estimate_probability(
+        calc.estimate_probability(
             forecasts=forecasts_low_std,
             threshold=0.5,
             days_ahead=1,
@@ -217,16 +214,17 @@ class TestCalculatorKellyCriterion:
 # 2. FORMULAS - Finansal Formül Testleri
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+
 class TestMaxBetCap:
     """Maksimum bet limiti testleri."""
 
     def test_max_bet_cap_calculation(self):
         """Max bet cap hesaplama."""
         portfolio = 1000.0
-        max_pct = 0.003  # 0.3%
+        max_pct = 0.01  # 1% = $10
         max_cap = max_bet_cap(portfolio, max_pct)
 
-        assert max_cap == pytest.approx(3.0)
+        assert max_cap == pytest.approx(10.0)
         assert max_cap <= portfolio  # Max bet % portfolio'dan küçük
 
     def test_max_bet_cap_zero_portfolio(self):
@@ -281,52 +279,52 @@ class TestPolymarketFee:
     """Polymarket fee hesaplama testleri."""
 
     def test_polymarket_fee_high_price(self):
-        """Yüksek fiyatda fee."""
+        """Yüksek fiyatda fee (weather exponent=0.5)."""
         shares = 100.0
         price = 0.75  # Close to 1.0
         fee_rate = 0.05
 
         fee = polymarket_fee(shares, price, fee_rate)
 
-        # fee = shares * rate * p * (1-p)
-        # p=0.75 -> p*(1-p) = 0.75*0.25 = 0.1875
-        expected = shares * fee_rate * 0.75 * (1 - 0.75)
+        # fee = shares * rate * p * (1-p)^0.5
+        # p=0.75 -> (1-p)^0.5 = 0.25^0.5 = 0.5
+        expected = shares * fee_rate * 0.75 * (1 - 0.75) ** 0.5
         assert fee == pytest.approx(expected, abs=0.01)
 
     def test_polymarket_fee_mid_price(self):
-        """Orta fiyatda fee."""
+        """Orta fiyatda fee (weather exponent=0.5)."""
         shares = 100.0
         price = 0.50  # Midpoint
         fee_rate = 0.05
 
         fee = polymarket_fee(shares, price, fee_rate)
 
-        # p*(1-p) = 0.5*0.5 = 0.25
-        expected = shares * fee_rate * 0.25
+        # (1-p)^0.5 = 0.5^0.5 = 0.7071
+        expected = shares * fee_rate * 0.50 * (1 - 0.50) ** 0.5
         assert fee == pytest.approx(expected, abs=0.01)
 
     def test_polymarket_fee_low_price(self):
-        """Düşük fiyatda fee."""
+        """Düşük fiyatda fee (weather exponent=0.5)."""
         shares = 100.0
         price = 0.10  # Low price
         fee_rate = 0.05
 
         fee = polymarket_fee(shares, price, fee_rate)
 
-        # p*(1-p) = 0.10*0.90 = 0.09
-        expected = shares * fee_rate * 0.09
+        # (1-p)^0.5 = 0.9^0.5 = 0.9487
+        expected = shares * fee_rate * 0.10 * (1 - 0.10) ** 0.5
         assert fee == pytest.approx(expected, abs=0.01)
 
     def test_polymarket_fee_from_stake(self):
-        """Stake-based fee shortcut."""
+        """Stake-based fee shortcut (weather exponent=0.5)."""
         stake = 100.0
         price = 0.60
         fee_rate = 0.05
 
         fee = polymarket_fee_from_stake(stake, price, fee_rate)
 
-        # fee = stake * rate * (1-p)
-        expected = stake * fee_rate * (1 - price)
+        # fee = stake * rate * (1-p)^0.5
+        expected = stake * fee_rate * (1 - price) ** 0.5
         assert fee == pytest.approx(expected, abs=0.01)
 
 
@@ -394,7 +392,7 @@ class TestPortfolioValues:
 
         pnl = unrealized_pnl(shares, current_price, entry_price)
 
-        expected = shares * (current_price - entry_price)  # -10.0
+        shares * (current_price - entry_price)  # -10.0
         assert pnl < 0
 
     def test_bet_shares(self):
@@ -461,11 +459,11 @@ class TestPortfolioValues:
 # 3. SLIPPAGE & GAS FEE MODÜLLERİ (Test için mock kullanılacak)
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+
 class TestSlippageModels:
     """Slippage modelleri testleri (mock API)."""
 
-    @pytest.mark.asyncio
-    async def test_orderbook_slippage_estimation(self):
+    def test_orderbook_slippage_estimation(self):
         """Orderbook slippage tahmini."""
         # TODO: utils/slippage.py mock testi
         # condition_id varken orderbook depth bazlı slippage hesapla
@@ -492,26 +490,16 @@ class TestSlippageModels:
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-# 4. STRATEGY PARAMETERS (Karpathy search sonuçları)
+# 4. STRATEGY PARAMETERS
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+
 class TestStrategyParams:
-    """Karpathy-search parametreleri testleri."""
+    """Strateji parametreleri testleri."""
 
     def test_default_min_edge(self):
         """Default min_edge = 5%."""
         assert bot_config.strategy.min_edge == 0.05
-
-    def test_min_entry_price_gate(self):
-        """Min entry price gate."""
-        # Polymarket public-search'te genelde entry_price ~0.5
-        # Long-shot bets (< 30%) filtrelenmeli
-        assert bot_config.strategy.min_entry_price == 0.01  # Default (permissive)
-
-    def test_inefficiency_min_gate(self):
-        """Inefficiency min gate."""
-        # Negatif = gate disabled
-        assert bot_config.strategy.inefficiency_min == -1.0
 
 
 if __name__ == "__main__":

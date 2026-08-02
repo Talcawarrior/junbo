@@ -16,8 +16,7 @@ Formula inventory:
   10. portfolio_current       — initial + all PnL (market value, includes unrealised)
   11. roi_pct                 — return on stake
   12. win_rate_pct            — wins / closed
-  13. daily_pnl               — today's profit / loss
-  14. bet_shares              — stake / price (shares purchased)
+  13. bet_shares              — stake / price (shares purchased)
 """
 
 from __future__ import annotations
@@ -160,31 +159,37 @@ def settlement_pnl(
 # ---------------------------------------------------------------------------
 
 
-def polymarket_fee(shares: float, price: float, fee_rate: float = None) -> float:
+def polymarket_fee(shares: float, price: float, fee_rate: float | None = None) -> float:
     """Polymarket taker fee at trade match time.
 
     Official formula (per docs.polymarket.com):
-      fee = C × feeRate × p × (1-p)
+      fee = C × feeRate × p × (1-p)^exponent
 
     Where:
       C        = number of shares traded
       feeRate  = fetched from Polymarket API (default: 0.05 for weather)
       p        = trade price (0.01–0.99)
+      exponent = category-specific (0.5 for weather — flatter curve)
 
     Fee is collected at order match time, NOT at market settlement.
-    Settlement fee is always zero (p→1 ⇒ p(1-p)→0).
+    Settlement fee is always zero (p→1 ⇒ p(1-p)^exp→0).
     """
     if fee_rate is None:
         fee_rate = bot_config.strategy.current_fee_rate
 
-    return shares * fee_rate * price * (1.0 - price)
+    # Weather category uses exponent=0.5 (flatter fee curve).
+    # Other categories use exponent=1.0 (standard quadratic).
+    from config.settings import bot_config as _bc
+    exponent = getattr(_bc.strategy, "fee_exponent", 1.0)
+
+    return shares * fee_rate * price * ((1.0 - price) ** exponent)
 
 
-def polymarket_fee_from_stake(stake: float, price: float, fee_rate: float = None) -> float:
+def polymarket_fee_from_stake(stake: float, price: float, fee_rate: float | None = None) -> float:
     """Stake-based shortcut for polymarket_fee.
 
     Since shares = stake / price, the fee formula simplifies to:
-      fee = (stake / price) × feeRate × p × (1-p) = stake × feeRate × (1-p)
+      fee = (stake / price) × feeRate × p × (1-p)^exp = stake × feeRate × (1-p)^exp
 
     Fee rate is fetched from Polymarket API (default: 0.05 for weather).
     """
@@ -194,7 +199,10 @@ def polymarket_fee_from_stake(stake: float, price: float, fee_rate: float = None
     if fee_rate is None:
         fee_rate = bot_config.strategy.current_fee_rate
 
-    return stake * fee_rate * (1.0 - price)
+    from config.settings import bot_config as _bc
+    exponent = getattr(_bc.strategy, "fee_exponent", 1.0)
+
+    return stake * fee_rate * ((1.0 - price) ** exponent)
 
 
 # ---------------------------------------------------------------------------
@@ -248,22 +256,65 @@ def portfolio_current_value(
 # ---------------------------------------------------------------------------
 
 
+def pnl_ratio(current_price: float, entry_price: float) -> float:
+    """Fiyat değişimi oranı (0-1 arası ratio, percentage DEĞİL).
+
+    pnl_ratio = (current_price - entry_price) / entry_price
+
+    Tüm exit check'ler bu fonksiyonu kullanmalı.
+    1.0 = %100 kâr, -0.3 = %30 zarar.
+
+    Kullanım:
+      - check_take_profit: pnl_ratio >= cfg.take_profit_pct
+      - check_stop_loss: pnl_ratio <= -cfg.stop_loss_pct
+      - check_time_decay: pnl_ratio <= cfg.time_decay_threshold
+    """
+    if entry_price <= 0:
+        return 0.0
+    return (current_price - entry_price) / entry_price
+
+
+def drop_ratio(peak_price: float, current_price: float) -> float:
+    """Tepeden düşüş oranı (trailing stop için).
+
+    drop_ratio = (peak_price - current_price) / peak_price
+
+    Kullanım:
+      - check_trailing_stop: drop_ratio >= cfg.trailing_stop_pct
+    """
+    if peak_price <= 0:
+        return 0.0
+    return (peak_price - current_price) / peak_price
+
+
 def roi_pct(pnl: float, stake: float) -> float:
     """Return on investment as a percentage.
 
     ROI = (pnl / stake) × 100
 
-    Used by:
-      - main.py (:282, :855, :904)
-      - API trade-history and health stats
+    Kullanım: API display, historical stats
     """
     if stake <= 0:
         return 0.0
     return (pnl / stake) * 100
 
 
+# profit_pct KALDIRILDI — pnl_ratio() * 100 kullanın
+
+
 # ---------------------------------------------------------------------------
-# 11. Win rate
+# 11. Daily PnL
+# ---------------------------------------------------------------------------
+
+
+def daily_pnl(today_realized: float, open_bets: list) -> float:
+    """Today's total PnL = realised today + sum(unrealised on open bets)."""
+    unrealized_total = sum(getattr(b, "unrealized_pnl", 0) or 0 for b in open_bets)
+    return today_realized + float(unrealized_total)
+
+
+# ---------------------------------------------------------------------------
+# 12. Win rate
 # ---------------------------------------------------------------------------
 
 
@@ -280,42 +331,4 @@ def win_rate_pct(wins: int, total_closed: int) -> float:
     return (wins / total_closed) * 100
 
 
-# ---------------------------------------------------------------------------
-# 12. Daily PnL
-# ---------------------------------------------------------------------------
 
-
-def daily_pnl(today_realized: float, open_bets: list) -> float:
-    """Today's total PnL = realised today + sum(unrealised on open bets).
-
-    Used by:
-      - main.py (:293)  — API daily_pnl
-    """
-    unrealized_total = sum(getattr(b, "unrealized_pnl", 0) or 0 for b in open_bets)
-    return today_realized + float(unrealized_total)
-
-
-# ---------------------------------------------------------------------------
-# 13. Exit price from PnL (for frontend exit-price reconstruction)
-# ---------------------------------------------------------------------------
-
-
-def exit_price_from_pnl(
-    entry_price: float, realized_pnl: float, stake: float, side: str
-) -> float:
-    """Reconstruct the exit price from a closed bet's PnL.
-
-    For YES side:
-      exit = entry + (pnl / stake)
-    For NO side:
-      exit = entry - (|pnl| / stake)
-
-    Used by:
-      - frontend (api.ts:575-576) — trade history
-    """
-    if stake <= 0:
-        return entry_price
-    if side.upper() == "YES":
-        return min(1.0, entry_price * (1.0 + realized_pnl / stake))
-    else:
-        return max(0.0, entry_price * (1.0 - abs(realized_pnl) / stake))

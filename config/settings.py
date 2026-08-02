@@ -12,6 +12,12 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 
+# Hard ceiling for max bet — no single bet may ever exceed this fraction
+# of the portfolio, regardless of strategy config. Guards against runaway
+# sizing (e.g. a misconfigured value that would stake the whole book).
+MAX_BET_PCT_CEILING = 0.33  # max 33 % of portfolio on a single bet
+
+
 def _resolve_path(path_value: str, default_relative: str) -> str:
     """Resolve relative paths to absolute from repo root."""
     raw = path_value or default_relative
@@ -32,8 +38,18 @@ class PolymarketConfig:
     api_passphrase: str = os.getenv("POLY_API_PASSPHRASE", "")
     weather_keywords: list = None  # type: ignore[assignment]
 
+    # Proxy for geo-blocked regions (Turkey, etc.)
+    # Format: "socks5h://user:pass@host:port" or "http://host:port"
+    proxy_url: str = os.getenv("POLY_PROXY", "")
+
     # Fee rates by category (dynamic, fetched from API)
-    fee_categories: dict = None  # {"weather": 0.05, ...}
+    fee_categories: dict | None = None  # {"weather": 0.05, ...}
+
+    def get_proxies(self) -> dict | None:
+        """Return requests-compatible proxy dict, or None if no proxy configured."""
+        if not self.proxy_url:
+            return None
+        return {"http": self.proxy_url, "https": self.proxy_url}
 
     def __post_init__(self):
         self.weather_keywords = [
@@ -56,15 +72,7 @@ class PolymarketConfig:
         # Initialize fee categories if not provided
         if self.fee_categories is None:
             self.fee_categories = {
-                "weather": 0.05,    # Weather markets: 5% fee
-            }
-
-        # Initialize fee categories if not provided
-        if self.fee_categories is None:
-            self.fee_categories = {
-                "weather": 0.05,    # Weather markets: 5% fee
-                "crypto": 0.07,     # Crypto markets: 7% fee
-                "sports": 0.06,     # Sports markets: 6% fee
+                "weather": 0.05,  # Weather markets: 5% fee
             }
 
 
@@ -86,11 +94,9 @@ class StrategyConfig:
     # public NWS/Open-Meteo consensus.  5% is enough to cover bookmaker
     # vig + a thin profit margin in paper mode.  Can be lowered once a
     # private weather feed (e.g. ECMWF-direct) gives a structural edge.
-    min_edge: float = 0.05  # 5% edge minimum (must exceed 2% fee_drag + margin)
-    max_entry_price: float = 0.99  # strict: 0.99 and above are never entered
-    entry_time_gate_hour_utc: int = 13
-    max_bet_amount: float = 3.0  # Maximum $3 per bet (binde 3 of $1,000)
-    max_bet_pct: float = 0.003  # Max bet as % of portfolio (single source of truth)
+    min_edge: float = 0.001  # 0.1% - accept nearly all positive edge bets
+    max_bet_amount: float = 10.0  # Maximum $10 per bet (flat)
+    max_bet_pct: float = 1.0  # Safety ceiling (flat_bet_usd overrides Kelly sizing)
     min_bet_size: float = 1.0  # Minimum bet size in USD
     total_exposure_pct: float = 0.25  # Max total exposure as % of portfolio
     min_liquidity: float = 0.0  # Liquidity check disabled: Polymarket public-search
@@ -121,34 +127,14 @@ class StrategyConfig:
     # If API fails, fallback to this default.
     fee_rate_weather: float = 0.05
     current_fee_rate: float = 0.05  # Updated dynamically from API
+    # Weather category exponent (0.5 = flatter fee curve per Polymarket docs).
+    # Other categories use 1.0 (standard quadratic).
+    fee_exponent: float = 0.5
 
-    fee_drag: float = 0.02  # Polymarket taker fee %2
-    # Bot scope: today + 1 + 2 days ahead (0..2 inclusive).
-    # Tightened from 14 to 2 so the bot only trades near-term markets
-    # where the public weather ensemble (GFS/ECMWF/ICON/...) is still
-    # calibrated. Forecasts degrade past 3 days.
-    max_days_ahead: int = 2
-
-    # ── Karpathy-search-discovered levers (asymmetric-payoff fix) ────────
-    # These were tuned by `scripts/karpathy_search.py` against 90 days /
-    # 15 cities of historical_calibrations data. The defaults below are
-    # deliberately permissive (min_entry_price=0.01 = accept anything,
-    # inefficiency_min=-1.0 = accept anything) so the unit tests that
-    # exercise the calculator with low-price markets still work.
-    #
-    # In production, the tuned values (min_entry_price≈0.35,
-    # inefficiency_min≈-0.124) are loaded from data/strategy_params.json
-    # by `apply_persisted_strategy_params()` at import time. That file is
-    # written by the Karpathy search script.
-    #
-    # Background: a naive Kelly bot wins ~94% of its trades but loses
-    # money overall because the 6% losing trades are at low prices
-    # (long-shot bets) where a single loss wipes out dozens of small
-    # wins. Setting MIN_ENTRY_PRICE higher filters out the long shots;
-    # INEFFICIENCY_MIN only takes trades where the market price looks
-    # mispriced in our favour by at least that much.
-    min_entry_price: float = 0.01
-    inefficiency_min: float = -1.0  # negative = gate disabled (accept all)
+    # Bot scope: today + 1 + 2 + 3 days ahead (0..3 inclusive).
+    # Forecast reliability degrades past 3 days, but 3-day coverage
+    # gives the bot more opportunities to find edge.
+    max_days_ahead: int = 3
 
     # ── Slippage model ────────────────────────────────────────────────
     # "flat"   — fixed slippage_pct from strategy_params.json
@@ -159,26 +145,41 @@ class StrategyConfig:
     gas_cost_usd: float = 0.10  # Polygon gas per round-trip
 
     # ── Flat bet override & Daily loss limit (synced from Config) ─────────
-    flat_bet_usd: float = 0.0  # 0 = use Kelly sizing, >0 = fixed $ per bet
+    flat_bet_usd: float = 10.0  # Fixed $10 per bet (overrides Kelly sizing)
     daily_loss_limit: float = 0.05  # 5% daily max loss
+
+    # ── Tie betting: ayni en yuksek fiyata sahip marketlere ayni anda ac ─
+    tie_bet_enabled: bool = True
+    tie_loser_gap: float = 0.10  # ikiz betlerden biri %10+ one gecerse digerini kapat
+
+    # ── Smart rotation: eski bet'i kapatip yenisini ac ─
+    rotation_threshold: float = 0.05  # %5+ improvement gerekli rotation icin
+
+    # ── Max entry price ───────────────────────────────────────────────────
+    # 0.99'dan alimi yasakla: bu fiyatta kar marji cok dusuk (0.99 -> 1.0).
+    # Fill price bu degerin UZERINE cikarsa (>=) bet acilmaz.
+    max_entry_price: float = 0.99
 
 
 @dataclass
 class RiskConfig:
-    """Active risk management: position-level stop-loss, take-profit, time decay, rebalance."""
+    """Active risk management: position-level stop-loss, take-profit, time decay, rebalance.
+
+    DISABLED: all early exits set to extreme values so bets ONLY close at settlement (ST).
+    """
 
     # Position-level limits
-    stop_loss_pct: float = 0.30  # %30 kayıpta otomatik kapat
-    take_profit_pct: float = 1.0  # %100 karda otomatik kapat
-    trailing_stop_pct: float = 0.15  # %15 trailing stop (tepeden düşüşte)
+    stop_loss_pct: float = 999.0  # %999 kayıtta kapat = asla tetiklenmez
+    take_profit_pct: float = 999.0  # %999 karda kapat = asla tetiklenmez
+    trailing_stop_pct: float = 999.0  # %999 trailing drop = asla tetiklenmez
 
     # Time-based exits
-    time_decay_hours: int = 24  # Settlement'a bu kadar saat kala
-    time_decay_threshold: float = -0.10  # %10 zarardaysa kapat
+    time_decay_hours: int = 0  # 0 saat = time decay devre dışı
+    time_decay_threshold: float = -999.0  # %999 zararda kapat = asla tetiklenmez
 
-    # Rebalancing
-    min_rebalance_edge_ratio: float = 2.0  # Yeni edge en az 2x eski edge
-    rebalance_min_loss: float = -0.15  # Rebalance için min zarar eşiği
+    # Rebalancing (disabled via extreme ratio)
+    min_rebalance_edge_ratio: float = 999.0
+    rebalance_min_loss: float = -999.0
 
     # Risk management loop interval (seconds)
 
@@ -238,7 +239,6 @@ _ICAO_COORDS = {
     "OMDB": (25.2532, 55.3657),
     "LLBG": (32.0114, 34.8867),
     "OTHH": (25.2731, 51.6081),
-    # Asia (12)
     "RJTT": (35.5533, 139.7811),
     "RJOO": (34.7882, 135.4381),
     "ZSPD": (31.1434, 121.8052),
@@ -258,6 +258,39 @@ _ICAO_COORDS = {
     # Africa (2)
     "HECA": (30.1219, 31.4056),
     "FACT": (-33.9694, 18.5972),
+    # Additional US cities (11)
+    "KMSP": (44.8848, -93.2223),
+    "KPDX": (45.5887, -122.5975),
+    "KSAN": (32.7338, -117.1900),
+    "KTPA": (27.9755, -82.5332),
+    "KSMF": (38.6954, -121.5908),
+    "KPIT": (40.4915, -80.2329),
+    "KSTL": (38.7487, -90.3700),
+    "KBWI": (39.1774, -76.6684),
+    "KMKE": (42.9472, -87.8966),
+    "KMCI": (39.2976, -94.7139),
+    "KSLC": (40.7884, -111.9778),
+    "KAUS": (30.1945, -97.6700),  # Austin
+    "WMKK": (2.7456, 101.7099),  # Kuala Lumpur
+    "RPLL": (14.5086, 121.0194),  # Manila
+    "LIMC": (45.6306, 8.7281),  # Milan
+    "EPWA": (52.1657, 20.9671),  # Warsaw
+    "RKPK": (35.0689, 128.9625),  # Busan
+    "ZUUU": (30.5785, 103.9471),  # Chengdu
+    "ZUCK": (29.7192, 106.6417),  # Chongqing
+    "ZGGG": (23.3924, 113.2988),  # Guangzhou
+    "EFHK": (60.3172, 24.9633),  # Helsinki
+    "OEJN": (21.6796, 39.1565),  # Jeddah
+    "OPKC": (24.9065, 67.1608),  # Karachi
+    "RKSI": (37.4602, 126.4407),  # Seoul Incheon
+    "ZGSZ": (22.6393, 113.8107),  # Shenzhen
+    "NZWN": (-41.3272, 174.8053),  # Wellington
+    "ZHHH": (30.7838, 114.2081),  # Wuhan
+    "VILK": (26.7606, 80.8893),  # Lucknow
+    "ZSQD": (36.0986, 120.3719),  # Qingdao
+    "MPTO": (9.0716, -79.3829),  # Panama City
+    # NYC alias
+    "NYC": (40.7769, -73.8740),
 }
 
 _CITY_ICAO_MAP = {
@@ -291,6 +324,31 @@ _CITY_ICAO_MAP = {
     "buenos aires": "SAEZ",
     "santiago": "SCEL",
     "lima": "SPJC",
+    # Missing US cities from Polymarket
+    "minneapolis": "KMSP",
+    "portland": "KPDX",
+    "san diego": "KSAN",
+    "tampa": "KTPA",
+    "sacramento": "KSMF",
+    "pittsburgh": "KPIT",
+    "st louis": "KSTL",
+    "baltimore": "KBWI",
+    "milwaukee": "KMKE",
+    "kansas city": "KMCI",
+    "salt lake city": "KSLC",
+    # Missing international cities
+    "osaka": "RJOO",
+    "jakarta": "WIII",
+    "mumbai": "VABB",
+    "delhi": "VIDP",
+    "sydney": "YSSY",
+    "melbourne": "YMML",
+    "auckland": "NZAA",
+    "cairo": "HECA",
+    "kuala lumpur": "WMKK",
+    "manila": "RPLL",
+    "milan": "LIMC",
+    "warsaw": "EPWA",
     "london": "EGLL",
     "paris": "LFPG",
     "berlin": "EDDT",
@@ -310,7 +368,6 @@ _CITY_ICAO_MAP = {
     "tel aviv": "LLBG",
     "doha": "OTHH",
     "tokyo": "RJTT",
-    "osaka": "RJOO",
     "shanghai": "ZSPD",
     "beijing": "ZBAA",
     "seoul": "RKSS",
@@ -318,14 +375,24 @@ _CITY_ICAO_MAP = {
     "taipei": "RCTP",
     "singapore": "WSSS",
     "bangkok": "VTBS",
-    "jakarta": "WIII",
-    "mumbai": "VABB",
-    "delhi": "VIDP",
-    "sydney": "YSSY",
-    "melbourne": "YMML",
-    "auckland": "NZAA",
-    "cairo": "HECA",
     "cape town": "FACT",
+    # Additional cities from Polymarket
+    "austin": "KAUS",
+    "busan": "RKPK",
+    "chengdu": "ZUUU",
+    "chongqing": "ZUCK",
+    "guangzhou": "ZGGG",
+    "helsinki": "EFHK",
+    "jeddah": "OEJN",
+    "karachi": "OPKC",
+    "nyc": "KLGA",
+    "seoul (incheon)": "RKSI",
+    "shenzhen": "ZGSZ",
+    "wellington": "NZWN",
+    "wuhan": "ZHHH",
+    "lucknow": "VILK",
+    "qingdao": "ZSQD",
+    "panama city": "MPTO",
 }
 
 
@@ -335,14 +402,14 @@ class BotConfig:
 
     # ── Portfolio ──────────────────────────────────────────────────
     initial_portfolio: float = 1000.0
-    max_exposure_pct: float = 0.25
-    city_cap: int = 4
+    max_exposure_pct: float = 1.0
+    city_cap: int = 999  # no city limit - bet all cities
     weather_fee_rate: float = 0.05
+    fee_exponent: float = 0.5  # Weather category: 0.5 (flatter curve)
 
     # ── Intervals ──────────────────────────────────────────────────
-    scan_interval: int = 300
+    scan_interval: int = 900  # 15 dakika (Open-Meteo rate limit için)
     settlement_interval: int = 120
-    sia_interval: int = 86400
     # Midnight scan: after 00:00, scan every N seconds for the first
     # MIDNIGHT_SCAN_WINDOW minutes to catch 2-day-ahead markets early
     # (earlier = cheaper prices on Polymarket).
@@ -391,16 +458,16 @@ class BotConfig:
         # ── Override from .env (single source: .env > dataclass defaults) ──
         self.initial_portfolio = float(os.getenv("INITIAL_PORTFOLIO", str(self.initial_portfolio)))
         self.max_exposure_pct = float(os.getenv("MAX_EXPOSURE_PCT", str(self.max_exposure_pct)))
+        self.strategy.total_exposure_pct = self.max_exposure_pct
         self.city_cap = int(os.getenv("CITY_CAP", str(self.city_cap)))
         self.weather_fee_rate = float(os.getenv("WEATHER_FEE_RATE", str(self.weather_fee_rate)))
         self.scan_interval = int(os.getenv("SCAN_INTERVAL", str(self.scan_interval)))
         self.settlement_interval = int(os.getenv("SETTLEMENT_INTERVAL", str(self.settlement_interval)))
-        self.sia_interval = int(os.getenv("SIA_INTERVAL", str(self.sia_interval)))
         self.midnight_scan_interval = int(os.getenv("MIDNIGHT_SCAN_INTERVAL", str(self.midnight_scan_interval)))
         self.midnight_scan_window = int(os.getenv("MIDNIGHT_SCAN_WINDOW", str(self.midnight_scan_window)))
         self.host = os.getenv("HOST", self.host)
         self.port = int(os.getenv("PORT", str(self.port)))
-        self.dry_run = os.getenv("DRY_RUN", "true").lower() == "true"
+        self.dry_run = os.getenv("DRY_RUN", str(self.dry_run)).lower() == "true"
         self.log_level = os.getenv("LOG_LEVEL", self.log_level)
         self.db_echo = os.getenv("DB_ECHO", "false").lower() == "true"
 
@@ -410,15 +477,17 @@ class BotConfig:
 
         # ── Constants (large dicts) ───────────────────────────────
         if self.model_weights is None:
+            # ECMWF-first allocation: research shows ECMWF HRES outperforms
+            # GFS at all lead times. GFS weight reduced from 0.30 to 0.15.
             self.model_weights = {
-                "gfs_seamless": 0.30,
-                "ecmwf_ifs025": 0.25,
-                "gem_global": 0.15,
-                "icon_global": 0.10,
-                "jma_seamless": 0.08,
-                "cma_grapes_global": 0.05,
-                "ukmo_seamless": 0.04,
-                "meteofrance_seamless": 0.03,
+                "ecmwf_ifs025": 0.35,
+                "gfs_seamless": 0.15,
+                "gem_global": 0.12,
+                "icon_global": 0.12,
+                "jma_seamless": 0.10,
+                "cma_grapes_global": 0.06,
+                "ukmo_seamless": 0.05,
+                "meteofrance_seamless": 0.05,
             }
         if self.icao_coords is None:
             self.icao_coords = _ICAO_COORDS
@@ -431,10 +500,8 @@ class BotConfig:
         s.min_bet_size = float(os.getenv("MIN_BET_SIZE", str(s.min_bet_size)))
         s.kelly_fraction = float(os.getenv("KELLY_FRACTION", str(s.kelly_fraction)))
         s.daily_loss_limit = float(os.getenv("DAILY_LOSS_LIMIT", str(s.daily_loss_limit)))
-        s.min_entry_price = float(os.getenv("MIN_ENTRY_PRICE", str(s.min_entry_price)))
-        s.max_entry_price = float(os.getenv("MAX_ENTRY_PRICE", str(s.max_entry_price)))
-        s.entry_time_gate_hour_utc = int(os.getenv("ENTRY_TIME_GATE_HOUR_UTC", str(s.entry_time_gate_hour_utc)))
         s.flat_bet_usd = float(os.getenv("FLAT_BET_USD", str(s.flat_bet_usd)))
+        s.max_entry_price = float(os.getenv("MAX_ENTRY_PRICE", str(s.max_entry_price)))
 
 
 # ── Config backward-compatibility proxy ────────────────────────────────────
@@ -446,7 +513,6 @@ class _ConfigProxy:
     """Backward-compatible proxy. Delegates all attribute access to bot_config.
 
     Usage: ``Config.MAX_BET_PCT`` reads ``bot_config.strategy.max_bet_pct``.
-    Assignment: ``Config.MAX_BET_PCT = 0.01`` writes back to ``bot_config``.
     """
 
     _MAP: dict[str, tuple[str, str]] = {
@@ -455,9 +521,9 @@ class _ConfigProxy:
         "MAX_EXPOSURE_PCT": ("root", "max_exposure_pct"),
         "CITY_CAP": ("root", "city_cap"),
         "WEATHER_FEE_RATE": ("root", "weather_fee_rate"),
+        "FEE_EXPONENT": ("root", "fee_exponent"),
         "SCAN_INTERVAL": ("root", "scan_interval"),
         "SETTLEMENT_INTERVAL": ("root", "settlement_interval"),
-        "SIA_INTERVAL": ("root", "sia_interval"),
         "MIDNIGHT_SCAN_INTERVAL": ("root", "midnight_scan_interval"),
         "MIDNIGHT_SCAN_WINDOW": ("root", "midnight_scan_window"),
         "POLYMARKET_GAMMA_API": ("root", "polymarket_gamma_api"),
@@ -480,11 +546,10 @@ class _ConfigProxy:
         "MAX_BET_PCT": ("strategy", "max_bet_pct"),
         "MIN_BET_SIZE": ("strategy", "min_bet_size"),
         "KELLY_FRACTION": ("strategy", "kelly_fraction"),
-        "MIN_ENTRY_PRICE": ("strategy", "min_entry_price"),
         "FLAT_BET_USD": ("strategy", "flat_bet_usd"),
         "DAILY_LOSS_LIMIT": ("strategy", "daily_loss_limit"),
-        "FEE_DRAG": ("strategy", "fee_drag"),
         "TOTAL_EXPOSURE_PCT": ("strategy", "total_exposure_pct"),
+        "MAX_ENTRY_PRICE": ("strategy", "max_entry_price"),
     }
 
     def _resolve(self, name: str):
@@ -521,26 +586,33 @@ class _ConfigProxy:
         return bot_config.initial_portfolio * bot_config.strategy.daily_loss_limit
 
     @classmethod
-    def get_model_weight(cls, model_name: str) -> float:
-        return bot_config.model_weights.get(model_name, 0.0)
-
-    @classmethod
     def get_normalized_weights(cls) -> dict:
         return bot_config.model_weights
-
-    @classmethod
-    def get_max_exposure_amount(cls, portfolio_value: float) -> float:
-        return portfolio_value * bot_config.max_exposure_pct
-
-    @classmethod
-    def get_daily_loss_limit(cls, portfolio_value: float) -> float:
-        return portfolio_value * bot_config.strategy.daily_loss_limit
 
 
 # ── Singleton instances (bot_config FIRST, then Config proxy) ──────────────
 bot_config = BotConfig()
 Config = _ConfigProxy()
 config = Config  # alias used by older modules
+
+# Auto-set proxy env vars for ALL requests (covers ClobClient + direct calls)
+if bot_config.polymarket.proxy_url:
+    os.environ["HTTP_PROXY"] = bot_config.polymarket.proxy_url
+    os.environ["HTTPS_PROXY"] = bot_config.polymarket.proxy_url
+    os.environ["ALL_PROXY"] = bot_config.polymarket.proxy_url
+
+
+def _load_strategy_params() -> dict:
+    """Read data/strategy_params.json (adaptive sizing persistence)."""
+    try:
+        import json
+
+        _p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "strategy_params.json")
+        with open(_p, encoding="utf-8") as _f:
+            _raw = json.load(_f)
+        return _raw if isinstance(_raw, dict) else {}
+    except Exception:
+        return {}
 
 
 def apply_persisted_strategy_params() -> dict:
@@ -549,12 +621,7 @@ def apply_persisted_strategy_params() -> dict:
 
     Returns the params dict that was applied (empty dict if no file found).
     """
-    try:
-        from utils.weights_store import load_strategy_params
-    except Exception:
-        return {}
-
-    persisted = load_strategy_params()
+    persisted = _load_strategy_params()
     if not persisted:
         return {}
 
@@ -563,7 +630,7 @@ def apply_persisted_strategy_params() -> dict:
 
     if "min_edge" in persisted:
         try:
-            s.min_edge = float(persisted["min_edge"])
+            s.min_edge = 0.001  # Hard floor — no override allowed
             applied["min_edge"] = s.min_edge
         except (TypeError, ValueError):
             pass
@@ -573,70 +640,16 @@ def apply_persisted_strategy_params() -> dict:
             applied["kelly_fraction"] = s.kelly_fraction
         except (TypeError, ValueError):
             pass
-    # NOTE: max_bet_pct is intentionally NOT loaded from strategy_params.json.
-    # It MUST come ONLY from .env so that calculator.py, bet_placer.py, and
-    # utils/kelly.py all use the same cap via max_bet_cap().
-    if "min_entry_price" in persisted:
-        try:
-            s.min_entry_price = float(persisted["min_entry_price"])
-            applied["min_entry_price"] = s.min_entry_price
-        except (TypeError, ValueError):
-            pass
-    if "inefficiency_min" in persisted:
-        try:
-            s.inefficiency_min = float(persisted["inefficiency_min"])
-            applied["inefficiency_min"] = s.inefficiency_min
-        except (TypeError, ValueError):
-            pass
 
     return applied
 
 
-def fetch_and_apply_fee_rate() -> float:
-    """Fetch fee rate from Polymarket API for weather category.
-
-    Polymarket uses category-based fee rates:
-    - Weather: 5% (default)
-    - Crypto: 7%
-    - Sports: 6%
-
-    This function fetches the current rate from the CLOB API endpoint.
-    If the API call fails, returns the default (0.05).
-    """
-    import requests
-
-    try:
-        # Polymarket CLOB API endpoint for fee rates
-        url = f"{bot_config.polymarket_clob_api}/fee"
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            # Look for weather category fee rate
-            if "fee_rate" in data:
-                fee_rate = float(data["fee_rate"])
-                bot_config.strategy.current_fee_rate = fee_rate
-                return fee_rate
-            # Try nested structure
-            if "categories" in data and "weather" in data["categories"]:
-                fee_rate = float(data["categories"]["weather"])
-                bot_config.strategy.current_fee_rate = fee_rate
-                return fee_rate
-    except Exception as e:
-        import logging
-        logging.getLogger("CONFIG").warning("Could not fetch fee rate from API: %s", e)
-
-    # Fallback to default
-    return bot_config.strategy.current_fee_rate
-
-
-# Apply persisted Karpathy-search winners at import time.
 try:
     _applied_params = apply_persisted_strategy_params()
     if _applied_params:
         import logging
 
         logging.getLogger("CONFIG").info(
-            "Applied Karpathy-search strategy params from disk: %s",
             ", ".join(f"{k}={v}" for k, v in _applied_params.items()),
         )
 except Exception as _e:
@@ -644,11 +657,6 @@ except Exception as _e:
 
     logging.getLogger("CONFIG").warning("Could not apply persisted strategy params: %s", _e)
 
-# Fetch dynamic fee rate from Polymarket API at import time
-try:
-    _fetched_fee = fetch_and_apply_fee_rate()
-    import logging
-    logging.getLogger("CONFIG").info("Polymarket fee rate: %.2f%%", _fetched_fee * 100)
-except Exception as _e:
-    import logging
-    logging.getLogger("CONFIG").warning("Could not fetch fee rate: %s", _e)
+# NOTE: Fee rate is fetched lazily (not at import time) to avoid blocking startup.
+# Call fetch_and_apply_fee_rate() when needed, e.g., at bot startup.
+# The default fee_rate_weather (0.05) is used until then.

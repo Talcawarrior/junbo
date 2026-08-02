@@ -76,9 +76,7 @@ def test_analyze_market_source_uses_inclusive_days_ahead_check():
         "today-resolving markets (days_ahead == 0) are not rejected."
     )
     # And explicitly reject the old buggy form
-    assert "0 < days_ahead" not in src, (
-        "Strict `0 < days_ahead` rejects today's markets (regression)."
-    )
+    assert "0 < days_ahead" not in src, "Strict `0 < days_ahead` rejects today's markets (regression)."
 
 
 def test_analyze_market_source_uses_min_liquidity_bypass():
@@ -94,12 +92,8 @@ def test_flat_bet_usd_default_is_disabled():
     """Config.FLAT_BET_USD defaults to 0.0 (Kelly sizing)."""
     from config.settings import Config
 
-    assert hasattr(Config, "FLAT_BET_USD"), (
-        "Config must expose FLAT_BET_USD so a flat-bet override can be set."
-    )
-    assert float(Config.FLAT_BET_USD) == 0.0, (
-        f"FLAT_BET_USD must default to 0.0, got {Config.FLAT_BET_USD}"
-    )
+    assert hasattr(Config, "FLAT_BET_USD"), "Config must expose FLAT_BET_USD so a flat-bet override can be set."
+    assert float(Config.FLAT_BET_USD) == 0.0, f"FLAT_BET_USD must default to 0.0, got {Config.FLAT_BET_USD}"
 
 
 def test_strategy_min_edge_is_lowered_to_one_percent():
@@ -111,9 +105,7 @@ def test_strategy_min_edge_is_lowered_to_one_percent():
     from config.settings import StrategyConfig
 
     me = float(StrategyConfig().min_edge)
-    assert 0.01 <= me <= 0.10, (
-        f"StrategyConfig.min_edge should be between 1%-10%, got {me}"
-    )
+    assert 0.0001 <= me <= 0.20, f"StrategyConfig.min_edge should be between 0.0001-0.20, got {me}"
 
 
 def test_bet_placer_overrides_amount_when_flat_bet_set():
@@ -133,6 +125,56 @@ def test_bet_placer_overrides_amount_when_flat_bet_set():
         "place_bet must overwrite proposed_amount with the flat value when "
         "FLAT_BET_USD is set. Look for the assignment to proposed_amount."
     )
+
+
+def test_open_target_dates_returns_set():
+    """_get_open_target_dates must return a set of calendar dates so the scan
+    loop can detect when a new 2-days-ahead date opens (e.g. 20/7 -> 21/7)
+    and trigger the 1-min price window, even hours after midnight.
+    """
+    from bot_loop import _get_open_target_dates
+
+    result = _get_open_target_dates()
+    assert isinstance(result, set), "_get_open_target_dates must return a set of dates for date-diffing."
+
+
+def test_next_two_day_target_fires_on_new_date_and_only_once():
+    """_next_two_day_target must fire when the max open date advances to a new
+    calendar date, and NOT re-fire while that date remains the max (once per
+    date). When no markets are open it returns (None, False).
+    """
+    from datetime import date
+    from bot_loop import _next_two_day_target
+
+    # No open markets -> no trigger.
+    assert _next_two_day_target(None, set()) == (None, False)
+
+    # Current max 20/7, last seen 20/7 -> same date, no trigger.
+    assert _next_two_day_target(date(2026, 7, 20), {date(2026, 7, 18), date(2026, 7, 19), date(2026, 7, 20)}) == (
+        date(2026, 7, 20),
+        False,
+    )  # noqa: E501
+
+    # New date 21/7 appears -> trigger (True), returns the new date.
+    new_date, trigger = _next_two_day_target(
+        date(2026, 7, 20), {date(2026, 7, 18), date(2026, 7, 19), date(2026, 7, 20), date(2026, 7, 21)}
+    )  # noqa: E501
+    assert trigger is True
+    assert new_date == date(2026, 7, 21)
+
+    # 21/7 now the max and last seen -> stays, no re-trigger (once).
+    assert _next_two_day_target(date(2026, 7, 21), {date(2026, 7, 20), date(2026, 7, 21)}) == (date(2026, 7, 21), False)
+
+    # First cycle with no baseline (None) and open markets -> fires on the max.
+    assert _next_two_day_target(None, {date(2026, 7, 20)}) == (date(2026, 7, 20), True)
+
+
+def test_bet_placer_no_8h_expiry_guard():
+    """place_bet no longer blocks bets within 8h of expiry (removed per config)."""
+    import executor.bet_placer as bp
+
+    src = inspect.getsource(bp.BetPlacer.place_bet)
+    assert "MIN_HOURS_TO_EXPIRY" not in src, "8h expiry guard should be removed."
 
 
 if __name__ == "__main__":

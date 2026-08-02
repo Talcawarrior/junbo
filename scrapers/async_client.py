@@ -42,17 +42,28 @@ logger = logging.getLogger("SCRAPER_ASYNC")
 
 
 # ---- Public knobs (module-level so tests can monkeypatch) -------------
-MAX_CONCURRENT = 8
-_THROTTLE_S = 0.25
+MAX_CONCURRENT = 20
+_THROTTLE_S = 1.0
 _TIMEOUT_S = 15.0
 _USER_AGENT = "Junbo/1.0 (+tier3-12)"
 
 
 # ---- Cache -------------------------------------------------------------
-# (url, frozen-params) -> result-or-None. We remember failures (None)
-# too so a 429-storm does not get retried by every market in the scan.
-_CACHE: dict[tuple, Any] = {}
+# (url, frozen-params) -> (value-or-None, expires_at). We remember
+# failures (None) too so a 429-storm does not get retried by every
+# market in the scan. Entries carry an *expiry* so prices refresh on the
+# next polling cycle instead of being frozen at the first fetch for the
+# whole process lifetime (the bug that made open-position prices drift
+# further from live Polymarket the longer the service ran).
+_CACHE: dict[tuple, tuple] = {}
 _CACHE_LOCK = threading.Lock()
+
+# Successful fetches live for a couple of minutes: long enough to dedupe
+# repeated identical requests within a single scan, short enough that the
+# 5-minute price poller always re-fetches fresh prices. Failures expire
+# faster so a transient 429 does not suppress fetches for the whole run.
+_CACHE_TTL_S = 120.0
+_CACHE_FAILURE_TTL_S = 30.0
 
 
 def _cache_key(url: str, params: dict | None) -> tuple:
@@ -62,17 +73,24 @@ def _cache_key(url: str, params: dict | None) -> tuple:
 
 
 def _cache_get(key: tuple) -> tuple[bool, Any]:
-    """Return (hit, value). hit=True even when the cached value is None
-    so callers can short-circuit failed fetches."""
+    """Return (hit, value). ``hit`` is False once the entry has expired so
+    callers re-fetch. A live ``None`` value (cached failure) still reports
+    ``hit=True`` until it expires, short-circuiting repeated 429s."""
     with _CACHE_LOCK:
-        if key in _CACHE:
-            return True, _CACHE[key]
-        return False, None
+        entry = _CACHE.get(key)
+        if entry is None:
+            return False, None
+        value, expires_at = entry
+        if time.monotonic() > expires_at:
+            _CACHE.pop(key, None)
+            return False, None
+        return True, value
 
 
 def _cache_set(key: tuple, value: Any) -> None:
+    ttl = _CACHE_TTL_S if value is not None else _CACHE_FAILURE_TTL_S
     with _CACHE_LOCK:
-        _CACHE[key] = value
+        _CACHE[key] = (value, time.monotonic() + ttl)
 
 
 def cache_clear() -> None:
@@ -109,6 +127,7 @@ async def _async_fetch_one(
     host: str,
     url: str,
     params: dict | None,
+    cache_key: tuple | None = None,
 ) -> Any:
     """Issue one GET, returning the parsed JSON body or None on failure.
 
@@ -133,10 +152,14 @@ async def _async_fetch_one(
             ) as resp:
                 if resp.status != 200:
                     logger.warning("async fetch %s -> HTTP %s", url, resp.status)
+                    if cache_key is not None:
+                        _cache_set(cache_key, None)
                     return None
                 return await resp.json()
         except (TimeoutError, aiohttp.ClientError) as exc:  # type: ignore
             logger.warning("async fetch %s failed: %s", url, exc)
+            if cache_key is not None:
+                _cache_set(cache_key, None)
             return None
 
 
@@ -207,7 +230,12 @@ class AsyncHttpClient:
         )
         try:
             tasks = [
-                asyncio.create_task(_async_fetch_one(session, sem, host, url, params))
+                asyncio.create_task(
+                    _async_fetch_one(
+                        session, sem, host, url, params,
+                        cache_key=_cache_key(url, params),
+                    )
+                )
                 for url, params, host in items
             ]
             return await asyncio.gather(*tasks, return_exceptions=False)
@@ -240,6 +268,7 @@ class AsyncHttpClient:
     ) -> Any:
         results = await self._afetch([(url, params, host)])
         value = results[0] if results else None
+        # Also cache here in case _afetch didn't cache (e.g. aiohttp-less path)
         _cache_set(key, value)
         return value
 

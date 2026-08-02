@@ -1,18 +1,19 @@
 @echo off
-REM Junbo Bot - Kalici Baslatici
-REM Bu dosyayi calistirarak bot'u kalici olarak baslatabilirsiniz.
-
-echo ========================================
-echo   Junbo Bot - Kalici Servis
-echo ========================================
-echo.
+REM ================================================
+REM JUNBO BOT + WATCHDOG
+REM Bot'u başlatır, çökerse otomatik yeniden başlatır.
+REM ================================================
 
 cd /d "C:\Users\fdemir\Documents\New project\junbo"
 
-echo Bot baslatiliyor...
-echo Durdurmak icin CTRL+C basin
-echo.
+REM Watchdog'u başlat (arka planda)
+echo Watchdog baslatiliyor...
+start /B python watchdog.py
 
-python service.py
-
-pause
+REM Ana döngü - bot'u başlat ve izle
+:START
+echo [%date% %time%] Bot baslatiliyor...
+python main.py bot
+echo [%date% %time%] Bot durdu! 3 saniye sonra yeniden baslatilacak...
+timeout /t 3 /nobreak >nul
+goto START

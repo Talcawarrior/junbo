@@ -1,38 +1,81 @@
 """Independent scheduled job executors."""
 
 import logging
-import subprocess
-import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func
 
 from database.db import get_session, get_session_or
-from database.models import OPEN_BET_STATUSES, Analysis, Bet, Portfolio, WeatherMarket
-from config.settings import bot_config
-from engine.market_selection import select_highest_yes_candidates
+from database.models import (
+    OPEN_BET_STATUSES,
+    Analysis,
+    Bet,
+    Portfolio,
+    WeatherForecast,
+    WeatherMarket,
+)
 from utils.formulas import (
     polymarket_fee,
     portfolio_total_value,
     unrealized_pnl as compute_unrealized_pnl,
 )
 
-
-def run_ui_market_verification():
-    """Run the non-mutating UI/DB market verifier every two hours."""
-    script = __import__("pathlib").Path(__file__).resolve().parents[1] / "scripts" / "verify_ui_markets.py"
-    try:
-        result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, timeout=30, check=False)
-        if result.returncode:
-            logger.warning("UI market verification failed: %s", result.stdout.strip() or result.stderr.strip())
-        else:
-            logger.info(result.stdout.strip())
-        return result.returncode
-    except Exception as exc:
-        logger.warning("UI market verification unavailable: %s", exc)
-        return 1
-
 logger = logging.getLogger("JOBS_SCHEDULER")
+
+
+# --- Re-analysis throttle ---------------------------------------------------
+# `analyze_market` is, for our purposes, a pure function of its inputs: the
+# cached hourly weather forecast, the live market price, slippage, the
+# time-to-close (days_ahead) and the number of forecast sources. If none of
+# those changed since the last analysis, the output (edge / should_bet /
+# side) is identical, so re-running it is pure wasted work.
+#
+# We therefore SKIP re-analyzing a market only when ALL of these hold:
+#   - it was analyzed recently (within MAX_ANALYSIS_AGE_MIN), AND
+#   - no new weather forecast has arrived since the last analysis, AND
+#   - its price has not moved more than PRICE_REANALYZE_DELTA.
+# Any of those being false forces a fresh analysis. This cannot drop bet
+# quality: an unchanged input set yields an unchanged decision, and every
+# path that could change the decision (new weather, a real price move, or
+# the time-to-close window opening) still triggers a re-analysis.
+PRICE_REANALYZE_DELTA = 0.005  # 0.5% price move forces re-analysis (well below min_edge 1%)
+MAX_ANALYSIS_AGE_MIN = 30  # never go longer than this without re-analyzing
+
+
+def _should_skip_analysis(sess, market, now):
+    """Return True if re-analyzing `market` this cycle is safe to skip.
+
+    Safe to skip only when the analysis inputs are unchanged since the last
+    analysis (see PRICE_REANALYZE_DELTA / MAX_ANALYSIS_AGE_MIN above).
+    """
+    last = sess.query(Analysis).filter(Analysis.market_id == market.id).order_by(Analysis.analyzed_at.desc()).first()
+    if last is None:
+        return False  # never analyzed yet -> must analyze
+    # Analysis.analyzed_at is stored tz-aware (UTC). `now` is tz-naive UTC,
+    # so strip tzinfo before subtracting to avoid a naive/aware TypeError.
+    last_at = last.analyzed_at
+    if last_at.tzinfo is not None:
+        last_at = last_at.replace(tzinfo=None)
+    if (now - last_at) >= timedelta(minutes=MAX_ANALYSIS_AGE_MIN):
+        return False  # too old -> refresh
+    # New weather since the last analysis?
+    new_weather = (
+        sess.query(WeatherForecast)
+        .filter(
+            WeatherForecast.market_id == market.id,
+            WeatherForecast.metric == market.metric,
+            WeatherForecast.fetched_at > last.analyzed_at,
+        )
+        .first()
+    )
+    if new_weather is not None:
+        return False  # fresh forecast -> re-analyze
+    # Price moved enough to matter?
+    last_price = last.market_implied_prob if last.market_implied_prob is not None else 0.5
+    cur_price = market.yes_price if market.yes_price is not None else 0.5
+    if abs(cur_price - last_price) >= PRICE_REANALYZE_DELTA:
+        return False  # price moved -> re-analyze
+    return True  # inputs unchanged -> safe to skip
 
 
 def run_fetch_markets():
@@ -63,40 +106,83 @@ def run_fetch_weather():
 
 
 def run_analyze(session=None):
-    """Run forecast analyses for open markets. Optional session for batched cycles."""
+    """Run forecast analyses for open markets. Optional session for batched cycles.
+
+    Paralel analiz: 4 worker ile aynı anda 4 market analiz edilir.
+    Hesaplamalar birebir aynıdır, sadece hızlanır.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     from engine.calculator import Calculator
 
-    calc = Calculator()
     analyzed = 0
+    errors = 0
+
     with get_session_or(session) as sess:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        # Only analyze markets that actually have at least one matching-metric
+        # forecast. Newly fetched markets (or ones whose open-meteo forecast
+        # fetch timed out this cycle) have no forecasts written yet; analyzing
+        # them produces a misleading "Az kaynak: 0" PASS row in the health feed
+        # even though the data simply has not landed. Skipping them here means
+        # they wait for the next cycle, when the forecast arrives and the
+        # re-analysis gate (_should_skip_analysis -> new_weather) picks them up.
+        has_matching_forecast = (
+            sess.query(WeatherForecast.id)
+            .filter(
+                WeatherForecast.market_id == WeatherMarket.id,
+                WeatherForecast.metric == WeatherMarket.metric,
+            )
+            .exists()
+        )
         markets = (
             sess.query(WeatherMarket)
             .filter(
                 WeatherMarket.status == "open",
                 WeatherMarket.city.isnot(None),
-                WeatherMarket.target_date > datetime.now(timezone.utc).replace(tzinfo=None),
+                WeatherMarket.target_date > now,
+                has_matching_forecast,
             )
             .all()
         )
-        # Enforce the group winner rule before forecast analysis. A cheaper
-        # market must not become a bet simply because its forecast signal is
-        # stronger than the highest-YES-price candidate.
-        selected = select_highest_yes_candidates(
-            markets,
-            max_entry_price=bot_config.strategy.max_entry_price,
-        )
-        market_ids = [m.id for m in selected]
+        market_ids = [m.id for m in markets if not _should_skip_analysis(sess, m, now)]
+        skipped = len(markets) - len(market_ids)
 
-        for mid in market_ids:
-            try:
-                result = calc.analyze_market(mid, session=sess)
-                if result is not None:
-                    analyzed += 1
-            except Exception as e:
-                logger.error(f"Analiz hatası {mid}: {e}")
-                continue
+    def analyze_single(mid):
+        """Tek bir marketi analiz et (her thread kendi session'unu oluşturur)."""
+        try:
+            calc = Calculator()
+            result = calc.analyze_market(mid)  # Session yok → kendi session'unu oluşturur
+            return (mid, result, None)
+        except Exception as e:
+            return (mid, None, str(e))
 
-    return f"{analyzed} market analiz edildi ve kaydedildi"
+    # Paralel analiz: 4 worker
+    max_workers = min(4, len(market_ids)) if market_ids else 1
+    logger.info(
+        "Starting parallel analysis: %d to analyze, %d skipped (unchanged inputs), %d workers",
+        len(market_ids),
+        skipped,
+        max_workers,
+    )
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(analyze_single, mid): mid for mid in market_ids}
+        for future in as_completed(futures):
+            mid, result, error = future.result()
+            if result is not None:
+                analyzed += 1
+            elif error:
+                logger.error("Analysis error %s: %s", mid, error)
+                errors += 1
+
+    logger.info(
+        "Parallel analysis complete: %d analyzed, %d errors, %d skipped, %d total",
+        analyzed,
+        errors,
+        skipped,
+        len(markets),
+    )
+    return f"{analyzed} market analiz edildi ({len(market_ids)} analiz edilen, {skipped} atlandi, {errors} hata)"
 
 
 def run_place_bets():
@@ -110,7 +196,7 @@ def run_place_bets():
 
 def run_update_prices(session=None):
     """
-    Refresh `current_price` and update `unrealized_pnl`
+    Refresh `current_price`, fill ladder orders, and update `unrealized_pnl`
     on every open bet. Updates Portfolio.total_value at the end.
     Optional session for batched cycles.
     """
@@ -177,12 +263,70 @@ def run_update_prices(session=None):
             else:
                 cash = (portfolio.initial_value or 1000.0) + float(realized_pnl_total)
             portfolio.total_value = portfolio_total_value(cash, float(open_exposure))
-            portfolio.current_value = portfolio.total_value  # Sync current_value
+            # current_value = mark-to-market: book value + unrealized (paper) PnL.
+            # Distinct from total_value (book value, excludes paper PnL) so the
+            # dashboard can show both the conservative book and the live value.
+            portfolio.current_value = round(portfolio.total_value + float(total_unrealized), 2)
             portfolio.last_updated = datetime.now(timezone.utc).replace(tzinfo=None)
             sess.add(portfolio)
 
         sess.commit()
     return f"{updated} açık bet güncellendi, total_unrealized={total_unrealized:.2f}"
+
+
+def run_refresh_open_prices():
+    """Refresh ``yes_price``/``no_price`` for markets we still hold open bets in.
+
+    The main market fetch (``run_fetch_markets``) goes through Polymarket's
+    relevance-ranked ``public-search``, which stops returning a market once it
+    ends/expires.  Markets we still hold positions in therefore freeze at their
+    last-fetched price even though the live ``outcomePrices`` have already moved
+    to the resolved value — so the dashboard and PnL keep showing a stale,
+    mid-range price instead of the clear ≥0.98 winner.
+
+    This refreshes exactly those markets from the direct Gamma ``/markets/{id}``
+    endpoint every poller cycle.  Only the price fields are touched — never
+    ``status`` — so settled markets cannot be resurrected.
+    """
+    from executor.settler import SettlementEngine
+
+    open_statuses = OPEN_BET_STATUSES
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    refreshed = 0
+    with get_session() as session:
+        market_ids = [
+            r[0]
+            for r in session.query(Bet.market_id)
+            .filter(Bet.status.in_(open_statuses), Bet.market_id.isnot(None))
+            .distinct()
+        ]
+        if not market_ids:
+            return "0 market fiyatı tazelendi (açık bet yok)"
+        markets = session.query(WeatherMarket).filter(WeatherMarket.id.in_(market_ids)).all()
+        engine = SettlementEngine()
+        for m in markets:
+            try:
+                data = engine._call_gamma_api(m)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Price refresh failed for %s: %s", m.id, e)
+                continue
+            if not data:
+                continue
+            raw = data.get("outcomePrices")
+            if not raw:
+                continue
+            try:
+                prices = json.loads(raw) if isinstance(raw, str) else raw
+                yes = float(prices[0])
+                no = float(prices[1])
+            except (TypeError, ValueError, json.JSONDecodeError, IndexError):
+                continue
+            m.yes_price = yes
+            m.no_price = no
+            m.last_updated = now
+            refreshed += 1
+            session.add(m)
+    return f"{refreshed} market fiyatı tazelendi"
 
 
 def run_settle():
@@ -215,6 +359,84 @@ def run_report():
         return report
 
 
+def _partial_close_early(bet, sess, reason, current_price):
+    """Kısmi take-profit: ana parayı kurtaracak kadar sat, kalan pozisyonu
+    açık tut (trailing stop ile "free ride"). Bet status AKTİF kalır — bu
+    tam kapanma DEĞİLDİR.
+
+    İdempotent: partial_tp_done=True ise tekrar çalışmaz (çift satış yok).
+    Satılacak oran kendi içinde hesaplanır (entry / current_price).
+    """
+    # Idempotency guard — never double-sell
+    if bool(getattr(bet, "partial_tp_done", False)):
+        return False
+
+    from config.settings import bot_config
+    from utils.accounting import credit_sale
+
+    entry = float(bet.entry_price if bet.entry_price is not None else bet.price or 0.0)
+    if entry <= 0 or current_price <= 0:
+        return False
+
+    # Self-contained sell fraction (no reliance on externally-set flags)
+    fraction_to_sell = entry / current_price
+    if not (0 < fraction_to_sell < 1):
+        return False
+
+    original_shares = float(bet.shares or 0.0)
+    if original_shares <= 0:
+        return False
+    sold_shares = original_shares * fraction_to_sell
+    remaining_shares = original_shares - sold_shares
+
+    # Accounting for the sold portion
+    raw_pnl = sold_shares * (current_price - entry)
+    fee_rate = bot_config.strategy.current_fee_rate
+    fee = round(polymarket_fee(sold_shares, current_price, fee_rate), 2)
+    realized = round(raw_pnl - fee, 2)
+    proceeds_net = round(sold_shares * current_price - fee, 2)
+
+    # Credit net proceeds to cash (central accounting)
+    credit_sale(sess, proceeds_net, f"partial_tp:{bet.market_id}:{reason}")
+
+    # Shrink the open position; keep status active
+    bet.shares = remaining_shares
+    bet.amount = round(float(bet.amount or 0.0) * (1.0 - fraction_to_sell), 2)
+    bet.stake_amount = round(float(bet.stake_amount or 0.0) * (1.0 - fraction_to_sell), 2)
+    bet.realized_pnl = round(float(bet.realized_pnl or 0.0) + realized, 2)
+    bet.pnl = bet.realized_pnl
+    bet.unrealized_pnl = round(compute_unrealized_pnl(remaining_shares, current_price, entry), 2)
+    bet.current_price = current_price
+    bet.covered_fraction = fraction_to_sell
+    bet.partial_tp_done = True
+    # NOTE: bet.status intentionally unchanged — stays in OPEN_BET_STATUSES.
+
+    portfolio = sess.query(Portfolio).filter(Portfolio.id == 1).first()
+    if portfolio:
+        open_exposure = (
+            sess.query(func.coalesce(func.sum(Bet.amount), 0.0)).filter(Bet.status.in_(OPEN_BET_STATUSES)).scalar()
+        ) or 0.0
+        portfolio.total_value = portfolio_total_value(float(portfolio.cash_balance or 0.0), float(open_exposure))
+        portfolio.total_realized_pnl = round((portfolio.total_realized_pnl or 0.0) + realized, 2)
+        portfolio.total_won = (portfolio.total_won or 0) + (1 if realized > 0 else 0)
+        portfolio.last_updated = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    sess.add(bet)
+    if portfolio:
+        sess.add(portfolio)
+    logger.info(
+        "Partial TP bet=%s market=%s sold %.2f/%.2f shares (%.1f%%) realized=$%.2f fee=$%.2f (stays open)",
+        bet.id,
+        bet.market_id,
+        sold_shares,
+        original_shares,
+        fraction_to_sell * 100,
+        realized,
+        fee,
+    )
+    return True
+
+
 def run_risk_management(session=None):
     """Aktif risk yönetimi: stop-loss, take-profit, time-decay, trailing stop kontrolleri.
     Optional session for batched cycles.
@@ -237,6 +459,7 @@ def run_risk_management(session=None):
                 markets[m.id] = m
 
         closed_count = 0
+        partial_count = 0
         for bet in bets:
             market = markets.get(bet.market_id)
             if not market:
@@ -265,66 +488,66 @@ def run_risk_management(session=None):
                     should_exit, reason = True, rev_reason
 
             if should_exit:
-                from utils.accounting import credit_sale
+                if reason.startswith("partial_take_profit"):
+                    # Partial TP: recover principal, keep remainder open (trailing stop)
+                    _partial_close_early(bet, sess, reason, current_price)
+                    partial_count += 1
+                else:
+                    from utils.accounting import credit_sale
 
-                # Single-fill position: all recorded shares are executable.
-                entry = float(bet.entry_price or bet.price or 0.0)
-                exit_shares = float(bet.shares or 0.0)
-                raw_pnl = round(compute_unrealized_pnl(exit_shares, current_price, entry), 2)
-                proceeds = round(exit_shares * current_price, 2)
+                    # Single-fill position: all recorded shares are executable.
+                    entry = float(bet.entry_price or bet.price or 0.0)
+                    exit_shares = float(bet.shares or 0.0)
+                    raw_pnl = round(compute_unrealized_pnl(exit_shares, current_price, entry), 2)
+                    proceeds = round(exit_shares * current_price, 2)
 
-                # Polymarket taker fee on early exit (sell order).
-                fee_rate = 0.05  # Weather category rate
-                fee = round(polymarket_fee(exit_shares, current_price, fee_rate), 2)
-                realized = round(raw_pnl - fee, 2)
-                proceeds_net = round(proceeds - fee, 2)
+                    # Polymarket taker fee on early exit (sell order).
+                    fee_rate = bot_config.strategy.current_fee_rate
+                    fee = round(polymarket_fee(exit_shares, current_price, fee_rate), 2)
+                    realized = round(raw_pnl - fee, 2)
+                    proceeds_net = round(proceeds - fee, 2)
 
-                bet.status = "closed_early"
-                bet.close_reason = reason
-                bet.closed_at = datetime.now(timezone.utc)
-                bet.realized_pnl = realized
-                bet.pnl = realized
-                bet.current_price = current_price
+                    bet.status = "closed_early"
+                    bet.close_reason = reason
+                    bet.closed_at = datetime.now(timezone.utc)
+                    bet.realized_pnl = realized
+                    bet.pnl = realized
+                    bet.current_price = current_price
 
-                # Credit net proceeds (after fee) to cash via central accounting.
-                credit_sale(sess, proceeds_net, f"early_exit:{bet.market_id}:{reason}")
+                    # Credit net proceeds (after fee) to cash via central accounting.
+                    credit_sale(sess, proceeds_net, f"early_exit:{bet.market_id}:{reason}")
 
-                portfolio = sess.query(Portfolio).filter(Portfolio.id == 1).first()
-                if portfolio:
-                    open_exposure = (
-                        sess.query(func.coalesce(func.sum(Bet.amount), 0.0))
-                        .filter(Bet.status.in_(OPEN_BET_STATUSES))
-                        .scalar()
-                    ) or 0.0
-                    portfolio.total_value = portfolio_total_value(
-                        float(portfolio.cash_balance or 0.0), float(open_exposure)
+                    portfolio = sess.query(Portfolio).filter(Portfolio.id == 1).first()
+                    if portfolio:
+                        open_exposure = (
+                            sess.query(func.coalesce(func.sum(Bet.amount), 0.0))
+                            .filter(Bet.status.in_(OPEN_BET_STATUSES))
+                            .scalar()
+                        ) or 0.0
+                        portfolio.total_value = portfolio_total_value(
+                            float(portfolio.cash_balance or 0.0), float(open_exposure)
+                        )
+                        portfolio.total_realized_pnl = round((portfolio.total_realized_pnl or 0.0) + realized, 2)
+                        portfolio.total_won = (portfolio.total_won or 0) + (1 if realized > 0 else 0)
+                        portfolio.total_lost = (portfolio.total_lost or 0) + (1 if realized <= 0 else 0)
+                        portfolio.last_updated = datetime.now(timezone.utc).replace(tzinfo=None)
+
+                    sess.add(bet)
+                    if portfolio:
+                        sess.add(portfolio)
+                    closed_count += 1
+                    logger.info(
+                        "Early exit bet=%s market=%s reason=%s realized=$%.2f fee=$%.2f proceeds=$%.2f",
+                        bet.id,
+                        bet.market_id,
+                        reason,
+                        realized,
+                        fee,
+                        proceeds_net,
                     )
-                    portfolio.total_realized_pnl = round((portfolio.total_realized_pnl or 0.0) + realized, 2)
-                    portfolio.total_won = (portfolio.total_won or 0) + (1 if realized > 0 else 0)
-                    portfolio.total_lost = (portfolio.total_lost or 0) + (1 if realized <= 0 else 0)
-                    portfolio.last_updated = datetime.now(timezone.utc)
-
-                sess.add(bet)
-                if portfolio:
-                    sess.add(portfolio)
-                closed_count += 1
-                logger.info(
-                    "Early exit bet=%s market=%s reason=%s realized=$%.2f fee=$%.2f proceeds=$%.2f",
-                    bet.id,
-                    bet.market_id,
-                    reason,
-                    realized,
-                    fee,
-                    proceeds_net,
-                )
 
         sess.commit()
-        return f"Risk: {closed_count} position(s) closed early"
-
-
-def start_scheduler():
-    """Mock/stub for cron scheduler activation."""
-    logger.info("Scheduler initialized in background thread...")
+        return f"Risk: {closed_count} position(s) closed early, {partial_count} partial TP"
 
 
 def run_cycle():
@@ -343,6 +566,8 @@ def run_cycle():
             results.append(f"analyze error: {e}")
 
         try:
+            # M5: run_place_bets intentionally manages its own DB session
+            # for bet placement atomicity — does NOT share the cycle session
             results.append(run_place_bets())
         except Exception as e:
             logger.error("Cycle place_bets error: %s", e)
@@ -353,6 +578,18 @@ def run_cycle():
         except Exception as e:
             logger.error("Cycle update_prices error: %s", e)
             results.append(f"update_prices error: {e}")
+
+        try:
+            # Tie olarak acilan ikiz betlerden geride kalanini kapat
+            from executor.bet_placer import BetPlacer
+
+            placer = BetPlacer()
+            twin_closed = placer.close_losing_twin_bets()
+            if twin_closed:
+                results.append(f"twin loser close: {twin_closed}")
+        except Exception as e:
+            logger.error("Cycle twin loser close error: %s", e)
+            results.append(f"twin loser close error: {e}")
 
         try:
             results.append(run_risk_management(session=session))

@@ -793,6 +793,8 @@ python run_tests.py --no-unit --integration
 
 ### Local Development
 
+**Ön Gereksinimler**: Python >= 3.11 (kod `datetime.UTC` ve modern type syntax kullanır)
+
 **Başlatma**:
 ```bash
 cd junbo

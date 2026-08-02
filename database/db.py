@@ -67,9 +67,18 @@ def init_db():
     _migrate_add_column("historical_calibrations", "bias", "FLOAT")
     # Migration: add entry_fee to bets (Polymarket taker fee at entry time)
     _migrate_add_column("bets", "entry_fee", "FLOAT")
-    # Ladder execution was removed. Drop the legacy column from existing
-    # SQLite databases so the schema cannot silently resurrect it.
+    # Ladder execution has been removed; remove the legacy column from
+    # existing SQLite databases as well as from the ORM model.
     _migrate_drop_column("bets", "ladder_data")
+
+    # Migration: add hot-path indexes (avoids full table scans on lookups)
+    _migrate_add_index("ix_weather_forecasts_market_id", "weather_forecasts", "market_id")
+    _migrate_add_index("ix_weather_forecasts_fetched_at", "weather_forecasts", "fetched_at")
+    _migrate_add_index("ix_analyses_market_id", "analyses", "market_id")
+    _migrate_add_index("ix_bets_market_id", "bets", "market_id")
+    _migrate_add_index("ix_bets_status", "bets", "status")
+    _migrate_add_index("ix_market_snapshots_market_id", "market_snapshots", "market_id")
+    _migrate_add_index("ix_market_snapshots_snapshot_time", "market_snapshots", "snapshot_time")
 
     _DB_INITIALIZED = True
     logger.info("Database initialized at %s with WAL mode", DB_PATH)
@@ -96,11 +105,20 @@ def _migrate_drop_column(table: str, column: str) -> None:
     """Idempotently remove a retired SQLite column."""
     with engine.connect() as conn:
         row = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
-        existing = [r[1] for r in row]
-        if column in existing:
+        if column in [r[1] for r in row]:
             conn.execute(text(f"ALTER TABLE {table} DROP COLUMN {column}"))
             conn.commit()
             logger.info("Migration: removed retired column %s.%s", table, column)
+
+
+def _migrate_add_index(index: str, table: str, column: str) -> None:
+    """Idempotent CREATE INDEX IF NOT EXISTS for SQLite."""
+    with engine.connect() as conn:
+        existing = [r[0] for r in conn.execute(text("SELECT name FROM sqlite_master WHERE type='index'")).fetchall()]
+        if index not in existing:
+            conn.execute(text(f"CREATE INDEX IF NOT EXISTS {index} ON {table} ({column})"))
+            conn.commit()
+            logger.info("Migration: added index %s ON %s(%s)", index, table, column)
 
 
 @contextmanager
