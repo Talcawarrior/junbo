@@ -351,16 +351,51 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
               <Card key={kpi.label} className="py-2 gap-1 shadow-sm" style={{ borderColor: BORDER }}>
                 <CardContent className="px-2 pb-0 pt-0">
                   <div className="flex items-center justify-between">
-                    <p className="text-[9px] font-medium" style={{ color: TEXT_MUTED }} title={kpi.tooltip}>{kpi.label}</p>
+                    <p className="text-[10px] font-semibold" style={{ color: TEXT_MUTED }} title={kpi.tooltip}>{kpi.label}</p>
                     <span style={{ color: kpi.color }}>{kpi.icon}</span>
                   </div>
                   <div className="flex items-center gap-1 mt-0.5">
                     <span className="text-sm font-bold tabular-nums" style={{ color: kpi.color }}>{kpi.value}</span>
                   </div>
-                  {kpi.sub && <p className="text-[8px] mt-0.5 tabular-nums" style={{ color: TEXT_MUTED }}>{kpi.sub}</p>}
+                  {kpi.sub && <p className="text-[10px] mt-0.5 tabular-nums font-medium" style={{ color: TEXT_PRIMARY }}>{kpi.sub}</p>}
                 </CardContent>
               </Card>
             ))}
+          </section>
+
+          {/* Açık/Kapalı PnL breakdown */}
+          <section className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
+            <Card className="py-2 gap-1 shadow-sm" style={{ borderColor: BORDER }}>
+              <CardContent className="px-2 pb-0 pt-0">
+                <p className="text-[10px] font-semibold" style={{ color: TEXT_MUTED }}>Açık Bet Değeri</p>
+                <p className="text-sm font-bold tabular-nums mt-0.5" style={{ color: TEAL }}>{fmtUsd(kpiData.openPositionsValue)}</p>
+                <p className="text-[10px] mt-0.5 tabular-nums font-medium" style={{ color: TEXT_PRIMARY }}>Max: {fmtUsd(kpiData.maxOpenableUsd)}</p>
+              </CardContent>
+            </Card>
+            <Card className="py-2 gap-1 shadow-sm" style={{ borderColor: BORDER }}>
+              <CardContent className="px-2 pb-0 pt-0">
+                <p className="text-[10px] font-semibold" style={{ color: TEXT_MUTED }}>Toplam PnL</p>
+                <p className="text-sm font-bold tabular-nums mt-0.5" style={{ color: kpiData.totalPnlValue >= 0 ? "#16A34A" : RED }}>{fmtUsd(kpiData.totalPnlValue)}</p>
+                <div className="flex justify-between mt-0.5">
+                  <p className="text-[10px] tabular-nums font-medium" style={{ color: TEXT_PRIMARY }}>Gerçekleşen</p>
+                  <p className="text-[10px] tabular-nums font-medium" style={{ color: kpiData.realizedPnl >= 0 ? TEAL : RED }}>{fmtUsd(kpiData.realizedPnl)}</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="py-2 gap-1 shadow-sm" style={{ borderColor: BORDER }}>
+              <CardContent className="px-2 pb-0 pt-0">
+                <p className="text-[10px] font-semibold" style={{ color: TEXT_MUTED }}>Açık PnL</p>
+                <p className="text-sm font-bold tabular-nums mt-0.5" style={{ color: kpiData.unrealizedPnl >= 0 ? TEAL : RED }}>{fmtUsd(kpiData.unrealizedPnl)}</p>
+                <p className="text-[10px] mt-0.5 tabular-nums font-medium" style={{ color: TEXT_PRIMARY }}>Unrealized</p>
+              </CardContent>
+            </Card>
+            <Card className="py-2 gap-1 shadow-sm" style={{ borderColor: BORDER }}>
+              <CardContent className="px-2 pb-0 pt-0">
+                <p className="text-[10px] font-semibold" style={{ color: TEXT_MUTED }}>Kapalı Bahis</p>
+                <p className="text-sm font-bold tabular-nums mt-0.5" style={{ color: TEXT_PRIMARY }}>{fmtInt(kpiData.closedBets)}</p>
+                <p className="text-[10px] mt-0.5 tabular-nums font-medium" style={{ color: TEXT_PRIMARY }}>{fmtInt(kpiData.closedWins)}W / {fmtInt(kpiData.closedLosses)}L</p>
+              </CardContent>
+            </Card>
           </section>
         </>
       )}
