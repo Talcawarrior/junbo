@@ -145,7 +145,7 @@ class StrategyConfig:
     gas_cost_usd: float = 0.10  # Polygon gas per round-trip
 
     # ── Flat bet override & Daily loss limit (synced from Config) ─────────
-    flat_bet_usd: float = 1000.0  # Fixed $1000 per bet (overrides Kelly sizing)
+    flat_bet_usd: float = 10.0  # Fixed $10 per bet
     daily_loss_limit: float = 0.0  # Disabled: no daily loss circuit breaker
 
     # ── Tie betting: ayni en yuksek fiyata sahip marketlere ayni anda ac ─

@@ -667,6 +667,23 @@ class BetPlacer:
             )
             amount = remaining_room
 
+        # Bet boyutu nakit bakiyesinden buyuk olamaz
+        pf = session.query(Portfolio).filter(Portfolio.id == 1).first()
+        cash_balance = float(pf.cash_balance) if pf else 0.0
+        if amount > cash_balance:
+            logger.info(
+                "open_bet_on_market: %s amount capped $%.2f -> $%.2f (cash balance)",
+                market.id, amount, cash_balance,
+            )
+            amount = cash_balance
+
+        if amount <= 0:
+            logger.warning(
+                "open_bet_on_market: %s rejected — amount $%.2f <= 0",
+                market.id, amount,
+            )
+            return None
+
         # Fill price + slippage
         raw_fill = float(market.yes_price or 0.5)
 

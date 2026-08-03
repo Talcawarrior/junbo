@@ -1014,7 +1014,7 @@ def get_history():
                     "realized_pnl": pnl,
                     "roi": round(roi, 2),
                     "edge": edge_pct,
-                    "result": "WIN" if pnl > 0 else "LOSS",
+                    "result": "WIN" if pnl > 0 else ("ROTATION" if exit_type == "RT" else "LOSS"),
                     "placed_at": bet.placed_at.isoformat() if bet.placed_at else None,
                     "settled_at": (bet.settled_at.isoformat() if bet.settled_at else None),
                     "closed_at": (bet.closed_at.isoformat() if bet.closed_at else None),

@@ -585,7 +585,7 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
 // TRADE HISTORY TAB
 // ==========================================
 function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: TradeHistoryEntry[]; historyStats: HistoryStats | null; totalPnl: number }) {
-  const [filterResult, setFilterResult] = useState<"ALL" | "WIN" | "LOSS" | "PARTIAL_TP">("ALL");
+  const [filterResult, setFilterResult] = useState<"ALL" | "WIN" | "LOSS" | "PARTIAL_TP" | "ROTATION">("ALL");
   const [filterSide, setFilterSide] = useState<"ALL" | "YES" | "NO">("ALL");
   const [filterExit, setFilterExit] = useState<"ALL" | "ST" | "TP" | "SL" | "TS" | "TD" | "RT" | "TL" | "CL">("ALL");
   const [filterDate, setFilterDate] = useState<string>("");
@@ -690,7 +690,7 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
             <div className="flex items-center gap-1.5">
               <Filter className="h-3.5 w-3.5" style={{ color: TEXT_MUTED }} />
               <span className="text-[11px] font-medium" style={{ color: TEXT_MUTED }}>Sonuç:</span>
-              {(["ALL", "WIN", "PARTIAL_TP", "LOSS"] as const).map((v) => (
+              {(["ALL", "WIN", "PARTIAL_TP", "ROTATION", "LOSS"] as const).map((v) => (
                 <button key={v} onClick={() => setFilterResult(v)}
                   className="px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors"
                   style={{
@@ -827,7 +827,7 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
                       <TableCell className="text-right font-mono text-sm font-semibold tabular-nums" style={{ color: t.pnl >= 0 ? TEAL : RED }}>{fmtUsd(t.pnl)}</TableCell>
                       <TableCell>
                         <Badge className="text-[10px] font-bold px-2 py-0.5 h-5" style={{ backgroundColor: t.result === "WIN" ? GREEN_LIGHT : t.result === "PARTIAL_TP" ? "#FFF7ED" : RED_LIGHT, color: t.result === "WIN" ? "#16A34A" : t.result === "PARTIAL_TP" ? "#D97706" : RED, border: `1px solid ${t.result === "WIN" ? "#16A34A" : t.result === "PARTIAL_TP" ? "#D97706" : RED}33` }}>
-                          {t.result === "WIN" ? "✓ WIN" : t.result === "PARTIAL_TP" ? "◐ PT" : "✗ LOSS"}
+                          {t.result === "WIN" ? "✓ WIN" : t.result === "PARTIAL_TP" ? "◐ PT" : t.result === "ROTATION" ? "↻ ROTATION" : "✗ LOSS"}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-center">
