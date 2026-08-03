@@ -402,7 +402,7 @@ class BotConfig:
 
     # ── Portfolio ──────────────────────────────────────────────────
     initial_portfolio: float = 1000.0
-    max_exposure_pct: float = 0.60
+    max_exposure_pct: float = 1.0
     city_cap: int = 999  # no city limit - bet all cities
     weather_fee_rate: float = 0.05
     fee_exponent: float = 0.5  # Weather category: 0.5 (flatter curve)
