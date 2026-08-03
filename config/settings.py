@@ -95,10 +95,10 @@ class StrategyConfig:
     # vig + a thin profit margin in paper mode.  Can be lowered once a
     # private weather feed (e.g. ECMWF-direct) gives a structural edge.
     min_edge: float = 0.001  # 0.1% - accept nearly all positive edge bets
-    max_bet_amount: float = 10.0  # Maximum $10 per bet (flat)
+    max_bet_amount: float = 1000.0  # Maximum $1000 per bet (flat)
     max_bet_pct: float = 1.0  # Safety ceiling (flat_bet_usd overrides Kelly sizing)
     min_bet_size: float = 1.0  # Minimum bet size in USD
-    total_exposure_pct: float = 0.60  # Max total exposure as % of previous-day capital
+    total_exposure_pct: float = 1.0  # Max total exposure as % of previous-day capital
     min_liquidity: float = 0.0  # Liquidity check disabled: Polymarket public-search
     # markets don't expose a `liquidity` field reliably
     # (it's always 0). The current_price already reflects
@@ -145,7 +145,7 @@ class StrategyConfig:
     gas_cost_usd: float = 0.10  # Polygon gas per round-trip
 
     # ── Flat bet override & Daily loss limit (synced from Config) ─────────
-    flat_bet_usd: float = 10.0  # Fixed $10 per bet (overrides Kelly sizing)
+    flat_bet_usd: float = 1000.0  # Fixed $1000 per bet (overrides Kelly sizing)
     daily_loss_limit: float = 0.0  # Disabled: no daily loss circuit breaker
 
     # ── Tie betting: ayni en yuksek fiyata sahip marketlere ayni anda ac ─
