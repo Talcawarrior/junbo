@@ -363,6 +363,22 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
                 tooltip: "Toplam getiri oran"
               },
               {
+                label: "Toplam Fee",
+                value: fmtUsd(kpiData.totalEntryFee),
+                icon: <Wallet className="h-3 w-3" />,
+                color: RED,
+                sub: "",
+                tooltip: "Tum betlerden kesilen giris ucreti"
+              },
+              {
+                label: "Gercek Kayip",
+                value: fmtUsd(-kpiData.gercekKayip),
+                icon: <TrendingUp className="h-3 w-3" />,
+                color: kpiData.gercekKayip <= 0 ? RED : TEAL,
+                sub: "",
+                tooltip: "Fee dahil toplam kayip"
+              },
+              {
                 label: "Max acilabilir",
                 value: fmtUsd(kpiData.maxOpenableUsd),
                 icon: <Activity className="h-3 w-3" />,

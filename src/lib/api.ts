@@ -99,6 +99,8 @@ export interface StatusResponse {
 
 
     total_roi: number;
+    total_entry_fee?: number;
+    gercek_kayip?: number;
 
 
 
@@ -936,6 +938,8 @@ export interface KpiData {
 
 
   totalRoi: number;            // Total ROI (%)
+  totalEntryFee: number;       // Toplam giriş ücreti
+  gercekKayip: number;         // Gerçek toplam kayıp (fee dahil)
 
 
 
@@ -1813,6 +1817,8 @@ return {
 
 
   const totalRoi = hs?.overall_roi ?? 0;
+  const totalEntryFee = p.total_entry_fee ?? 0;
+  const gercekKayip = p.gercek_kayip ?? 0;
 
 
 
@@ -2062,6 +2068,8 @@ return {
 
 
     totalRoi,
+    totalEntryFee,
+    gercekKayip,
 
 
 
