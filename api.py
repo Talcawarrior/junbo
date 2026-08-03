@@ -295,7 +295,6 @@ def get_status():
         initial_capital = float(pf.initial_value) if pf and pf.initial_value else float(state.config.INITIAL_PORTFOLIO)
         # --- Doğru muhasebe katmanları ---
         # 1) "Net kapanmış PnL": sadece kapanan betlerin realized_pnl toplamı
-        #    (bet tablosundan — entry fee buraya dahil DEĞİL, o bir maliyet kalemi)
         closed_realized = (
             db.query(func.coalesce(func.sum(Bet.realized_pnl), 0.0))
             .filter(Bet.status.in_(_closed_statuses))
@@ -308,10 +307,9 @@ def get_status():
         ) or 0.0
         realized_pnl_db = round(float(closed_realized) + float(closed_partial_tp), 2)
 
-        # 2) "Toplam PnL": equity - initial (cash-based, fee dahil)
-        #    equity = cash + açık pozisyon stake'i + unrealized PnL
+        # 2) "Kapalı+Acık PnL" ve "Toplam PnL": realized + unrealized
         equity_cash = float(pf.cash_balance or 0.0) + float(exposure_db) + float(unrealized_pnl_db)
-        total_pnl = round(equity_cash - initial_capital, 2)
+        total_pnl = round(realized_pnl_db + float(unrealized_pnl_db), 2)
 
         # 4. Available Cash (from Portfolio table)
         pf = db.query(Portfolio).filter(Portfolio.id == 1).first()
