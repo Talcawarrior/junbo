@@ -267,31 +267,6 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
 
   return (
     <div className="space-y-6">
-      <Card className="shadow-sm py-4 gap-3" style={{ borderColor: BORDER }}>
-        <CardHeader className="pb-0 pt-0 px-5">
-          <CardTitle className="text-sm font-semibold" style={{ color: TEXT_PRIMARY }}>Giriş fiyatına göre ROI</CardTitle>
-          <p className="text-[11px]" style={{ color: TEXT_MUTED }}>Yalnızca kapanmış YES betleri · ROI = net PnL / stake</p>
-        </CardHeader>
-        <CardContent className="px-3 overflow-x-auto">
-          <Table>
-            <TableHeader><TableRow className="hover:bg-transparent">
-              {['Fiyat bandı', 'İşlem', 'Win %', 'Net PnL', 'ROI'].map((h) => <TableHead key={h} className="text-[11px] font-semibold text-right first:text-left" style={{ color: TEXT_MUTED }}>{h}</TableHead>)}
-            </TableRow></TableHeader>
-            <TableBody>
-              {kpiData.roiByPriceBand.map((row) => (
-                <TableRow key={row.band}>
-                  <TableCell className="font-mono text-xs font-semibold" style={{ color: TEXT_PRIMARY }}>{row.band}</TableCell>
-                  <TableCell className="text-right text-xs tabular-nums">{fmtInt(row.trades)}</TableCell>
-                  <TableCell className="text-right text-xs tabular-nums">%{fmtNum(row.win_rate, 1)}</TableCell>
-                  <TableCell className="text-right text-xs font-mono tabular-nums" style={{ color: row.pnl >= 0 ? GREEN : RED }}>{fmtUsd(row.pnl)}</TableCell>
-                  <TableCell className="text-right text-xs font-mono font-semibold tabular-nums" style={{ color: row.roi >= 0 ? TEAL : RED }}>{row.roi >= 0 ? '+' : ''}%{fmtNum(row.roi, 1)}</TableCell>
-                </TableRow>
-              ))}
-              {kpiData.roiByPriceBand.length === 0 && <TableRow><TableCell colSpan={5} className="text-center text-xs py-6" style={{ color: TEXT_MUTED }}>Henüz kapanmış işlem yok</TableCell></TableRow>}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
       {/* KPI Cards — skeleton while loading */}
       {isLoading ? (
         <>
@@ -558,6 +533,33 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
           </CardContent>
         </Card>
       </section>
+
+      {/* Giriş fiyatına göre ROI tablosu */}
+      <Card className="shadow-sm py-4 gap-3" style={{ borderColor: BORDER }}>
+        <CardHeader className="pb-0 pt-0 px-5">
+          <CardTitle className="text-sm font-semibold" style={{ color: TEXT_PRIMARY }}>Giriş fiyatına göre ROI</CardTitle>
+          <p className="text-[11px]" style={{ color: TEXT_MUTED }}>Yalnızca kapanmış YES betleri · ROI = net PnL / stake</p>
+        </CardHeader>
+        <CardContent className="px-3 overflow-x-auto">
+          <Table>
+            <TableHeader><TableRow className="hover:bg-transparent">
+              {['Fiyat bandı', 'İşlem', 'Win %', 'Net PnL', 'ROI'].map((h) => <TableHead key={h} className="text-[11px] font-semibold text-right first:text-left" style={{ color: TEXT_MUTED }}>{h}</TableHead>)}
+            </TableRow></TableHeader>
+            <TableBody>
+              {kpiData.roiByPriceBand.map((row) => (
+                <TableRow key={row.band}>
+                  <TableCell className="font-mono text-xs font-semibold" style={{ color: TEXT_PRIMARY }}>{row.band}</TableCell>
+                  <TableCell className="text-right text-xs tabular-nums">{fmtInt(row.trades)}</TableCell>
+                  <TableCell className="text-right text-xs tabular-nums">%{fmtNum(row.win_rate, 1)}</TableCell>
+                  <TableCell className="text-right text-xs font-mono tabular-nums" style={{ color: row.pnl >= 0 ? GREEN : RED }}>{fmtUsd(row.pnl)}</TableCell>
+                  <TableCell className="text-right text-xs font-mono font-semibold tabular-nums" style={{ color: row.roi >= 0 ? TEAL : RED }}>{row.roi >= 0 ? '+' : ''}%{fmtNum(row.roi, 1)}</TableCell>
+                </TableRow>
+              ))}
+              {kpiData.roiByPriceBand.length === 0 && <TableRow><TableCell colSpan={5} className="text-center text-xs py-6" style={{ color: TEXT_MUTED }}>Henüz kapanmış işlem yok</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
     </div>
   );

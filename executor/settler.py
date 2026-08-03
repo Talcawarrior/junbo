@@ -209,9 +209,6 @@ class SettlementEngine:
             portfolio = session.query(Portfolio).filter(Portfolio.id == 1).first()
             if portfolio:
                 if bet_won:
-                    # Credit FULL payout — the entry fee was already debited
-                    # at bet placement time (bet_placer.py :: debit_stake for fee).
-                    # Settlement fee is always 0 (mathematical zero at p→1).
                     credit_settlement(session, payout, 0.0, f"settle:{bet.market_id}:won")
                     portfolio.total_won = (portfolio.total_won or 0) + 1
                 else:
