@@ -213,7 +213,7 @@ def get_status():
         _ts = datetime.now(timezone.utc).replace(tzinfo=None)
         _today_start = _ts.replace(hour=0, minute=0, second=0, microsecond=0)
         # All closed bet statuses (settled + bot-closed early exits)
-        _closed_statuses = ("won", "lost", "settled", "closed_early")
+        _closed_statuses = ("won", "lost", "settled", "closed_early", "closed")
         from sqlalchemy import or_
 
         daily_pnl = (
@@ -293,16 +293,25 @@ def get_status():
         ) or 0.0
 
         initial_capital = float(pf.initial_value) if pf and pf.initial_value else float(state.config.INITIAL_PORTFOLIO)
-        # Gerçek muhasebe: cash_balance tek doğruluk kaynağıdır (fee/gas dahil tüm
-        # nakit hareketlerini yansıtır). Bet tablosundan toplanan realized_pnl eksik
-        # kalır (eski betler temizlenir, fee'ler tam yansımaz). Bu yüzden realized
-        # ve total PnL nakitten türetilir:
-        #   equity      = cash + açık pozisyon stake'i + unrealized PnL
-        #   total_pnl   = equity - initial
-        #   realized    = total_pnl - unrealized
+        # --- Doğru muhasebe katmanları ---
+        # 1) "Net kapanmış PnL": sadece kapanan betlerin realized_pnl toplamı
+        #    (bet tablosundan — entry fee buraya dahil DEĞİL, o bir maliyet kalemi)
+        closed_realized = (
+            db.query(func.coalesce(func.sum(Bet.realized_pnl), 0.0))
+            .filter(Bet.status.in_(_closed_statuses))
+            .scalar()
+        ) or 0.0
+        closed_partial_tp = (
+            db.query(func.coalesce(func.sum(Bet.realized_pnl), 0.0))
+            .filter(Bet.status.in_(OPEN_BET_STATUSES), Bet.partial_tp_done.is_(True))
+            .scalar()
+        ) or 0.0
+        realized_pnl_db = round(float(closed_realized) + float(closed_partial_tp), 2)
+
+        # 2) "Toplam PnL": equity - initial (cash-based, fee dahil)
+        #    equity = cash + açık pozisyon stake'i + unrealized PnL
         equity_cash = float(pf.cash_balance or 0.0) + float(exposure_db) + float(unrealized_pnl_db)
         total_pnl = round(equity_cash - initial_capital, 2)
-        realized_pnl_db = round(total_pnl - float(unrealized_pnl_db), 2)
 
         # 4. Available Cash (from Portfolio table)
         pf = db.query(Portfolio).filter(Portfolio.id == 1).first()
@@ -397,9 +406,7 @@ def get_status():
         price_poller_running = bool(state.tasks.get("price_poller") and not state.tasks["price_poller"].done())
 
         # Calculate derived values
-        equity = portfolio_current_value(
-            initial_capital, realized_pnl_db, unrealized_pnl_db
-        )  # Portföy Değeri = Sermaye + Realized + Unrealized
+        equity = equity_cash  # Portföy Değeri = cash + açık pozisyon + unrealized
         available_cash = float(pf.cash_balance or 0.0) if pf else 0.0  # Nakit (Hemen Çekilebilir)
         exposure = float(exposure_db)  # Açık Pozisyonlar Toplamı
         max_exposure_allowed = round(

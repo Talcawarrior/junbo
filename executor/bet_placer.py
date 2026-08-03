@@ -639,26 +639,33 @@ class BetPlacer:
         if existing:
             return None
 
-        # Bet tutari
+        # Bet tutari — exposure room'a gore kisitla
         flat_bet = float(getattr(bot_config.strategy, "flat_bet_usd", 10.0) or 10.0)
         amount = flat_bet
 
-        # Exposure kontrolu
+        # Exposure kontrolu — kalan room'a gore bet boyutunu ayarla
         current_exposure = (
             session.query(func.coalesce(func.sum(Bet.amount), 0.0)).filter(Bet.status.in_(self._OPEN_STATUSES)).scalar()
         ) or 0.0
         current_exposure = float(current_exposure)
         conservative = self.risk_manager._conservative_portfolio_value()
         max_exposure = float(conservative) * float(self.risk_manager.config.TOTAL_EXPOSURE_PCT)
-        if current_exposure + amount > max_exposure:
+        remaining_room = max(0.0, max_exposure - current_exposure)
+
+        if remaining_room <= 0:
             logger.warning(
-                "open_bet_on_market: %s rejected — exposure $%.2f + $%.2f > $%.2f",
-                market.id,
-                current_exposure,
-                amount,
-                max_exposure,
+                "open_bet_on_market: %s rejected — exposure full $%.2f/$%.2f",
+                market.id, current_exposure, max_exposure,
             )
             return None
+
+        # Bet boyutu kalan room'dan buyuk olamaz
+        if amount > remaining_room:
+            logger.info(
+                "open_bet_on_market: %s amount capped $%.2f -> $%.2f (remaining room)",
+                market.id, amount, remaining_room,
+            )
+            amount = remaining_room
 
         # Fill price + slippage
         raw_fill = float(market.yes_price or 0.5)
