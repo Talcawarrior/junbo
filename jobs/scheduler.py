@@ -236,10 +236,11 @@ def run_update_prices(session=None):
 
             bet.current_price = current
 
-            # 1. unrealized_pnl
+            # 1. unrealized_pnl — entry fee dahil (gercek maliyet)
             # current_price is already in side terms (YES=yes_price, NO=no_price)
             # so the same (current - entry) * shares formula works for both sides.
-            bet.unrealized_pnl = round(compute_unrealized_pnl(shares, current, entry), 2)
+            entry_fee = float(bet.entry_fee or 0.0)
+            bet.unrealized_pnl = round(compute_unrealized_pnl(shares, current, entry) - entry_fee, 2)
 
             total_unrealized += bet.unrealized_pnl or 0.0
 
@@ -406,7 +407,7 @@ def _partial_close_early(bet, sess, reason, current_price):
     bet.stake_amount = round(float(bet.stake_amount or 0.0) * (1.0 - fraction_to_sell), 2)
     bet.realized_pnl = round(float(bet.realized_pnl or 0.0) + realized, 2)
     bet.pnl = bet.realized_pnl
-    bet.unrealized_pnl = round(compute_unrealized_pnl(remaining_shares, current_price, entry), 2)
+    bet.unrealized_pnl = round(compute_unrealized_pnl(remaining_shares, current_price, entry) - float(bet.entry_fee or 0.0), 2)
     bet.current_price = current_price
     bet.covered_fraction = fraction_to_sell
     bet.partial_tp_done = True
@@ -473,79 +474,7 @@ def run_risk_management(session=None):
             else:
                 current_price = max(0.0, min(1.0, yes_price))
 
-            # Check early exit
-            should_exit, reason = rm.check_early_exit(bet, current_price, market)
-
-            # Check model reversal if analysis exists
-            if not should_exit:
-                analysis = (
-                    sess.query(Analysis)
-                    .filter(Analysis.market_id == bet.market_id)
-                    .order_by(Analysis.analyzed_at.desc())
-                    .first()
-                )
-                rev_exit, rev_reason = rm.check_model_reversal(bet, analysis)
-                if rev_exit:
-                    should_exit, reason = True, rev_reason
-
-            if should_exit:
-                if reason.startswith("partial_take_profit"):
-                    # Partial TP: recover principal, keep remainder open (trailing stop)
-                    _partial_close_early(bet, sess, reason, current_price)
-                    partial_count += 1
-                else:
-                    from utils.accounting import credit_sale
-
-                    # Single-fill position: all recorded shares are executable.
-                    entry = float(bet.entry_price or bet.price or 0.0)
-                    exit_shares = float(bet.shares or 0.0)
-                    raw_pnl = round(compute_unrealized_pnl(exit_shares, current_price, entry), 2)
-                    proceeds = round(exit_shares * current_price, 2)
-
-                    # Polymarket taker fee on early exit (sell order).
-                    fee_rate = bot_config.strategy.current_fee_rate
-                    fee = round(polymarket_fee(exit_shares, current_price, fee_rate), 2)
-                    realized = round(raw_pnl - fee, 2)
-                    proceeds_net = round(proceeds - fee, 2)
-
-                    bet.status = "closed_early"
-                    bet.close_reason = reason
-                    bet.closed_at = datetime.now(timezone.utc)
-                    bet.realized_pnl = realized
-                    bet.pnl = realized
-                    bet.current_price = current_price
-
-                    # Credit net proceeds (after fee) to cash via central accounting.
-                    credit_sale(sess, proceeds_net, f"early_exit:{bet.market_id}:{reason}")
-
-                    portfolio = sess.query(Portfolio).filter(Portfolio.id == 1).first()
-                    if portfolio:
-                        open_exposure = (
-                            sess.query(func.coalesce(func.sum(Bet.amount), 0.0))
-                            .filter(Bet.status.in_(OPEN_BET_STATUSES))
-                            .scalar()
-                        ) or 0.0
-                        portfolio.total_value = portfolio_total_value(
-                            float(portfolio.cash_balance or 0.0), float(open_exposure)
-                        )
-                        portfolio.total_realized_pnl = round((portfolio.total_realized_pnl or 0.0) + realized, 2)
-                        portfolio.total_won = (portfolio.total_won or 0) + (1 if realized > 0 else 0)
-                        portfolio.total_lost = (portfolio.total_lost or 0) + (1 if realized <= 0 else 0)
-                        portfolio.last_updated = datetime.now(timezone.utc).replace(tzinfo=None)
-
-                    sess.add(bet)
-                    if portfolio:
-                        sess.add(portfolio)
-                    closed_count += 1
-                    logger.info(
-                        "Early exit bet=%s market=%s reason=%s realized=$%.2f fee=$%.2f proceeds=$%.2f",
-                        bet.id,
-                        bet.market_id,
-                        reason,
-                        realized,
-                        fee,
-                        proceeds_net,
-                    )
+            # Early exit ve partial_tp DEVRE DISI — sadece fiyat guncellemesi
 
         sess.commit()
         return f"Risk: {closed_count} position(s) closed early, {partial_count} partial TP"

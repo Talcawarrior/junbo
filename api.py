@@ -311,6 +311,12 @@ def get_status():
         equity_cash = float(pf.cash_balance or 0.0) + float(exposure_db) + float(unrealized_pnl_db)
         total_pnl = round(realized_pnl_db + float(unrealized_pnl_db), 2)
 
+        # 3) Toplam entry fee (tum betlerden)
+        total_entry_fees = (
+            db.query(func.coalesce(func.sum(Bet.entry_fee), 0.0))
+            .scalar()
+        ) or 0.0
+
         # 4. Available Cash (from Portfolio table)
         pf = db.query(Portfolio).filter(Portfolio.id == 1).first()
         print(f"DEBUG: pf={pf}, cash_balance={pf.cash_balance if pf else None}")
@@ -450,6 +456,8 @@ def get_status():
                 "gerceklenmemis_pnl": float(unrealized_pnl_db),  # Açık Pozisyonlardan Kar/Zarar (Kağıt Üzerinde)
                 "toplam_pnl": total_pnl,  # Toplam Kar/Zarar = Gerçekleşmiş + Gerçekleşmemiş
                 "toplam_roi_pct": total_roi,
+                "toplam_entry_fee": round(float(total_entry_fees), 2),  # Toplam giriş ücreti
+                "gercek_kayip": round(float(initial_capital - equity_cash), 2),  # Gercek toplam kayıp (fee dahil)
                 # Eski İngilizce alanlar (Geriye uyumluluk - Frontend için)
                 "initial": initial_capital,
                 "current": equity,
@@ -460,6 +468,8 @@ def get_status():
                 "realized_pnl": float(realized_pnl_db),
                 "total_pnl": total_pnl,
                 "total_roi": total_roi,
+                "total_entry_fee": round(float(total_entry_fees), 2),
+                "gercek_kayip": round(float(initial_capital - equity_cash), 2),
                 "exposure": exposure,
                 "max_exposure": max_exposure_allowed,
                 "capital_basis": round(capital_basis, 2),
