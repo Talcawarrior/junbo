@@ -9,7 +9,7 @@ Implement the requested entry policy in the backend scan cycle.
 - Group all open weather markets by city/date/metric.
 - Keep all candidates tied at the highest YES price.
 - Make only YES entries eligible.
-- Reject YES price `>= 0.99`.
+- Accept YES price in `[0.10, 0.95)`.
 - Gate markets two or more days ahead until 13:00 UTC.
 - Rotate only when a strictly higher price candidate exists.
 - Update market prices on the five-minute scan cadence.
@@ -30,7 +30,7 @@ price candidates are both visible and eligible.
 
 1. Group key is normalized city, target-date calendar date, and metric.
 2. Candidate maximum is computed from `yes_price` only.
-3. Candidates with `yes_price >= 0.99` are rejected.
+3. Candidates with `yes_price < 0.10` or `yes_price >= 0.95` are rejected.
 4. Candidate side is always `YES`.
 5. A candidate with `days_ahead >= 2` is blocked before 13:00 UTC.
 6. `abs(net_edge)` is replaced by positive-side `net_edge >= effective_min_edge`.
@@ -59,7 +59,7 @@ portfolio and open-position data.
 ## Acceptance criteria
 
 - HIGH and LOW groups both produce only YES analysis.
-- A price of 0.989 is eligible for price gate; 0.99 is not.
+- A price of 0.10 is eligible; 0.09 and 0.95 are not.
 - At 12:59 UTC a +2-day candidate is blocked; at 13:00 it is allowed.
 - A strictly better candidate causes old group positions to close; a tie does not.
 - Scan interval defaults to 300 seconds.

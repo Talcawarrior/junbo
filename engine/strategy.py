@@ -86,7 +86,7 @@ class RiskManager:
             self.daily_pnl = 0.0
             self._last_pnl_date = now
         self.daily_pnl += pnl
-        if self.daily_pnl <= -self.daily_loss_limit_amount:
+        if self.daily_loss_limit_amount > 0 and self.daily_pnl <= -self.daily_loss_limit_amount:
             logger.warning("DAILY STOP-LOSS TRIGGERED! PnL: $%.2f", self.daily_pnl)
             return False
         return True
@@ -198,7 +198,7 @@ class RiskManager:
 
     def is_bot_locked(self) -> bool:
         """Check if bot is locked."""
-        return self.daily_pnl <= -self.daily_loss_limit_amount
+        return self.daily_loss_limit_amount > 0 and self.daily_pnl <= -self.daily_loss_limit_amount
 
     def get_daily_pnl(self) -> float:
         """Get daily PnL."""
@@ -562,7 +562,7 @@ class RiskManager:
 
 
 class BettingEngine:
-    """Signal analysis, ladder betting, and position management."""
+    """Signal analysis, single-fill betting, and position management."""
 
     def __init__(self, db_session=None, risk_manager=None, weather_engine=None):
         self.db = db_session
@@ -751,9 +751,11 @@ class BettingEngine:
                 logger.info("NO bet refused for %s — YES-only mode", market_id)
                 return None
 
-            # Price gate: yes_price > 0.10 ise bahis acma
-            if yes_price > 0.10:
-                logger.info("Price gate: %s yes_price=%.3f > 0.10 — bet refused", market_id, yes_price)
+            # YES-only price gate: [0.10, 0.95)
+            min_price = float(getattr(bot_config.strategy, "min_entry_price", 0.10))
+            max_price = float(getattr(bot_config.strategy, "max_entry_price", 0.95))
+            if not (min_price <= float(yes_price) < max_price):
+                logger.info("Price gate: %s yes_price=%.3f outside [%.2f, %.2f)", market_id, yes_price, min_price, max_price)
                 return None
 
             # 8-hour pre-settlement guard: settlement'a 8 saatten az kaldiysa bet acma

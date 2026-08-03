@@ -402,6 +402,7 @@ def get_status():
             ),
             2,
         )
+        capital_basis = max(0.0, float(initial_capital + realized_before_today))
 
         return {
             "is_running": state.is_running,
@@ -448,12 +449,15 @@ def get_status():
                 "total_roi": total_roi,
                 "exposure": exposure,
                 "max_exposure": max_exposure_allowed,
+                "capital_basis": round(capital_basis, 2),
+                "previous_day_realized_pnl": round(float(realized_before_today), 2),
                 # Formüller (Şeffaflık için)
                 "formullar": {
                     "portfoy_degeri": "Sermaye + Gerçekleşmiş PnL + Gerçekleşmemiş PnL",
                     "nakit": "Sermaye - Açık Pozisyonlar Toplamı + Gerçekleşmiş Kazançlar",
                     "acik_pozisyonlar": "Tüm Açık Bet Tutarı Toplamı",
                     "toplam_pnl": "Gerçekleşmiş PnL + Gerçekleşmemiş PnL",
+                    "sermaye_bazı": "Başlangıç sermayesi + bugünden önce kapanan betlerin net PnL'i",
                 },
             },
             "stats": {
@@ -467,7 +471,8 @@ def get_status():
             "limits": {
                 "max_bet_pct": state.config.MAX_BET_PCT * 100,
                 "max_exposure_pct": state.config.TOTAL_EXPOSURE_PCT * 100,
-                "daily_stop_loss_pct": state.config.DAILY_LOSS_LIMIT * 100,
+                "daily_stop_loss_pct": 0,
+                "daily_stop_loss_enabled": False,
                 "city_cap": state.config.CITY_CAP,
             },
             "metrics": {
@@ -1024,8 +1029,39 @@ def get_history():
         win_rate = win_rate_pct(total_won, total_won + total_lost)
         overall_roi = roi_pct(total_pnl_all, total_stake_all)
         profit_factor = round(total_win_pnl / total_loss_pnl, 2) if total_loss_pnl > 0 else 0.0
+        # Realized performance split by entry-price band. This deliberately
+        # uses closed bets only; open/unrealized PnL must not contaminate ROI.
+        price_bands = [(i / 100, (i + 10) / 100) for i in range(10, 90, 10)] + [(0.90, 0.95)]
+        roi_by_price_band = []
+        closed_for_bands = (
+            db.query(Bet)
+            .filter(Bet.status.in_(all_closed_statuses))
+            .all()
+        )
+        for band_min, band_max in price_bands:
+            in_band = []
+            for bet in closed_for_bands:
+                entry = bet.entry_price if bet.entry_price is not None else bet.price
+                if entry is not None and band_min <= float(entry) < band_max:
+                    in_band.append(bet)
+            stake = sum(float(b.amount or b.stake_amount or 0.0) for b in in_band)
+            pnl = sum(float(b.pnl if b.pnl is not None else b.realized_pnl or 0.0) for b in in_band)
+            wins = sum(1 for b in in_band if (b.pnl if b.pnl is not None else b.realized_pnl or 0.0) > 0)
+            roi_by_price_band.append({
+                "band": f"{band_min:.2f}–{band_max:.2f}",
+                "min_price": band_min,
+                "max_price": band_max,
+                "trades": len(in_band),
+                "wins": wins,
+                "losses": len(in_band) - wins,
+                "stake": round(stake, 2),
+                "pnl": round(pnl, 2),
+                "roi": round(roi_pct(pnl, stake), 2),
+                "win_rate": round(win_rate_pct(wins, len(in_band)), 2),
+            })
         return {
             "history": history,
+            "roi_by_price_band": roi_by_price_band,
             "stats": {
                 "total_won": total_won,
                 "total_lost": total_lost,
@@ -1041,6 +1077,7 @@ def get_history():
                 "avg_edge": round(avg_edge * 100, 2) if avg_edge else 0.0,
                 "partial_tp_count": partial_tp_count,
                 "partial_tp_pnl": round(partial_tp_pnl, 2),
+                "roi_by_price_band": roi_by_price_band,
             },
         }
     finally:
@@ -1184,7 +1221,7 @@ def get_slippage():
 
 @app.post("/api/cleanup")
 def cleanup_old_data(_key: str = Depends(verify_api_key)):
-    """Cancel stale open bets and refund their stakes (ladder-aware)."""
+    """Cancel stale open bets and refund their single-fill stakes."""
     db = get_db_session()
     try:
         _ts = datetime.now(timezone.utc).replace(tzinfo=None)

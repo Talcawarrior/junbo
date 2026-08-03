@@ -196,7 +196,7 @@ def run_place_bets():
 
 def run_update_prices(session=None):
     """
-    Refresh `current_price`, fill ladder orders, and update `unrealized_pnl`
+    Refresh `current_price` and update `unrealized_pnl`
     on every open bet. Updates Portfolio.total_value at the end.
     Optional session for batched cycles.
     """

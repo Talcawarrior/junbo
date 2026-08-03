@@ -109,6 +109,9 @@ export interface StatusResponse {
 
 
     max_exposure: number;
+    free_cash?: number;
+    capital_basis?: number;
+    previous_day_realized_pnl?: number;
 
 
 
@@ -448,6 +451,7 @@ export interface HistoryStats {
 
 
   total_won: number;
+  roi_by_price_band?: RoiBand[];
 
 
 
@@ -497,6 +501,19 @@ export interface HistoryStats {
 
 
 
+}
+
+export interface RoiBand {
+  band: string;
+  min_price: number;
+  max_price: number;
+  trades: number;
+  wins: number;
+  losses: number;
+  stake: number;
+  pnl: number;
+  roi: number;
+  win_rate: number;
 }
 
 
@@ -934,6 +951,7 @@ export interface KpiData {
 
 
   closedLosses: number;
+  roiByPriceBand: RoiBand[];
 
 
 
@@ -1719,6 +1737,7 @@ return {
 
 
       closedLosses: 0,
+      roiByPriceBand: [],
 
 
 
@@ -2008,11 +2027,11 @@ return {
 
 
 
-    availableCash: Math.round((p.initial + p.realized_pnl + p.unrealized_pnl - p.exposure) * 100) / 100,
+    availableCash: Math.round(((p.free_cash ?? (p.initial + p.realized_pnl + p.unrealized_pnl - p.exposure))) * 100) / 100,
 
 
 
-    maxOpenableUsd: Math.round((p.initial + p.realized_pnl + p.unrealized_pnl - p.exposure) * 100) / 100,
+    maxOpenableUsd: Math.round(Math.max(0, (p.max_exposure ?? 0) - (p.exposure ?? 0)) * 100) / 100,
 
 
 
@@ -2058,6 +2077,7 @@ return {
 
 
     closedLosses,
+    roiByPriceBand: hs?.roi_by_price_band ?? [],
 
 
 

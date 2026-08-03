@@ -107,15 +107,16 @@ class BetPlacer:
                 d.log(logging.WARNING)
                 return None
 
-            # Price gate: 0.99'dan (ve ustunden) alimi yasakla - kar marji cok
-            # dusuk (0.99 -> 1.0 settlement). Fill price bu eşiği asarsa reddedilir.
-            _max_entry = float(getattr(bot_config.strategy, "max_entry_price", 0.99) or 0.99)
+            # YES price gate: [0.10, 0.95).
+            _min_entry = float(getattr(bot_config.strategy, "min_entry_price", 0.10))
+            _max_entry = float(getattr(bot_config.strategy, "max_entry_price", 0.95))
             _yp = float(market.yes_price or 0.5)
-            if _yp >= _max_entry:
+            if not (_min_entry <= _yp < _max_entry):
                 logger.info(
-                    "Price gate: %s yes_price=%.3f >= %.2f - bet refused",
+                    "Price gate: %s yes_price=%.3f outside [%.2f, %.2f) - bet refused",
                     market.id,
                     _yp,
+                    _min_entry,
                     _max_entry,
                 )
                 d.check("max_entry_price", False, yes_price=_yp, max_entry=_max_entry)
@@ -652,13 +653,15 @@ class BetPlacer:
                 )
                 return None
 
-        # Price gate: 0.99'dan (ve ustunden) alimi yasakla.
-        _max_entry = float(getattr(bot_config.strategy, "max_entry_price", 0.99) or 0.99)
-        if raw_fill >= _max_entry:
+        # YES price gate: [0.10, 0.95).
+        _min_entry = float(getattr(bot_config.strategy, "min_entry_price", 0.10))
+        _max_entry = float(getattr(bot_config.strategy, "max_entry_price", 0.95))
+        if not (_min_entry <= raw_fill < _max_entry):
             logger.info(
-                "open_bet_on_market: %s yes_price=%.3f >= %.2f - skipped",
+                "open_bet_on_market: %s yes_price=%.3f outside [%.2f, %.2f) - skipped",
                 market.id,
                 raw_fill,
+                _min_entry,
                 _max_entry,
             )
             return None

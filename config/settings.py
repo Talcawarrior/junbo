@@ -98,7 +98,7 @@ class StrategyConfig:
     max_bet_amount: float = 10.0  # Maximum $10 per bet (flat)
     max_bet_pct: float = 1.0  # Safety ceiling (flat_bet_usd overrides Kelly sizing)
     min_bet_size: float = 1.0  # Minimum bet size in USD
-    total_exposure_pct: float = 0.25  # Max total exposure as % of portfolio
+    total_exposure_pct: float = 0.60  # Max total exposure as % of previous-day capital
     min_liquidity: float = 0.0  # Liquidity check disabled: Polymarket public-search
     # markets don't expose a `liquidity` field reliably
     # (it's always 0). The current_price already reflects
@@ -146,7 +146,7 @@ class StrategyConfig:
 
     # ── Flat bet override & Daily loss limit (synced from Config) ─────────
     flat_bet_usd: float = 10.0  # Fixed $10 per bet (overrides Kelly sizing)
-    daily_loss_limit: float = 0.05  # 5% daily max loss
+    daily_loss_limit: float = 0.0  # Disabled: no daily loss circuit breaker
 
     # ── Tie betting: ayni en yuksek fiyata sahip marketlere ayni anda ac ─
     tie_bet_enabled: bool = True
@@ -156,9 +156,9 @@ class StrategyConfig:
     rotation_threshold: float = 0.05  # %5+ improvement gerekli rotation icin
 
     # ── Max entry price ───────────────────────────────────────────────────
-    # 0.99'dan alimi yasakla: bu fiyatta kar marji cok dusuk (0.99 -> 1.0).
-    # Fill price bu degerin UZERINE cikarsa (>=) bet acilmaz.
-    max_entry_price: float = 0.99
+    # YES entries are accepted in [0.10, 0.95). The upper bound is strict.
+    min_entry_price: float = 0.10
+    max_entry_price: float = 0.95
 
 
 @dataclass
@@ -402,7 +402,7 @@ class BotConfig:
 
     # ── Portfolio ──────────────────────────────────────────────────
     initial_portfolio: float = 1000.0
-    max_exposure_pct: float = 1.0
+    max_exposure_pct: float = 0.60
     city_cap: int = 999  # no city limit - bet all cities
     weather_fee_rate: float = 0.05
     fee_exponent: float = 0.5  # Weather category: 0.5 (flatter curve)
@@ -501,6 +501,7 @@ class BotConfig:
         s.kelly_fraction = float(os.getenv("KELLY_FRACTION", str(s.kelly_fraction)))
         s.daily_loss_limit = float(os.getenv("DAILY_LOSS_LIMIT", str(s.daily_loss_limit)))
         s.flat_bet_usd = float(os.getenv("FLAT_BET_USD", str(s.flat_bet_usd)))
+        s.min_entry_price = float(os.getenv("MIN_ENTRY_PRICE", str(s.min_entry_price)))
         s.max_entry_price = float(os.getenv("MAX_ENTRY_PRICE", str(s.max_entry_price)))
 
 
@@ -550,6 +551,7 @@ class _ConfigProxy:
         "DAILY_LOSS_LIMIT": ("strategy", "daily_loss_limit"),
         "TOTAL_EXPOSURE_PCT": ("strategy", "total_exposure_pct"),
         "MAX_ENTRY_PRICE": ("strategy", "max_entry_price"),
+        "MIN_ENTRY_PRICE": ("strategy", "min_entry_price"),
     }
 
     def _resolve(self, name: str):

@@ -10,13 +10,13 @@ the requested operating rules.
 
 - Select only the highest `yes_price` market in each `(city, target_date, metric)` group.
 - Always enter the YES side, for both HIGH and LOW temperature markets.
-- Reject entry prices `>= 0.99`.
+- Accept YES entry prices in `[0.10, 0.95)`; reject values below `0.10` or at/above `0.95`.
 - Apply the 13:00 UTC gate to markets at least two calendar days ahead.
 - Rotate out of an existing group position when a strictly better candidate appears.
 - Preserve ties: every candidate at the group maximum price remains eligible.
 - Poll prices every five minutes.
 - Keep `net_edge >= effective_min_edge` as a mandatory entry gate.
-- Expose the requested 11 KPI values and calculate available cash consistently.
+- Expose the requested KPI values, 60% previous-day compounded exposure, and ROI by entry-price band.
 - Run UI/DB verification every two hours.
 
 ## Design direction

@@ -20,13 +20,15 @@ def test_selects_highest_yes_price_per_group_and_keeps_ties():
     assert selected == [high, tie, other]
 
 
-def test_max_entry_price_is_strict_and_does_not_fallback_to_cheaper_market():
+def test_price_range_is_inclusive_at_floor_and_strict_at_ceiling():
     target = datetime(2026, 8, 5, tzinfo=timezone.utc)
     best_too_expensive = market("Ankara", target, "temperature_max", 0.99)
     cheaper = market("Ankara", target, "temperature_max", 0.80)
 
     assert select_highest_yes_candidates([best_too_expensive, cheaper]) == []
-    assert len(select_highest_yes_candidates([market("Ankara", target, "temperature_max", 0.989)])) == 1
+    assert select_highest_yes_candidates([market("Ankara", target, "temperature_max", 0.09)]) == []
+    assert len(select_highest_yes_candidates([market("Ankara", target, "temperature_max", 0.10)])) == 1
+    assert select_highest_yes_candidates([market("Ankara", target, "temperature_max", 0.95)]) == []
 
 
 def test_time_gate_blocks_two_days_ahead_before_13_utc_and_allows_at_13():

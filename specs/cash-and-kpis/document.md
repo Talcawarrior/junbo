@@ -61,6 +61,14 @@ total capital 1040 and available cash 840.
 
 Do not use `Portfolio.total_value` as a replacement for derived available cash.
 
+## Compounded exposure policy
+
+- Maximum total open exposure is `60%` of the previous day's capital basis.
+- `capital_basis = initial_capital + realized_pnl_from_bets_closed_before_today`.
+- Today's realized PnL changes the next day's cap, not the current day's cap.
+- A daily loss circuit breaker is disabled; drawdown remains observable but does not block entries.
+- Closed ROI is reported by YES entry-price bands: `0.10–0.20` through `0.90–0.95`.
+
 ## Status / open questions
 
 Status: done. KPI labels can remain Turkish while API fields stay snake_case.
