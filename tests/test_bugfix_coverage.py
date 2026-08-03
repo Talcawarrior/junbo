@@ -207,7 +207,6 @@ class TestExecuteSignalFlush:
 
         with get_session() as s:
             _add_portfolio(s)
-            # Add a market so the 8h guard doesn't block
             td = _td()
             s.add(
                 WeatherMarket(
@@ -218,8 +217,8 @@ class TestExecuteSignalFlush:
                     metric="temperature_max",
                     threshold=25.0,
                     target_date=td,
-                    yes_price=0.02,
-                    no_price=0.98,
+                    yes_price=0.50,
+                    no_price=0.50,
                     status="open",
                     latitude=41.0,
                     longitude=29.0,
@@ -229,33 +228,29 @@ class TestExecuteSignalFlush:
 
             engine = BettingEngine(db_session=s)
 
-            # Mock a signal
             signal = MagicMock()
             signal.edge = 0.05
             signal.bet_size = 10.0
             signal.city_code = "TEST"
             signal.city = "Testville"
             signal.market_id = "flush_test_market"
-            signal.entry_price = 0.02
-            signal.fair_value = 0.07
-            signal.probability = 0.07
+            signal.entry_price = 0.50
+            signal.fair_value = 0.55
+            signal.probability = 0.55
             signal.outcome = "YES"
             signal.side = "YES"
 
-            market_data = {"market_id": "flush_test_market", "city_code": "TEST", "yes_price": 0.02}
+            market_data = {"market_id": "flush_test_market", "city_code": "TEST", "yes_price": 0.50}
 
             with patch.object(s, "flush") as mock_flush:
                 with patch.object(s, "commit") as mock_commit:
-                    # execute_signal should use flush, not commit
                     loop = asyncio.new_event_loop()
                     try:
                         loop.run_until_complete(engine.execute_signal(signal, market_data))
                     finally:
                         loop.close()
 
-                    # flush should have been called (to assign ID)
                     mock_flush.assert_called()
-                    # commit should NOT be called by execute_signal (caller manages transaction)
                     mock_commit.assert_not_called()
 
 
@@ -263,10 +258,10 @@ class TestExecuteSignalFlush:
 
 
 class TestPriceGate:
-    """New rule: all bets with yes_price > 0.10 must be refused."""
+    """New rule: bets with yes_price outside [0.10, 0.95) must be refused."""
 
     def test_execute_signal_refuses_high_price(self):
-        """execute_signal should refuse bets with yes_price > 0.10."""
+        """execute_signal should refuse bets with yes_price >= 0.95."""
         import asyncio
         from engine.strategy import BettingEngine
         from database.db import get_session
@@ -284,8 +279,8 @@ class TestPriceGate:
                     metric="temperature_max",
                     threshold=25.0,
                     target_date=td,
-                    yes_price=0.30,
-                    no_price=0.70,
+                    yes_price=0.95,
+                    no_price=0.05,
                     status="open",
                     latitude=41.0,
                     longitude=29.0,
@@ -300,23 +295,23 @@ class TestPriceGate:
             signal.city_code = "TEST"
             signal.city = "Testville"
             signal.market_id = "price_gate_market"
-            signal.entry_price = 0.30
-            signal.fair_value = 0.35
-            signal.probability = 0.35
+            signal.entry_price = 0.95
+            signal.fair_value = 0.99
+            signal.probability = 0.99
             signal.outcome = "YES"
             signal.side = "YES"
 
-            market_data = {"market_id": "price_gate_market", "city_code": "TEST", "yes_price": 0.30}
+            market_data = {"market_id": "price_gate_market", "city_code": "TEST", "yes_price": 0.95}
 
             loop = asyncio.new_event_loop()
             try:
                 result = loop.run_until_complete(engine.execute_signal(signal, market_data))
             finally:
                 loop.close()
-            assert result is None, "Bet with yes_price=0.30 should be refused"
+            assert result is None, "Bet with yes_price=0.95 should be refused (>= 0.95)"
 
     def test_execute_signal_allows_low_price(self):
-        """execute_signal should allow bets with yes_price ≤ 0.10."""
+        """execute_signal should allow bets with yes_price in [0.10, 0.95)."""
         import asyncio
         from engine.strategy import BettingEngine
         from database.db import get_session
@@ -334,8 +329,8 @@ class TestPriceGate:
                     metric="temperature_max",
                     threshold=25.0,
                     target_date=td,
-                    yes_price=0.05,
-                    no_price=0.95,
+                    yes_price=0.50,
+                    no_price=0.50,
                     status="open",
                     latitude=41.0,
                     longitude=29.0,
@@ -350,23 +345,23 @@ class TestPriceGate:
             signal.city_code = "TEST"
             signal.city = "Testville"
             signal.market_id = "price_ok_market"
-            signal.entry_price = 0.05
-            signal.fair_value = 0.10
-            signal.probability = 0.10
+            signal.entry_price = 0.50
+            signal.fair_value = 0.55
+            signal.probability = 0.55
             signal.outcome = "YES"
             signal.side = "YES"
 
-            market_data = {"market_id": "price_ok_market", "city_code": "TEST", "yes_price": 0.05}
+            market_data = {"market_id": "price_ok_market", "city_code": "TEST", "yes_price": 0.50}
 
             loop = asyncio.new_event_loop()
             try:
                 result = loop.run_until_complete(engine.execute_signal(signal, market_data))
             finally:
                 loop.close()
-            assert result is not None, "Bet with yes_price=0.05 should be allowed"
+            assert result is not None, "Bet with yes_price=0.50 should be allowed"
 
-    def test_execute_signal_refuses_exactly_011(self):
-        """Edge case: yes_price=0.11 should be refused."""
+    def test_execute_signal_refuses_exactly_095(self):
+        """Edge case: yes_price=0.95 should be refused (upper bound is strict)."""
         import asyncio
         from engine.strategy import BettingEngine
         from database.db import get_session
@@ -384,8 +379,8 @@ class TestPriceGate:
                     metric="temperature_max",
                     threshold=25.0,
                     target_date=td,
-                    yes_price=0.11,
-                    no_price=0.89,
+                    yes_price=0.95,
+                    no_price=0.05,
                     status="open",
                     latitude=41.0,
                     longitude=29.0,
@@ -400,20 +395,20 @@ class TestPriceGate:
             signal.city_code = "TEST"
             signal.city = "Testville"
             signal.market_id = "price_edge_market"
-            signal.entry_price = 0.11
-            signal.fair_value = 0.16
-            signal.probability = 0.16
+            signal.entry_price = 0.95
+            signal.fair_value = 0.99
+            signal.probability = 0.99
             signal.outcome = "YES"
             signal.side = "YES"
 
-            market_data = {"market_id": "price_edge_market", "city_code": "TEST", "yes_price": 0.11}
+            market_data = {"market_id": "price_edge_market", "city_code": "TEST", "yes_price": 0.95}
 
             loop = asyncio.new_event_loop()
             try:
                 result = loop.run_until_complete(engine.execute_signal(signal, market_data))
             finally:
                 loop.close()
-            assert result is None, "Bet with yes_price=0.11 should be refused"
+            assert result is None, "Bet with yes_price=0.95 should be refused (upper bound is strict < 0.95)"
 
 
 if __name__ == "__main__":

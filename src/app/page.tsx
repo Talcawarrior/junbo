@@ -325,7 +325,7 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
               },
               {
                 label: "Toplam sermaye",
-                value: `$${kpiData.initial.toLocaleString("tr-TR", { minimumFractionDigits: 0 })}`,
+                value: fmtUsd(kpiData.portfolioValue),
                 icon: <Wallet className="h-3 w-3" />,
                 color: TEAL,
                 sub: `PnL: ${fmtUsd(kpiData.totalPnl)}`,
@@ -389,7 +389,7 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
               },
               {
                 label: "Max acilabilir",
-                value: fmtUsd(kpiData.availableCash),
+                value: fmtUsd(kpiData.maxOpenableUsd),
                 icon: <Activity className="h-3 w-3" />,
                 color: TEAL,
                 sub: "",

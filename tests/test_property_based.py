@@ -222,10 +222,9 @@ class TestPortfolioFormulas:
         total_exposure_pct = 0.25
         max_exp = max_exposure_cap(initial, realized_before_today, total_exposure_pct)
 
-        # Exposure cap = (initial + realized) * pct
-        # When initial + realized < 0, cap can be negative (which means no betting allowed)
-        # The formula is correct, so we just verify the calculation
-        expected = (initial + realized_before_today) * total_exposure_pct
+        # Exposure cap = max(0, initial + realized) * pct
+        # The formula clamps to 0 so a losing account cannot create negative exposure allowance
+        expected = max(0.0, initial + realized_before_today) * total_exposure_pct
         assert abs(max_exp - expected) < 0.01
 
     @given(

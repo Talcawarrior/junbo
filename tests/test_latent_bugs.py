@@ -406,6 +406,10 @@ ALLOWED_DEAD = {
     "get_active_model_windows",
     # Entry time analysis (called from API/CLI on demand)
     "get_entry_time_analysis",
+    # Market selection helpers (called by scheduler/bet_placer)
+    "market_group_key",
+    "passes_time_gate",
+    "select_highest_yes_candidates",
 }
 
 

@@ -8,7 +8,6 @@ place -> settle cycles at configurable intervals.
 # pylint: disable=E1102,E1111  # SQLAlchemy func.* false positives
 
 import asyncio
-import json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -218,7 +217,7 @@ def get_status():
         from sqlalchemy import or_
 
         daily_pnl = (
-            db.query(func.coalesce(func.sum(Bet.pnl), 0.0))
+            db.query(func.coalesce(func.sum(Bet.realized_pnl), 0.0))
             .filter(
                 Bet.status.in_(_closed_statuses),
                 or_(Bet.settled_at >= _today_start, Bet.closed_at >= _today_start),
@@ -255,9 +254,9 @@ def get_status():
         ) or 0.0
 
         # 3. Counts â€” win/loss based on PnL (includes closed_early)
-        _all_closed = db.query(Bet.pnl).filter(Bet.status.in_(_closed_statuses)).all()
-        win_count = sum(1 for b in _all_closed if (b.pnl or 0) > 0)
-        loss_count = sum(1 for b in _all_closed if (b.pnl or 0) <= 0)
+        _all_closed = db.query(Bet.realized_pnl).filter(Bet.status.in_(_closed_statuses)).all()
+        win_count = sum(1 for b in _all_closed if (b.realized_pnl or 0) > 0)
+        loss_count = sum(1 for b in _all_closed if (b.realized_pnl or 0) <= 0)
         total_bets_db = db.query(Bet).filter(Bet.status.in_(open_statuses)).count()
         total_signals_db = db.query(Analysis).filter(Analysis.should_bet.is_(True)).count()
 
@@ -293,8 +292,17 @@ def get_status():
             db.query(func.coalesce(func.sum(Bet.amount), 0.0)).filter(Bet.status.in_(open_statuses)).scalar()
         ) or 0.0
 
-        initial_capital = state.config.INITIAL_PORTFOLIO
-        total_pnl = realized_pnl_db + unrealized_pnl_db
+        initial_capital = float(pf.initial_value) if pf and pf.initial_value else float(state.config.INITIAL_PORTFOLIO)
+        # Gerçek muhasebe: cash_balance tek doğruluk kaynağıdır (fee/gas dahil tüm
+        # nakit hareketlerini yansıtır). Bet tablosundan toplanan realized_pnl eksik
+        # kalır (eski betler temizlenir, fee'ler tam yansımaz). Bu yüzden realized
+        # ve total PnL nakitten türetilir:
+        #   equity      = cash + açık pozisyon stake'i + unrealized PnL
+        #   total_pnl   = equity - initial
+        #   realized    = total_pnl - unrealized
+        equity_cash = float(pf.cash_balance or 0.0) + float(exposure_db) + float(unrealized_pnl_db)
+        total_pnl = round(equity_cash - initial_capital, 2)
+        realized_pnl_db = round(total_pnl - float(unrealized_pnl_db), 2)
 
         # 4. Available Cash (from Portfolio table)
         pf = db.query(Portfolio).filter(Portfolio.id == 1).first()
@@ -309,7 +317,7 @@ def get_status():
 
         # Realized PnL from bets closed BEFORE today (for daily exposure cap)
         realized_before_today = (
-            db.query(func.coalesce(func.sum(Bet.pnl), 0.0))
+            db.query(func.coalesce(func.sum(Bet.realized_pnl), 0.0))
             .filter(
                 Bet.status.in_(_closed_statuses),
                 or_(
@@ -339,13 +347,13 @@ def get_status():
         sharpe_ratio = 0.0
         max_drawdown_pct = 0.0
         closed_bets = (
-            db.query(Bet.pnl, Bet.settled_at)
+            db.query(Bet.realized_pnl, Bet.settled_at)
             .filter(Bet.status.in_(_closed_statuses))
             .order_by(Bet.settled_at.asc())
             .all()
         )
         if len(closed_bets) > 1:
-            pnls = [float(b.pnl or 0.0) for b in closed_bets]
+            pnls = [float(b.realized_pnl or 0.0) for b in closed_bets]
             mean_pnl = sum(pnls) / len(pnls)
             std_pnl = math.sqrt(sum((p - mean_pnl) ** 2 for p in pnls) / len(pnls))
             sharpe_ratio = round(mean_pnl / std_pnl, 4) if std_pnl > 0 else 0.0
@@ -354,7 +362,7 @@ def get_status():
             port_val = float(initial_capital)
             peak = port_val
             for b in closed_bets:
-                port_val += float(b.pnl or 0.0)
+                port_val += float(b.realized_pnl or 0.0)
                 if port_val > peak:
                     peak = port_val
                 dd = (peak - port_val) / peak * 100 if peak > 0 else 0
@@ -644,7 +652,6 @@ def get_bets(status: str = "", limit: int = 100, offset: int = 0):
 
 # Keep other endpoints (signals, history, cleanup, start, stop,
 # reset, ws, loops, run_cli) exactly as they were.
-
 
 
 @app.get("/api/signals")
@@ -1033,11 +1040,7 @@ def get_history():
         # uses closed bets only; open/unrealized PnL must not contaminate ROI.
         price_bands = [(i / 100, (i + 10) / 100) for i in range(10, 90, 10)] + [(0.90, 0.95)]
         roi_by_price_band = []
-        closed_for_bands = (
-            db.query(Bet)
-            .filter(Bet.status.in_(all_closed_statuses))
-            .all()
-        )
+        closed_for_bands = db.query(Bet).filter(Bet.status.in_(all_closed_statuses)).all()
         for band_min, band_max in price_bands:
             in_band = []
             for bet in closed_for_bands:
@@ -1047,18 +1050,20 @@ def get_history():
             stake = sum(float(b.amount or b.stake_amount or 0.0) for b in in_band)
             pnl = sum(float(b.pnl if b.pnl is not None else b.realized_pnl or 0.0) for b in in_band)
             wins = sum(1 for b in in_band if (b.pnl if b.pnl is not None else b.realized_pnl or 0.0) > 0)
-            roi_by_price_band.append({
-                "band": f"{band_min:.2f}–{band_max:.2f}",
-                "min_price": band_min,
-                "max_price": band_max,
-                "trades": len(in_band),
-                "wins": wins,
-                "losses": len(in_band) - wins,
-                "stake": round(stake, 2),
-                "pnl": round(pnl, 2),
-                "roi": round(roi_pct(pnl, stake), 2),
-                "win_rate": round(win_rate_pct(wins, len(in_band)), 2),
-            })
+            roi_by_price_band.append(
+                {
+                    "band": f"{band_min:.2f}–{band_max:.2f}",
+                    "min_price": band_min,
+                    "max_price": band_max,
+                    "trades": len(in_band),
+                    "wins": wins,
+                    "losses": len(in_band) - wins,
+                    "stake": round(stake, 2),
+                    "pnl": round(pnl, 2),
+                    "roi": round(roi_pct(pnl, stake), 2),
+                    "win_rate": round(win_rate_pct(wins, len(in_band)), 2),
+                }
+            )
         return {
             "history": history,
             "roi_by_price_band": roi_by_price_band,
@@ -1238,6 +1243,7 @@ def cleanup_old_data(_key: str = Depends(verify_api_key)):
             bet.settled_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
             from utils.accounting import credit_sale
+
             refund_amount = float(bet.amount or 0)
 
             credit_sale(db, refund_amount, f"cleanup_refund:bet_{bet.id}")

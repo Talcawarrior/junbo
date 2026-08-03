@@ -136,18 +136,13 @@ class BetPlacer:
                 d.log(logging.DEBUG)
                 return None
 
-            # Guard: skip resolved markets AND bets too close to expiry.
-            # Vadesine 8 saatten az kalansa bahis acilmaz (ani kayiplari onlemek
-            # icin - orn. ayni gun acilip hemen loss yazan bahisler).
+            # Guard: skip resolved markets (expiry check only).
             _now = datetime.now(timezone.utc).replace(tzinfo=None)
-            MIN_HOURS_TO_EXPIRY = 8
             date_ok = True
             if market.target_date:
                 secs_left = (market.target_date - _now).total_seconds()
                 if secs_left <= 0:
                     date_ok = False  # vadesi gecmis
-                elif secs_left < MIN_HOURS_TO_EXPIRY * 3600:
-                    date_ok = False  # vadesine 8 saatten az kaldi
             d.check("target_date_ok", date_ok, target_date=str(market.target_date) if market.target_date else None)
             if not d.should_bet:
                 d.log(logging.DEBUG)
@@ -489,10 +484,6 @@ class BetPlacer:
                 by_group[key].append((mkt, float(mkt.yes_price or 0)))
 
             # 3) Her grupta en yuksek fiyatli market(ler)i sec.
-            #    tie_bet_enabled ise: ayni en yuksek fiyata sahip tum marketler
-            #    (tie) birlikte acilir — sona dogru biri one gecerse digeri
-            #    otomatik kapatilir. Degilse: sadece ilk (en yuksek) market.
-            tie_enabled = bool(getattr(bot_config.strategy, "tie_bet_enabled", True))
             best_markets = []
             for (city, td, metric), candidates in by_group.items():
                 best_price = max(p for _, p in candidates)
@@ -520,9 +511,38 @@ class BetPlacer:
                     active_by_group[key].append(b)
 
             # 5) Her grup icin: EN YUKSEK fiyatli bet'i sec
+            rotation_threshold = float(getattr(bot_config.strategy, "rotation_threshold", 0.05) or 0.05)
             for city, td, metric, best_mkt, best_price in best_markets:
                 key = (city, td, metric)
                 group_bets = active_by_group.get(key, [])
+
+                # Mevcut bet'in market'ini kontrol et
+                if group_bets:
+                    old_bet = group_bets[0]
+                    old_mkt = session.query(WeatherMarket).filter_by(id=old_bet.market_id).first()
+                    old_price = float(old_mkt.yes_price or 0) if old_mkt else 0
+
+                    # Ayni market veya fiyat iyilesmesi rotation_threshold altindaysa rotation yapma
+                    same_market = str(old_bet.market_id) == str(best_mkt.id)
+                    price_improvement = best_price - old_price if old_price > 0 else 0
+
+                    if same_market:
+                        logger.info(
+                            "Rotation skipped: %s %s same market (price=%.4f)",
+                            city,
+                            str(td.date()),
+                            best_price,
+                        )
+                        continue
+                    if price_improvement < rotation_threshold:
+                        logger.info(
+                            "Rotation skipped: %s %s improvement %.4f < threshold %.4f",
+                            city,
+                            str(td.date()),
+                            price_improvement,
+                            rotation_threshold,
+                        )
+                        continue
 
                 # Grubun tamamini kapat (varsa)
                 for old_bet in group_bets:
@@ -649,7 +669,8 @@ class BetPlacer:
             if market.target_date <= _now:
                 logger.info(
                     "open_bet_on_market: %s target=%s GECTI - skipped",
-                    market.id, market.target_date,
+                    market.id,
+                    market.target_date,
                 )
                 return None
 

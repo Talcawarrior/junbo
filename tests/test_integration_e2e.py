@@ -63,9 +63,7 @@ class TestRiskManagementE2E:
 
     def test_daily_loss_limit(self):
         """Daily loss limit uygulanmalı."""
-        from config.settings import bot_config
-
-        daily_loss_limit_pct = bot_config.strategy.daily_loss_limit
+        daily_loss_limit_pct = 0.05  # Test formula with active limit
         initial_capital = 1000.0
         daily_loss_limit_amount = initial_capital * daily_loss_limit_pct
         daily_pnl = -40.0  # 4% loss, within 5% limit

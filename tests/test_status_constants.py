@@ -29,6 +29,8 @@ def test_no_literal_open_status_tuples():
     skip_files = {
         os.path.normpath("database/models.py"),
         os.path.normpath("tests/test_status_constants.py"),
+        os.path.normpath("junbo/database/models.py"),
+        os.path.normpath("junbo/tests/test_status_constants.py"),
     }
 
     for root, _dirs, files in os.walk(project_root):
@@ -36,6 +38,11 @@ def test_no_literal_open_status_tuples():
         if "venv" in root or "__pycache__" in root or ".git" in root:
             continue
         if "_backups" in root or "_test_backups" in root:
+            continue
+        # Skip nested project copies (junbo/junbo/)
+        if os.path.normpath(root) != os.path.normpath(project_root) and os.path.basename(root) == os.path.basename(
+            project_root
+        ):
             continue
         for fname in files:
             if not fname.endswith(".py"):

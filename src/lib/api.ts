@@ -1792,7 +1792,7 @@ return {
 
 
 
-  const realizedPnl = hs?.total_pnl ?? 0;
+  const realizedPnl = p.realized_pnl ?? hs?.total_pnl ?? 0;
 
 
 
@@ -1961,13 +1961,13 @@ return {
 
     initial: p.initial,
 
-    portfolioValue: p.initial + p.realized_pnl + p.unrealized_pnl,
+    portfolioValue: p.current ?? (p.initial + p.realized_pnl + p.unrealized_pnl),
     dailyPnl: p.daily_pnl,
 
 
 
 
-    totalPnl: hs?.total_pnl ?? 0,
+    totalPnl: p.total_pnl ?? hs?.total_pnl ?? 0,
 
 
 
@@ -2027,7 +2027,7 @@ return {
 
 
 
-    availableCash: Math.round(((p.free_cash ?? (p.initial + p.realized_pnl + p.unrealized_pnl - p.exposure))) * 100) / 100,
+    availableCash: Math.round(((p.free_cash ?? (p.current ?? p.initial) - (p.exposure ?? 0)) * 100)) / 100,
 
 
 
