@@ -712,16 +712,18 @@ class BetPlacer:
             return None
 
         condition_id = None
+        token_id = None
         try:
             raw = json.loads(market.raw_data) if market.raw_data else {}
             for tok in raw.get("tokens", []):
                 if tok.get("outcome", "").upper() == "YES":
                     condition_id = tok.get("condition_id") or tok.get("token_id")
+                    token_id = tok.get("token_id") or condition_id
                     break
         except (json.JSONDecodeError, TypeError):
             pass
 
-        slip_est = estimate_slippage(raw_fill, stake_usd=amount, condition_id=condition_id)
+        slip_est = estimate_slippage(raw_fill, stake_usd=amount, condition_id=condition_id, token_id=token_id)
         fill_price = raw_fill * (1.0 + slip_est.slippage_pct)
         fill_price = max(0.01, min(0.99, round(fill_price, 4)))
         shares = bet_shares(amount, fill_price)

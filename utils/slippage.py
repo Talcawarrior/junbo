@@ -82,6 +82,7 @@ def _orderbook_slippage(
     entry_price: float,
     stake_usd: float,
     condition_id: str | None = None,
+    token_id: str | None = None,
 ) -> SlippageEstimate:
     """Fetch live orderbook and estimate realistic fill price.
 
@@ -99,19 +100,30 @@ def _orderbook_slippage(
     -------
     SlippageEstimate with model_used="orderbook" (or "tiered" on fallback).
     """
-    if not condition_id:
+    if not condition_id and not token_id:
         return _tiered_fallback(entry_price, "orderbook: no condition_id")
 
     try:
-        from data_pipeline.resolvedmarkets_ingest import ResolvedMarketsClient
+        # Official CLOB book is authoritative for an executable token quote.
+        # Keep the resolved-markets adapter as a compatibility fallback for
+        # historical deployments that only persisted a condition id.
+        if token_id:
+            from scrapers.clob import CLOBClient
 
-        ob = ResolvedMarketsClient().get_live_orderbook(condition_id)
-        if not ob or ("asks" not in ob and "bids" not in ob):
+            book = CLOBClient().get_orderbook(token_id)
+            asks = [{"price": level.price, "size": level.size} for level in book.asks]
+            bids = [{"price": level.price, "size": level.size} for level in book.bids]
+        else:
+            from data_pipeline.resolvedmarkets_ingest import ResolvedMarketsClient
+
+            ob = ResolvedMarketsClient().get_live_orderbook(condition_id)
+            asks = ob.get("asks", []) if ob else []
+            bids = ob.get("bids", []) if ob else []
+        if not asks and not bids:
             logger.warning("Orderbook empty for %s, falling back to tiered", condition_id)
             return _tiered_fallback(entry_price, "orderbook: empty_book")
-
-        asks = ob.get("asks", [])
-        bids = ob.get("bids", [])
+        asks = sorted(asks, key=lambda item: float(item.get("price", 0)))
+        bids = sorted(bids, key=lambda item: float(item.get("price", 0)), reverse=True)
         best_ask = float(asks[0]["price"]) if asks else entry_price * 1.01
         best_bid = float(bids[0]["price"]) if bids else entry_price * 0.99
         mid = (best_ask + best_bid) / 2
@@ -150,6 +162,7 @@ def estimate_slippage(
     *,
     model: str | None = None,
     condition_id: str | None = None,
+    token_id: str | None = None,
 ) -> SlippageEstimate:
     """Dispatch to the configured slippage model.
 
@@ -169,7 +182,7 @@ def estimate_slippage(
     active_model = model or cfg_model
 
     if active_model == "orderbook":
-        return _orderbook_slippage(entry_price, stake_usd, condition_id)
+        return _orderbook_slippage(entry_price, stake_usd, condition_id, token_id)
     if active_model == "flat":
         flat_pct = getattr(bot_config.strategy, "slippage_pct", 0.005)
         return SlippageEstimate(
@@ -295,10 +308,21 @@ def check_orderbook_depth(
         return True, 0.0
 
     try:
-        from data_pipeline.resolvedmarkets_ingest import ResolvedMarketsClient
+        from scrapers.clob import CLOBClient
 
-        client = ResolvedMarketsClient()
-        ob = client.get_live_orderbook(condition_id)
+        # `condition_id` is retained as a compatibility parameter, but new
+        # callers pass the YES token id.  CLOB `/book` is the executable quote.
+        ob = None
+        try:
+            book = CLOBClient().get_orderbook(condition_id)
+            ob = {
+                "asks": [{"price": level.price, "size": level.size} for level in book.asks],
+                "bids": [{"price": level.price, "size": level.size} for level in book.bids],
+            }
+        except Exception:
+            from data_pipeline.resolvedmarkets_ingest import ResolvedMarketsClient
+
+            ob = ResolvedMarketsClient().get_live_orderbook(condition_id)
         if not ob:
             return True, 0.0
 
