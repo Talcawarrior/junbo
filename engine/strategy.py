@@ -419,8 +419,8 @@ class RiskManager:
             if placed.tzinfo is None:
                 placed = placed.replace(tzinfo=timezone.utc)
             hold_seconds = (now - placed).total_seconds()
-            if hold_seconds < 180:  # 3 dakika minimum hold
-                return False, "Hold (minimum hold period)"
+            if hold_seconds < 21600:  # 6 saat minimum hold (piyasa gurultusu rotasyonlari engelle)
+                return False, "Hold (minimum hold period: 6h)"
 
         # 1. Stop-loss (range betlerde devre disi)
         order_id = getattr(bet, "order_id", "") or ""

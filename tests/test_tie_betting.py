@@ -30,6 +30,8 @@ def _clean_db():
     from config.settings import bot_config
 
     bot_config.strategy.current_fee_rate = 0.05
+    # Betting window kontrolunu testlerde kapat
+    bot_config.strategy.betting_window_enabled = False
 
 
 def _td(offset=2):

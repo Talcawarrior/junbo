@@ -445,11 +445,85 @@ class BetPlacer:
                 return token.get("token_id")
         raise ValueError(f"Token ID bulunamadi: {side}")
 
+    def _count_today_rotations(self, session) -> int:
+        """Bugun yapilan rotasyon sayisini say (close_reason='rotation')."""
+        today_start = datetime.now(timezone.utc).replace(tzinfo=None).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        count = (
+            session.query(func.count(Bet.id))
+            .filter(
+                Bet.close_reason == "rotation",
+                Bet.closed_at.isnot(None),
+                Bet.closed_at >= today_start,
+            )
+            .scalar()
+        )
+        return int(count or 0)
+
+    def _is_in_betting_window(self) -> bool:
+        """Bahis penceresi kontrolu: sadece tanimli UTC saatlerinde bahis ac.
+
+        Pencereler disinda bahis acma kapalidir. Bu, dusuk likidite ve
+        eskimis model verisi saatlerinde gereksiz bahis/rotasyon engeller.
+        """
+        if not getattr(bot_config.strategy, "betting_window_enabled", True):
+            return True  # kapaliysa her zaman ac
+
+        windows = getattr(bot_config.strategy, "betting_windows", None)
+        if not windows:
+            return True  # pencere tanimli degilse her zaman ac
+
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        hour = now_utc.hour
+        for start_h, end_h in windows:
+            if start_h <= hour < end_h:
+                return True
+        return False
+
+    def _check_rotation_edge(self, market, session) -> bool:
+        """Rotasyonda yeni pazar icin minimum edge kontrolu.
+
+        Rotasyon karari sadece fiyat iyilesmesine degil, ayni zamanda
+        yeni pazarda yeterli pozitif edge olup olmadigina da bakar.
+        """
+        min_edge = float(getattr(bot_config.strategy, "min_edge", 0.04) or 0.04)
+
+        analysis = (
+            session.query(Analysis)
+            .filter(Analysis.market_id == market.id)
+            .order_by(Analysis.id.desc())
+            .first()
+        )
+        if not analysis:
+            logger.warning(
+                "Rotation edge check: no analysis for market %s, skipping rotation",
+                market.id,
+            )
+            return False
+
+        net_edge = float(analysis.edge or 0)
+        if net_edge < min_edge:
+            logger.info(
+                "Rotation blocked (low edge): %s net_edge=%.4f < min_edge=%.4f",
+                market.id,
+                net_edge,
+                min_edge,
+            )
+            return False
+
+        return True
+
     def place_all_pending(self) -> int:
         """Tum acik Polymarket weather marketleri icin bet ac.
         Analiz sonucuna bakilmaz — Polymarket'te hangi derece en yuksek
         fiyatlanmissa ona bet acilir. Smart rotation: ayni grupta daha iyi
         fiyatlı market bulunursa eski bet kapatilir, yenisi acilir.
+
+        UZELTI KONTROLLER (rotasyon icin):
+        - Gunluk rotasyon siniri (max_daily_rotations)
+        - Rotasyon edge kontrolu (yeni pazarda min_edge kontrolu)
+        - Bahis penceresi kontrolu (sadece tanimli UTC saatlerinde)
         """
         from collections import defaultdict
 
@@ -458,6 +532,28 @@ class BetPlacer:
 
         with get_session() as session:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+            # ── Bahis penceresi kontrolu ──────────────────────────────
+            if not self._is_in_betting_window():
+                hour = now.hour
+                windows = getattr(bot_config.strategy, "betting_windows", [])
+                logger.info(
+                    "Betting window KAPALI (hour=%d, windows=%s) — bahis acma atlandi",
+                    hour,
+                    windows,
+                )
+                return 0
+
+            # ── Gunluk rotasyon sayisi kontrolu ───────────────────────
+            max_daily_rot = int(getattr(bot_config.strategy, "max_daily_rotations", 3) or 3)
+            today_rotations = self._count_today_rotations(session)
+            if today_rotations >= max_daily_rot:
+                logger.info(
+                    "Daily rotation limit ULASILDI: %d/%d — rotasyon yok",
+                    today_rotations,
+                    max_daily_rot,
+                )
+                # Rotasyon yok ama yeni bahis acilabilir (pencere dahilinde)
 
             # 1) Tum acik ve gelecek tarihli marketleri cek
             open_markets = (
@@ -511,7 +607,8 @@ class BetPlacer:
                     active_by_group[key].append(b)
 
             # 5) Her grup icin: EN YUKSEK fiyatli bet'i sec
-            rotation_threshold = float(getattr(bot_config.strategy, "rotation_threshold", 0.05) or 0.05)
+            rotation_threshold = float(getattr(bot_config.strategy, "rotation_threshold", 0.12) or 0.12)
+            can_rotate = today_rotations < max_daily_rot
             for city, td, metric, best_mkt, best_price in best_markets:
                 key = (city, td, metric)
                 group_bets = active_by_group.get(key, [])
@@ -544,13 +641,33 @@ class BetPlacer:
                         )
                         continue
 
-                # Grubun tamamini kapat (varsa)
-                for old_bet in group_bets:
-                    old_mkt = session.query(WeatherMarket).filter_by(id=old_bet.market_id).first()
-                    old_price = float(old_mkt.yes_price or 0) if old_mkt else 0
-                    logger.info("Closing bet#%s %s %s (price=%.4f)", old_bet.id, city, str(td.date()), old_price)
-                    self.close_bet_for_rotation(old_bet, old_price, session)
-                    rotated += 1
+                    # ── Rotasyon kontrolleri (sadece rotasyon yapiliyorsa) ─
+                    if can_rotate:
+                        # Edge kontrolu: yeni pazarda yeterli edge var mi?
+                        if not self._check_rotation_edge(best_mkt, session):
+                            logger.info(
+                                "Rotation blocked (edge): %s %s insufficient edge",
+                                city,
+                                str(td.date()),
+                            )
+                            continue
+
+                        # Grubun tamamini kapat (varsa)
+                        for old_bet in group_bets:
+                            old_mkt = session.query(WeatherMarket).filter_by(id=old_bet.market_id).first()
+                            old_price = float(old_mkt.yes_price or 0) if old_mkt else 0
+                            logger.info("Closing bet#%s %s %s (price=%.4f)", old_bet.id, city, str(td.date()), old_price)
+                            self.close_bet_for_rotation(old_bet, old_price, session)
+                            rotated += 1
+                    else:
+                        logger.info(
+                            "Rotation skipped (daily limit): %s %s (%d/%d rotations today)",
+                            city,
+                            str(td.date()),
+                            today_rotations,
+                            max_daily_rot,
+                        )
+                        continue
 
                 # Yeni bet ac
                 bet = self.open_bet_on_market(best_mkt, session)
@@ -559,9 +676,11 @@ class BetPlacer:
                     active_by_group[key].append(bet)
 
         logger.info(
-            "place_all_pending done: %d placed, %d rotated (smart rotation)",
+            "place_all_pending done: %d placed, %d rotated (smart rotation, today_rotations=%d/%d)",
             placed,
             rotated,
+            today_rotations + rotated,
+            max_daily_rot,
         )
         return placed
 

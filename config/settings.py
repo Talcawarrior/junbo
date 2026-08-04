@@ -94,7 +94,7 @@ class StrategyConfig:
     # public NWS/Open-Meteo consensus.  5% is enough to cover bookmaker
     # vig + a thin profit margin in paper mode.  Can be lowered once a
     # private weather feed (e.g. ECMWF-direct) gives a structural edge.
-    min_edge: float = 0.001  # 0.1% - accept nearly all positive edge bets
+    min_edge: float = 0.04  # 4% - only bets with meaningful edge after costs
     max_bet_amount: float = 1000.0  # Maximum $1000 per bet (flat)
     max_bet_pct: float = 1.0  # Safety ceiling (flat_bet_usd overrides Kelly sizing)
     min_bet_size: float = 1.0  # Minimum bet size in USD
@@ -110,7 +110,7 @@ class StrategyConfig:
     # The depth is checked from the live orderbook via ResolvedMarkets API.
     # If the API call fails, the filter is skipped (graceful degradation).
     min_depth_usd: float = 0.0
-    kelly_fraction: float = 0.15  # Quarter/Fractional Kelly (aligned with Junbo 15%)
+    kelly_fraction: float = 0.25  # Half-Kelly (agresif ama dalgalanmaya dayanikli)
     # Time-to-close edge escalation. As a market approaches its
     # resolution time, Polymarket prices move fast on the public
     # weather consensus and forecast uncertainty is already low.
@@ -149,16 +149,25 @@ class StrategyConfig:
     daily_loss_limit: float = 0.0  # Disabled: no daily loss circuit breaker
 
     # ── Tie betting: ayni en yuksek fiyata sahip marketlere ayni anda ac ─
-    tie_bet_enabled: bool = True
+    tie_bet_enabled: bool = False  # Kapali: gereksiz sermaye bolusu ve maliyet yaratir
     tie_loser_gap: float = 0.10  # ikiz betlerden biri %10+ one gecerse digerini kapat
 
     # ── Smart rotation: eski bet'i kapatip yenisini ac ─
-    rotation_threshold: float = 0.05  # %5+ improvement gerekli rotation icin
+    rotation_threshold: float = 0.12  # %12+ improvement gerekli rotation icin (daha az ama daha kaliteli)
 
     # ── Max entry price ───────────────────────────────────────────────────
     # YES entries are accepted in [0.10, 0.95). The upper bound is strict.
     min_entry_price: float = 0.10
     max_entry_price: float = 0.95
+
+    # ── Daily rotation limit: gunde max N rotasyon ───────────────────
+    max_daily_rotations: int = 3  # gunde en fazla 3 rotasyon (maliyet kontrolu)
+
+    # ── Betting windows (UTC saatleri, bahis sadece bu pencerelerde acilir) ─
+    # Her pencere (baslangic_saati, bitis_saati) tuple olarak tanimlanir.
+    # Pencereler disinda bahis acma kapalidir.
+    betting_windows: list = None  # type: ignore[assignment]  # __post_init__'te初始化
+    betting_window_enabled: bool = True  # bahis penceresi kontrolunu aktif et
 
 
 @dataclass
@@ -455,6 +464,14 @@ class BotConfig:
         self.strategy = self.strategy or StrategyConfig()
         self.risk = self.risk or RiskConfig()
 
+        # ── Betting windows initialization ──────────────────────────
+        if self.strategy.betting_windows is None:
+            self.strategy.betting_windows = [
+                (3, 6),    # Pencere 1: 03:00-06:00 UTC (GFS+ECMWF taze veri)
+                (12, 15),  # Pencere 2: 12:00-15:00 UTC (2-gun pazarlari oturdu)
+                (19, 22),  # Pencere 3: 19:00-22:00 UTC (akşam runu + likidite)
+            ]
+
         # ── Override from .env (single source: .env > dataclass defaults) ──
         self.initial_portfolio = float(os.getenv("INITIAL_PORTFOLIO", str(self.initial_portfolio)))
         self.max_exposure_pct = float(os.getenv("MAX_EXPOSURE_PCT", str(self.max_exposure_pct)))
@@ -632,7 +649,7 @@ def apply_persisted_strategy_params() -> dict:
 
     if "min_edge" in persisted:
         try:
-            s.min_edge = 0.001  # Hard floor — no override allowed
+            s.min_edge = 0.04  # Hard floor 4% — no override allowed from persisted params
             applied["min_edge"] = s.min_edge
         except (TypeError, ValueError):
             pass
