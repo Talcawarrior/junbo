@@ -2,18 +2,15 @@
 
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import func
 
 from config.settings import bot_config, config
 from database.models import (
     OPEN_BET_STATUSES,
-    Analysis,
     Bet,
-    ModelPerformance,
     Portfolio,
-    WeatherMarket,
 )
 from utils.formulas import conservative_portfolio_value, max_exposure_cap
 from utils.kelly import kelly_bet_amount
@@ -755,10 +752,12 @@ class BettingEngine:
             min_price = float(getattr(bot_config.strategy, "min_entry_price", 0.10))
             max_price = float(getattr(bot_config.strategy, "max_entry_price", 0.95))
             if not (min_price <= float(yes_price) < max_price):
-                logger.info("Price gate: %s yes_price=%.3f outside [%.2f, %.2f)", market_id, yes_price, min_price, max_price)
+                logger.info(
+                    "Price gate: %s yes_price=%.3f outside [%.2f, %.2f)", market_id, yes_price, min_price, max_price
+                )
                 return None
 
-            # 8-hour pre-settlement guard: settlement'a 8 saatten az kaldiysa bet acma
+            # 24-hour settlement window: only bet on markets settling within 24h
             try:
                 from database.models import WeatherMarket as _WM
 
@@ -770,8 +769,8 @@ class BettingEngine:
 
                         _res = _res.replace(tzinfo=_tz.utc)
                     _hours_left = (_res - datetime.now(timezone.utc)).total_seconds() / 3600.0
-                    if _hours_left <= 8:
-                        logger.info("8h guard: %s has %.1fh left — bet refused", market_id, _hours_left)
+                    if _hours_left > 24 or _hours_left <= 0:
+                        logger.info("24h guard: %s has %.1fh left — bet refused", market_id, _hours_left)
                         return None
             except Exception:
                 pass
@@ -781,7 +780,6 @@ class BettingEngine:
                 city_code=city_code,
                 city=city,
                 outcome=getattr(signal, "outcome", "YES"),
-                stake=bet_size,
                 stake_amount=bet_size,
                 entry_price=getattr(signal, "entry_price", yes_price),
                 current_price=getattr(signal, "entry_price", yes_price),
@@ -795,7 +793,6 @@ class BettingEngine:
                     if isinstance(market_data, dict)
                     else getattr(market_data, "strike_temp", 25.0)
                 ),
-                bet_type=getattr(signal, "outcome", "YES"),
                 side=getattr(signal, "side", "YES"),
                 status="active",
                 placed_at=datetime.now(timezone.utc),
@@ -812,4 +809,3 @@ class BettingEngine:
             if self.db:
                 self.db.rollback()
             return None
-

@@ -607,8 +607,25 @@ class BetPlacer:
                     active_by_group[key].append(b)
 
             # 5) Her grup icin: EN YUKSEK fiyatli bet'i sec
-            rotation_threshold = float(getattr(bot_config.strategy, "rotation_threshold", 0.12) or 0.12)
-            can_rotate = today_rotations < max_daily_rot
+            rotation_threshold = float(getattr(bot_config.strategy, "rotation_threshold", 0.15) or 0.15)
+            daily_rotation_limit = int(getattr(bot_config.strategy, "daily_rotation_limit", 5) or 5)
+            rotations_today = 0
+            if daily_rotation_limit > 0:
+                _today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                rotations_today = (
+                    session.query(Bet)
+                    .filter(
+                        Bet.close_reason == "rotation",
+                        Bet.closed_at >= _today_start,
+                    )
+                    .count()
+                )
+                if rotations_today >= daily_rotation_limit:
+                    logger.info(
+                        "Daily rotation limit (%d) reached (%d today), skipping all rotations",
+                        daily_rotation_limit,
+                        rotations_today,
+                    )
             for city, td, metric, best_mkt, best_price in best_markets:
                 key = (city, td, metric)
                 group_bets = active_by_group.get(key, [])
@@ -774,7 +791,9 @@ class BetPlacer:
         if remaining_room <= 0:
             logger.warning(
                 "open_bet_on_market: %s rejected — exposure full $%.2f/$%.2f",
-                market.id, current_exposure, max_exposure,
+                market.id,
+                current_exposure,
+                max_exposure,
             )
             return None
 
@@ -782,7 +801,9 @@ class BetPlacer:
         if amount > remaining_room:
             logger.info(
                 "open_bet_on_market: %s amount capped $%.2f -> $%.2f (remaining room)",
-                market.id, amount, remaining_room,
+                market.id,
+                amount,
+                remaining_room,
             )
             amount = remaining_room
 
@@ -792,14 +813,17 @@ class BetPlacer:
         if amount > cash_balance:
             logger.info(
                 "open_bet_on_market: %s amount capped $%.2f -> $%.2f (cash balance)",
-                market.id, amount, cash_balance,
+                market.id,
+                amount,
+                cash_balance,
             )
             amount = cash_balance
 
         if amount <= 0:
             logger.warning(
                 "open_bet_on_market: %s rejected — amount $%.2f <= 0",
-                market.id, amount,
+                market.id,
+                amount,
             )
             return None
 

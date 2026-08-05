@@ -37,6 +37,10 @@ def _td(offset=2):
     return (datetime.now(timezone.utc) + timedelta(days=offset)).replace(hour=23, minute=59, second=59, microsecond=0)
 
 
+def _td_within_24h():
+    return (datetime.now(timezone.utc) + timedelta(hours=12)).replace(minute=0, second=0, microsecond=0)
+
+
 def _add_market(
     session, mid=None, city="Testville", icao="TEST", thresh=25, yes_price=0.02, no_price=0.98, target_date=None
 ):
@@ -207,7 +211,7 @@ class TestExecuteSignalFlush:
 
         with get_session() as s:
             _add_portfolio(s)
-            td = _td()
+            td = _td_within_24h()
             s.add(
                 WeatherMarket(
                     id="flush_test_market",
@@ -319,7 +323,7 @@ class TestPriceGate:
 
         with get_session() as s:
             _add_portfolio(s)
-            td = _td()
+            td = _td_within_24h()
             s.add(
                 WeatherMarket(
                     id="price_ok_market",

@@ -94,7 +94,7 @@ class StrategyConfig:
     # public NWS/Open-Meteo consensus.  5% is enough to cover bookmaker
     # vig + a thin profit margin in paper mode.  Can be lowered once a
     # private weather feed (e.g. ECMWF-direct) gives a structural edge.
-    min_edge: float = 0.04  # 4% - only bets with meaningful edge after costs
+    min_edge: float = 0.05  # 5% - minimum edge to accept a bet
     max_bet_amount: float = 1000.0  # Maximum $1000 per bet (flat)
     max_bet_pct: float = 1.0  # Safety ceiling (flat_bet_usd overrides Kelly sizing)
     min_bet_size: float = 1.0  # Minimum bet size in USD
@@ -153,7 +153,8 @@ class StrategyConfig:
     tie_loser_gap: float = 0.10  # ikiz betlerden biri %10+ one gecerse digerini kapat
 
     # ── Smart rotation: eski bet'i kapatip yenisini ac ─
-    rotation_threshold: float = 0.12  # %12+ improvement gerekli rotation icin (daha az ama daha kaliteli)
+    rotation_threshold: float = 0.15  # %15+ improvement gerekli rotation icin
+    daily_rotation_limit: int = 5  # Gunluk max rotation sayisi (0 = limitsiz)
 
     # ── Max entry price ───────────────────────────────────────────────────
     # YES entries are accepted in [0.10, 0.95). The upper bound is strict.
@@ -178,7 +179,7 @@ class RiskConfig:
     """
 
     # Position-level limits
-    stop_loss_pct: float = 999.0  # %999 kayıtta kapat = asla tetiklenmez
+    stop_loss_pct: float = 0.20  # %20 kayipta pozisyonu kapat
     take_profit_pct: float = 999.0  # %999 karda kapat = asla tetiklenmez
     trailing_stop_pct: float = 999.0  # %999 trailing drop = asla tetiklenmez
 
@@ -569,6 +570,8 @@ class _ConfigProxy:
         "TOTAL_EXPOSURE_PCT": ("strategy", "total_exposure_pct"),
         "MAX_ENTRY_PRICE": ("strategy", "max_entry_price"),
         "MIN_ENTRY_PRICE": ("strategy", "min_entry_price"),
+        "ROTATION_THRESHOLD": ("strategy", "rotation_threshold"),
+        "DAILY_ROTATION_LIMIT": ("strategy", "daily_rotation_limit"),
     }
 
     def _resolve(self, name: str):
@@ -649,7 +652,7 @@ def apply_persisted_strategy_params() -> dict:
 
     if "min_edge" in persisted:
         try:
-            s.min_edge = 0.04  # Hard floor 4% — no override allowed from persisted params
+            s.min_edge = 0.05  # Hard floor — no override allowed
             applied["min_edge"] = s.min_edge
         except (TypeError, ValueError):
             pass
