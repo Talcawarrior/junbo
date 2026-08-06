@@ -68,10 +68,10 @@ def _last_completed_run_hour(now_utc: datetime) -> tuple[int, int]:
     # Find the most recent run hour that is <= current_hour
     for h in reversed(sorted_hours):
         if current_hour >= h:
-            return h, current_hour - h
+            return h, int(current_hour - h)
 
     # All run hours are in the future today; the last run was 18 UTC yesterday
-    return 18, current_hour + (24 - 18)
+    return 18, int(current_hour + (24 - 18))
 
 
 def get_active_model_windows(now_utc: datetime | None = None) -> list[ModelRunWindow]:
@@ -131,7 +131,7 @@ def is_in_model_run_window(now_utc: datetime | None = None) -> bool:
     return len(get_active_model_windows(now_utc)) > 0
 
 
-def get_model_run_fast_interval(now_utc: datetime | None = None) -> int:
+def get_model_run_fast_interval(now_utc: datetime | None = None) -> int | None:
     """Returns the scan interval based on model run windows.
 
     Returns MODEL_RUN_FAST_INTERVAL (60s) if in a window,

@@ -452,7 +452,7 @@ def generate_charts(results: list[StrategyResult], city_stats: dict, hts_bands: 
     bars = ax.bar(names, wrs, color=colors, edgecolor="white", linewidth=0.5)
     for bar, wr in zip(bars, wrs):
         ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.5, f"{wr:.1f}%", ha="center", fontsize=9)
-    ax.set_title("Win Rate Karşılaştırması")
+    ax.set_title("Win Rate Karsilastirmasi")
     ax.set_ylabel("Win Rate (%)")
     ax.axhline(y=50, color="gray", linestyle="--", alpha=0.5)
     ax.grid(True, alpha=0.3, axis="y")
@@ -732,9 +732,7 @@ def run_rolling_backtest(initial_capital: float, fixed_bet: float):
         f"{'Net Kar':>10s} | {'ROI%':>7s} | {'Sharpe':>7s} | {'DD%':>6s}"
     )
     print(header)
-    print(
-        f"  {'-' * 20}-+-{'-' * 6}-+-{'-' * 6}-+-{'-' * 10}-+-{'-' * 7}-+-{'-' * 7}-+-{'-' * 6}"
-    )
+    print(f"  {'-' * 20}-+-{'-' * 6}-+-{'-' * 6}-+-{'-' * 10}-+-{'-' * 7}-+-{'-' * 7}-+-{'-' * 6}")
     for r in all_results:
         total = r.win_count + r.loss_count
         wr = r.win_count / total * 100 if total > 0 else 0

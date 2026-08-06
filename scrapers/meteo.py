@@ -6,14 +6,14 @@ import threading
 import time
 from datetime import datetime, timezone
 
-UTC = timezone.utc
-
 import requests
 
 from config.settings import bot_config, config
 from database.db import get_session
 from database.models import WeatherForecast, WeatherMarket
 from utils.retry import retry
+
+UTC = timezone.utc
 
 logger = logging.getLogger("SCRAPER_METEO")
 
@@ -62,7 +62,7 @@ _MIN_INTERVAL_S = 1.0
 _LAST_CALL_AT: dict[str, float] = {}
 _THROTTLE_LOCK = threading.Lock()
 
-# Global rate-limit flag — 429'da tüm API isteklerini durdur
+# Global rate-limit flag — 429'da tum API isteklerini durdur
 import time as _time  # noqa: E402
 
 _RATE_LIMITED_UNTIL = 0.0  # monotonic timestamp
@@ -166,7 +166,7 @@ class MeteoFetcher:
         if cached is not None or cache_key in _FETCH_CACHE:
             return cached
 
-        # Global rate-limit kontrolü
+        # Global rate-limit kontrolu
         if _time.monotonic() < _RATE_LIMITED_UNTIL:
             logger.debug("Rate-limited, skipping Open-Meteo for (%s,%s)", lat, lon)
             return None
@@ -275,10 +275,16 @@ class MeteoFetcher:
         ]
 
         total_saved = 0
-        # Open-Meteo'dan 8 farklı model çek (ensemble) — min_sources=2 için
+        # Open-Meteo'dan 8 farkli model cek (ensemble) — min_sources=2 icin
         openmeteo_models = [
-            "gfs_seamless", "ecmwf_ifs025", "gem_global", "icon_global",
-            "jma_seamless", "cma_grapes_global", "ukmo_seamless", "meteofrance_seamless"
+            "gfs_seamless",
+            "ecmwf_ifs025",
+            "gem_global",
+            "icon_global",
+            "jma_seamless",
+            "cma_grapes_global",
+            "ukmo_seamless",
+            "meteofrance_seamless",
         ]
 
         for source_name, fetch_func in sources:
@@ -310,9 +316,8 @@ class MeteoFetcher:
                 logger.error(f"[{source_name}] group fetch error: {e}")
                 continue
 
-        # Open-Meteo ensemble — her modeli ayrı kaynak olarak çek
+        # Open-Meteo ensemble — her modeli ayri kaynak olarak cek
         try:
-            from config.settings import bot_config
             for model in openmeteo_models:
                 try:
                     result = self._fetch_open_meteo_model(lat, lon, date_str, model)
@@ -426,8 +431,8 @@ class MeteoFetcher:
                                 total += result["model_count"] * len(mids)
                                 continue
 
-                            # Ensemble başarısız (429 veya diğer) → DB fallback
-                            # API fallback KALDIRILDI — 429'da 8x fazla istek yapıyordu
+                            # Ensemble basarisiz (429 veya diger) → DB fallback
+                            # API fallback KALDIRILDI — 429'da 8x fazla istek yapiyordu
                             cached_count = 0
                             for mid in mids[:1]:
                                 existing = (

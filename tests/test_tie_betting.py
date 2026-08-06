@@ -35,7 +35,10 @@ def _clean_db():
 
 
 def _td(offset=2):
-    return (datetime.now(timezone.utc) + timedelta(days=offset)).replace(hour=23, minute=59, second=59, microsecond=0)
+    # 24h bet kurali: sadece 24 saat icinde settle olacak marketlere bet acilir.
+    # Test marketlerini 12 saat sonrasina kur (8h alt sinir ile 24h ust sinir arasi).
+    # offset farkli zamanlar uretmek icin saat farki olarak kullanilir.
+    return datetime.now(timezone.utc) + timedelta(hours=12 + offset)
 
 
 def _add_market(session, mid, yes_price=0.40, no_price=0.60, city="Testville", icao="TEST", td=None):
@@ -93,7 +96,7 @@ class TestOneBetPerGroup:
     def test_rotation_closes_old_bet(self):
         """Eski bet kapatilip yenisini acmali."""
         from database.db import get_session
-        from database.models import Bet, WeatherMarket
+        from database.models import Bet
         from executor.bet_placer import BetPlacer
 
         td = _td()
@@ -134,6 +137,45 @@ class TestOneBetPerGroup:
             bets = s.query(Bet).filter(Bet.status.in_(("placed", "pending"))).all()
             assert len(bets) == 1, "tekrar calistirildiginda bet sayisi artmamali"
 
+    def test_rotation_replaces_bet_when_price_improves(self):
+        """Aktif bet varken ayni grupta fiyat %15+ iyilesirse eski bet kapanir,
+        yeni (daha yuksek fiyatli) markete bet acilir."""
+        from database.db import get_session
+        from database.models import Analysis, Bet
+        from executor.bet_placer import BetPlacer
+
+        td = _td()
+        m1 = _unique_id()
+        m2 = _unique_id()
+        with get_session() as s:
+            _add_portfolio(s)
+            # m1: once 0.50 (bet acilir), sonra 0.30'a duser (eski bet)
+            _add_market(s, m1, yes_price=0.50, td=td)
+            _add_market(s, m2, yes_price=0.40, td=td)
+            s.commit()
+
+        placer = BetPlacer()
+        placer.place_all_pending()
+
+        # Fiyatlar degisti: m1 0.30'a dustu, m2 0.50'ye cikti (>%15 iyilesme)
+        with get_session() as s:
+            from database.models import WeatherMarket
+
+            s.query(WeatherMarket).filter_by(id=m1).update({"yes_price": 0.30})
+            s.query(WeatherMarket).filter_by(id=m2).update({"yes_price": 0.50})
+            # Yeni market icin yeterli edge'li analysis (min_edge=0.05 ustu)
+            s.add(Analysis(market_id=m2, edge=0.20))
+            s.commit()
+
+        placer.place_all_pending()
+
+        with get_session() as s:
+            old = s.query(Bet).filter_by(market_id=m1).first()
+            new = s.query(Bet).filter_by(market_id=m2).first()
+            assert old is not None and old.status == "closed", f"eski bet kapanmadi: {old}"
+            assert old.close_reason == "rotation"
+            assert new is not None and new.status in ("placed", "pending"), "yeni bet acilmadi"
+
 
 class TestRotation:
     """Rotation: eski bet kapatilir, en yuksek fiyatli piyasada yenisi acilir."""
@@ -141,7 +183,7 @@ class TestRotation:
     def test_lower_priced_bet_closed(self):
         """Dusuk fiyatli bet kapatilmali, yuksek fiyatli kalmali."""
         from database.db import get_session
-        from database.models import Bet, WeatherMarket
+        from database.models import Bet
         from executor.bet_placer import BetPlacer
 
         td = _td()
@@ -154,7 +196,7 @@ class TestRotation:
             s.commit()
 
         # Ilk tur: en yuksek fiyatli markete bet ac
-        placed1 = BetPlacer().place_all_pending()
+        BetPlacer().place_all_pending()
         with get_session() as s:
             bets = s.query(Bet).filter(Bet.status.in_(("placed", "pending"))).all()
             assert len(bets) == 1

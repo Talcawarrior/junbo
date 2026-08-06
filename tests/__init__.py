@@ -1,6 +1,6 @@
 """Junbo Test Suite - Vibe Coding Test Framework
 
-Test katmanları:
+Test katmanlari:
 1. Regression tests (en kritik)
 2. Unit tests (pytest + parametrize)
 3. Property-based testing (Hypothesis)
@@ -8,7 +8,7 @@ Test katmanları:
 5. Static analysis (mypy, ruff)
 6. Integration/E2E tests
 
-Kullanım:
+Kullanim:
     pytest tests/ -v
     pytest tests/ -v --cov=.
     pytest tests/test_regression.py -v

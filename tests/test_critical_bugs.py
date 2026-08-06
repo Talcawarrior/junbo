@@ -1,14 +1,14 @@
-"""Critical bug regression tests — her kod değişikliğinde çalışmalı.
+"""Critical bug regression tests — her kod degisikliginde calismali.
 
-Bulduğumuz ve düzelttiğimiz kritik hataların tekrarlanmasını önler:
-1. Timezone naive/aware karşılaştırma (bot_loop crash)
-2. Gamma API format değişikliği (tokens boş → outcomePrices)
-3. Scraper fiyat çıkarma (0.5 default'a düşme)
-4. Bot startup zincir hatası (ConfigProxy, import chain)
+Buldugumuz ve duzelttigimiz kritik hatalarin tekrarlanmasini onler:
+1. Timezone naive/aware karsilastirma (bot_loop crash)
+2. Gamma API format degisikligi (tokens bos → outcomePrices)
+3. Scraper fiyat cikarma (0.5 default'a dusme)
+4. Bot startup zincir hatasi (ConfigProxy, import chain)
 5. DB koruma (testler production DB'ye dokunmaz)
-6. Backup mekanizması (reset öncesi backup)
-7. take_profit format string hatası (double multiply)
-8. Fee rate tutarsızlığı (hardcoded vs dynamic)
+6. Backup mekanizmasi (reset oncesi backup)
+7. take_profit format string hatasi (double multiply)
+8. Fee rate tutarsizligi (hardcoded vs dynamic)
 """
 
 import os
@@ -18,27 +18,27 @@ from unittest.mock import MagicMock
 import pytest
 
 
-# ── 1. TIMEZONE TESTLERİ ──────────────────────────────────────────────
+# ── 1. TIMEZONE TESTLERI ──────────────────────────────────────────────
 
 
 class TestTimezoneSafety:
-    """Timezone-aware ve naive datetime karşılaştırmaları crash etmemeli."""
+    """Timezone-aware ve naive datetime karsilastirmalari crash etmemeli."""
 
     def test_bot_loop_fast_mode_until_is_naive(self):
-        """fast_mode_until naive olmalı — now ile karşılaştırılmalı."""
+        """fast_mode_until naive olmali — now ile karsilastirilmali."""
         from datetime import datetime, timezone
 
         # Bot loop'daki pattern: now = datetime.now(timezone.utc).replace(tzinfo=None)
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        # fast_mode_until de naive olmalı
+        # fast_mode_until de naive olmali
         fast_mode_until = (datetime.now(timezone.utc) + timedelta(minutes=30)).replace(tzinfo=None)
 
-        # Bu karşılaştırma hatasız çalışmalı
+        # Bu karsilastirma hatasiz calismali
         assert now < fast_mode_until or now > fast_mode_until
 
     def test_state_last_scan_is_naive(self):
-        """state.last_scan naive datetime olmalı."""
+        """state.last_scan naive datetime olmali."""
         # settlement_loop'daki kontrol: (now_utc - state.last_scan).total_seconds()
         now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
         last_scan = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -68,19 +68,19 @@ class TestTimezoneSafety:
         assert len(result) == 2
 
 
-# ── 2. GAMMA API FORMAT TESTLERİ ─────────────────────────────────────
+# ── 2. GAMMA API FORMAT TESTLERI ─────────────────────────────────────
 
 
 class TestGammaAPIFormat:
-    """Gamma API format değişikliklerini yakala."""
+    """Gamma API format degisikliklerini yakala."""
 
     def test_outcome_prices_fallback(self):
-        """tokens boşken outcomePrices'dan fiyat çıkarılmalı."""
+        """tokens bosken outcomePrices'dan fiyat cikarilmali."""
         from scrapers.polymarket import PolymarketScraper
 
         s = PolymarketScraper()
 
-        # tokens boş, outcomePrices dolu — bestBid/bestAsk 0/1 (boş)
+        # tokens bos, outcomePrices dolu — bestBid/bestAsk 0/1 (bos)
         raw = {
             "id": "test_123",
             "question": "Will temperature exceed 30°C?",
@@ -99,7 +99,7 @@ class TestGammaAPIFormat:
         assert parsed["no_price"] == pytest.approx(0.35, abs=0.01)
 
     def test_tokens_empty_no_05_default(self):
-        """tokens boş ve outcomePrices de yoksa 0.5 default olmamalı."""
+        """tokens bos ve outcomePrices de yoksa 0.5 default olmamali."""
         from scrapers.polymarket import PolymarketScraper
 
         s = PolymarketScraper()
@@ -115,11 +115,11 @@ class TestGammaAPIFormat:
         }
 
         parsed = s._parse_market(raw)
-        # 0.5 default değil, outcomePrices'den gelmeli
+        # 0.5 default degil, outcomePrices'den gelmeli
         assert parsed["yes_price"] != 0.5 or parsed["yes_price"] == 0.80
 
     def test_outcome_prices_invalid_json(self):
-        """Bozuk outcomePrices JSON'ı crash etmemeli."""
+        """Bozuk outcomePrices JSON'i crash etmemeli."""
         from scrapers.polymarket import PolymarketScraper
 
         s = PolymarketScraper()
@@ -135,14 +135,14 @@ class TestGammaAPIFormat:
         assert isinstance(parsed, dict)
 
 
-# ── 3. SCRAPER FİYAT ÇIKARMA ──────────────────────────────────────────
+# ── 3. SCRAPER FIYAT CIKARMA ──────────────────────────────────────────
 
 
 class TestScraperPriceExtraction:
-    """Scraper'ın farklı API formatlarından fiyat çıkarmasını test et."""
+    """Scraper'in farkli API formatlarindan fiyat cikarmasini test et."""
 
     def test_price_from_outcome_prices(self):
-        """outcomePrices'den fiyat çıkarma."""
+        """outcomePrices'den fiyat cikarma."""
         from scrapers.polymarket import PolymarketScraper
 
         s = PolymarketScraper()
@@ -158,7 +158,7 @@ class TestScraperPriceExtraction:
         assert 0.01 <= parsed["no_price"] <= 0.99
 
     def test_price_from_tokens(self):
-        """tokens'tan fiyat çıkarma (eski format)."""
+        """tokens'tan fiyat cikarma (eski format)."""
         from scrapers.polymarket import PolymarketScraper
 
         s = PolymarketScraper()
@@ -176,7 +176,7 @@ class TestScraperPriceExtraction:
         assert parsed["no_price"] == pytest.approx(0.40, abs=0.01)
 
     def test_no_default_05_for_valid_market(self):
-        """Geçerli fiyat olan market'te 0.5 default kullanılmamalı."""
+        """Gecerli fiyat olan market'te 0.5 default kullanilmamali."""
         from scrapers.polymarket import PolymarketScraper
 
         s = PolymarketScraper()
@@ -191,25 +191,25 @@ class TestScraperPriceExtraction:
         assert parsed["yes_price"] == pytest.approx(0.30, abs=0.01)
 
 
-# ── 4. BOT STARTUP ZİNCİRİ ────────────────────────────────────────────
+# ── 4. BOT STARTUP ZINCIRI ────────────────────────────────────────────
 
 
 class TestBotStartupChain:
-    """Bot'un başlatılma zincirinin çalıştığını doğrula."""
+    """Bot'un baslatilma zincirinin calistigini dogrula."""
 
     def test_all_critical_imports(self):
-        """Tüm kritik modüller import edilebilmeli."""
+        """Tum kritik moduller import edilebilmeli."""
 
     def test_config_proxy_works(self):
-        """Config proxy bot_config'i doğru yönlendirmeli."""
+        """Config proxy bot_config'i dogru yonlendirmeli."""
         from config.settings import bot_config, Config
 
-        # Config proxy bot_config ile aynı değeri döndürmeli
+        # Config proxy bot_config ile ayni degeri dondurmeli
         assert Config.KELLY_FRACTION == bot_config.strategy.kelly_fraction
         assert Config.MAX_BET_PCT == bot_config.strategy.max_bet_pct
 
     def test_risk_config_consistent(self):
-        """RiskConfig default değerleri tutarlı olmalı."""
+        """RiskConfig default degerleri tutarli olmali."""
         from config.settings import bot_config
 
         risk = bot_config.risk
@@ -218,11 +218,11 @@ class TestBotStartupChain:
         assert 0 < risk.trailing_stop_pct, f"trailing_stop_pct={risk.trailing_stop_pct}"
 
     def test_weather_engine_init(self):
-        """WeatherEngine başlatılabilmeli."""
+        """WeatherEngine baslatilabilmeli."""
         from engine.calculator import WeatherEngine
         from config.settings import bot_config
 
-        # WeatherEngine init ConfigProxy üzerinden config okuyor
+        # WeatherEngine init ConfigProxy uzerinden config okuyor
         # Hata verirse skip et (ConfigProxy sorunu)
         try:
             we = WeatherEngine(db_session_factory=None, cfg=bot_config)
@@ -231,21 +231,21 @@ class TestBotStartupChain:
             pytest.skip("WeatherEngine requires ConfigProxy.get_normalized_weights")
 
     def test_settlement_engine_init(self):
-        """SettlementEngine başlatılabilmeli."""
+        """SettlementEngine baslatilabilmeli."""
         from executor.settler import SettlementEngine
 
         se = SettlementEngine()
         assert se is not None
 
 
-# ── 5. DB KORUMA TESTLERİ ────────────────────────────────────────────
+# ── 5. DB KORUMA TESTLERI ────────────────────────────────────────────
 
 
 class TestDBProtection:
-    """Testlerin production DB'ye dokunmadığını doğrula."""
+    """Testlerin production DB'ye dokunmadigini dogrula."""
 
     def test_production_db_not_modified_by_tests(self):
-        """Test çalışırken production DB değişmemeli."""
+        """Test calisirken production DB degismemeli."""
         prod_path = os.path.join(
             os.path.dirname(os.path.dirname(__file__)),
             "data",
@@ -253,18 +253,18 @@ class TestDBProtection:
         )
         if os.path.exists(prod_path):
             before_size = os.path.getsize(prod_path)
-            # Test çalışsın
+            # Test calissin
             from database.db import get_session
             from database.models import Bet
 
             with get_session() as session:
                 session.query(Bet).count()
-            # DB boyutu değişmemeli
+            # DB boyutu degismemeli
             after_size = os.path.getsize(prod_path)
             assert before_size == after_size, f"Production DB size changed: {before_size} -> {after_size}"
 
     def test_backup_exists(self):
-        """data/backups/ en az 1 backup dosyası içermeli."""
+        """data/backups/ en az 1 backup dosyasi icermeli."""
         backup_dir = os.path.join(
             os.path.dirname(os.path.dirname(__file__)),
             "data",
@@ -275,12 +275,12 @@ class TestDBProtection:
             assert len(backups) >= 1, f"No backups found in {backup_dir}"
 
     def test_db_backup_function_works(self):
-        """db_backup.py create_backup fonksiyonu çalışmalı."""
+        """db_backup.py create_backup fonksiyonu calismali."""
         from db_backup import create_backup
         import tempfile
 
         with tempfile.TemporaryDirectory():
-            # Geçici dosyaya backup al
+            # Gecici dosyaya backup al
             backup_path = create_backup("test")
             assert backup_path is not None
             assert os.path.exists(backup_path)
@@ -288,9 +288,9 @@ class TestDBProtection:
             os.unlink(backup_path)
 
     def test_reset_endpoint_has_backup(self):
-        """Reset endpoint'i tetiklendiğinde backup alınmalı."""
-        # Bu test sadece backup mekanizmasını doğrular
-        # Gerçek reset tetiklemez
+        """Reset endpoint'i tetiklendiginde backup alinmali."""
+        # Bu test sadece backup mekanizmasini dogrular
+        # Gercek reset tetiklemez
         from db_backup import create_backup
 
         backup_path = create_backup("pre_reset_test")
@@ -299,14 +299,14 @@ class TestDBProtection:
         os.unlink(backup_path)
 
 
-# ── 6. TAKE PROFIT FORMAT STRING TESTLERİ ─────────────────────────────
+# ── 6. TAKE PROFIT FORMAT STRING TESTLERI ─────────────────────────────
 
 
 class TestTakeProfitFormat:
-    """Take profit format string hatasını yakala."""
+    """Take profit format string hatasini yakala."""
 
     def test_take_profit_at_100(self):
-        """%100 kârda take_profit tetiklenmeli (partial veya full)."""
+        """%100 karda take_profit tetiklenmeli (partial veya full)."""
         from engine.strategy import RiskManager
         from config.settings import RiskConfig
 
@@ -324,7 +324,7 @@ class TestTakeProfitFormat:
         assert "take_profit" in reason
 
     def test_take_profit_reason_not_double_multiplied(self):
-        """Reason string'inde absürt değerler olmamalı (double multiply)."""
+        """Reason string'inde absurt degerler olmamali (double multiply)."""
         from engine.strategy import RiskManager
         from config.settings import RiskConfig
 
@@ -342,8 +342,8 @@ class TestTakeProfitFormat:
         assert "17000" not in reason
 
     def test_near_certain_win_at_098(self):
-        """Fiyat 0.98'de near_certain_win artık tetiklenmez (kaldırıldı).
-        Take-profit eşiği 999.0 olduğu için normal TP de tetiklenmez."""
+        """Fiyat 0.98'de near_certain_win artik tetiklenmez (kaldirildi).
+        Take-profit esigi 999.0 oldugu icin normal TP de tetiklenmez."""
         from engine.strategy import RiskManager
 
         rm = RiskManager(None)
@@ -357,39 +357,39 @@ class TestTakeProfitFormat:
         assert should_exit is False
 
 
-# ── 7. FEE RATE TUTARSIZLIĞI ──────────────────────────────────────────
+# ── 7. FEE RATE TUTARSIZLIGI ──────────────────────────────────────────
 
 
 class TestFeeRateConsistency:
-    """Fee rate'in her yerde aynı olmasını doğrula."""
+    """Fee rate'in her yerde ayni olmasini dogrula."""
 
     def test_bot_config_current_fee_rate_exists(self):
-        """bot_config.strategy.current_fee_rate mevcut olmalı."""
+        """bot_config.strategy.current_fee_rate mevcut olmali."""
         from config.settings import bot_config
 
         rate = bot_config.strategy.current_fee_rate
         assert 0.01 <= rate <= 0.15, f"current_fee_rate={rate}"
 
     def test_slippage_uses_dynamic_fee(self):
-        """slippage.py hardcoded FEE_PCT yerine bot_config kullanmalı."""
+        """slippage.py hardcoded FEE_PCT yerine bot_config kullanmali."""
         import inspect
         import utils.slippage as sl
 
         source = inspect.getsource(sl.adjust_edge_for_costs)
-        # Hardcoded FEE_PCT kullanmamalı (artık bot_config'den okunmalı)
+        # Hardcoded FEE_PCT kullanmamali (artik bot_config'den okunmali)
         assert "bot_config" in source or "current_fee_rate" in source, (
             "adjust_edge_for_costs should use bot_config.strategy.current_fee_rate"
         )
 
 
-# ── 8. API ENDPOINT SAĞLAMLIĞI ────────────────────────────────────────
+# ── 8. API ENDPOINT SAGLAMLIGI ────────────────────────────────────────
 
 
 class TestAPIEndpoints:
-    """Kritik API endpoint'lerinin çalıştığını doğrula."""
+    """Kritik API endpoint'lerinin calistigini dogrula."""
 
     def test_status_endpoint(self):
-        """GET /api/status 200 döndürmeli."""
+        """GET /api/status 200 dondurmeli."""
         from fastapi.testclient import TestClient
         from api import app
 
@@ -401,7 +401,7 @@ class TestAPIEndpoints:
         assert "scan_health" in data
 
     def test_health_check_endpoint(self):
-        """GET /api/health-check 200 döndürmeli."""
+        """GET /api/health-check 200 dondurmeli."""
         from fastapi.testclient import TestClient
         from api import app
 
@@ -412,7 +412,7 @@ class TestAPIEndpoints:
         assert "verdict" in data or "is_running" in data
 
     def test_signals_endpoint(self):
-        """GET /api/signals 200 döndürmeli."""
+        """GET /api/signals 200 dondurmeli."""
         from fastapi.testclient import TestClient
         from api import app
 
@@ -423,7 +423,7 @@ class TestAPIEndpoints:
         assert "signals" in data
 
     def test_status_has_scan_health(self):
-        """GET /api/status scan_health alanını içermeli."""
+        """GET /api/status scan_health alanini icermeli."""
         from fastapi.testclient import TestClient
         from api import app
 

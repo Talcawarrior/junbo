@@ -1,4 +1,4 @@
-"""Piyasa sorusunu çözümleyen parser modülü (Regex & Kural tabanlı)."""
+"""Piyasa sorusunu cozumleyen parser modulu (Regex & Kural tabanli)."""
 
 import logging
 import re
@@ -133,12 +133,12 @@ class MarketParser:
 
     @staticmethod
     def _resolve_unit(question: str, city: str | None) -> str:
-        """Birim tespiti: 1) açık birim regex'i, 2) şehre göre (K→ICAO=US→°F),
-        3) varsayılan Celsius.
+        """Birim tespiti: 1) acik birim regex'i, 2) sehre gore (K→ICAO=US→°F),
+        3) varsayilan Celsius.
 
-        US şehirleri Polymarket'ta °F, uluslararası °C konvansiyonundadır.
+        US sehirleri Polymarket'ta °F, uluslararasi °C konvansiyonundadir.
         """
-        # 1) Açık birim varsa (°F / °C / Fahrenheit / Celsius, sayıya bitişik)
+        # 1) Acik birim varsa (°F / °C / Fahrenheit / Celsius, sayiya bitisik)
         explicit = re.search(
             r"(?:\d\s*°?\s*[Ff](?:ahrenheit)?|°[Ff]|"
             r"\d\s*°?\s*[Cc](?:elsius)?|°[Cc])",
@@ -150,31 +150,29 @@ class MarketParser:
                 return "fahrenheit"
             return "celsius"
 
-        # 2) Birim yoksa, şehre göre karar ver
+        # 2) Birim yoksa, sehre gore karar ver
         if city:
             for alias, icao in Config.CITY_ICAO_MAP.items():
                 if alias.lower() in city.lower():
-                    # US/territory ICAO'ları K ile başlar
+                    # US/territory ICAO'lari K ile baslar
                     return "fahrenheit" if icao.upper().startswith("K") else "celsius"
 
-        # 3) Varsayılan
+        # 3) Varsayilan
         return "celsius"
 
-    def _extract_threshold(
-        self, question: str
-    ) -> tuple[float, str, float | None, float | None] | None:
-        """Sıcaklık eşiğini ve varsa aralığı bul.
+    def _extract_threshold(self, question: str) -> tuple[float, str, float | None, float | None] | None:
+        """Sicaklik esigini ve varsa araligi bul.
 
         Returns
         -------
         tuple (value_celsius, unit, low_c, high_c) or None
-            value_celsius: Celsius'a dönüşmüş ana eşik (tek değer veya aralığın ortası).
+            value_celsius: Celsius'a donusmus ana esik (tek deger veya araligin ortasi).
             unit: her zaman "celsius".
-            low_c / high_c: "between A-B°F/°C" kalıbı için alt/üst sınır (°C).
+            low_c / high_c: "between A-B°F/°C" kalibi icin alt/ust sinir (°C).
         """
         city = self._extract_city(question)
 
-        # ── 1) Aralık kalıbı (range): "between A-B°F/°C"
+        # ── 1) Aralik kalibi (range): "between A-B°F/°C"
         range_match = re.search(
             r"between\s+(\d+\.?\d*)\s*[-–]\s*(\d+\.?\d*)\s*°?\s*([FfCc]?)",
             question,
@@ -185,10 +183,8 @@ class MarketParser:
                 low_val = float(range_match.group(1))
                 high_val = float(range_match.group(2))
                 unit_char = range_match.group(3).lower() if range_match.group(3) else ""
-                # Birim belirtilmemişse şehre göre karar ver
-                is_f = unit_char == "f" or (
-                    not unit_char and self._resolve_unit(question, city) == "fahrenheit"
-                )
+                # Birim belirtilmemisse sehre gore karar ver
+                is_f = unit_char == "f" or (not unit_char and self._resolve_unit(question, city) == "fahrenheit")
                 if is_f:
                     low_c = round((low_val - 32) * 5 / 9, 1)
                     high_c = round((high_val - 32) * 5 / 9, 1)
@@ -200,7 +196,7 @@ class MarketParser:
             except ValueError:
                 pass
 
-        # ── 2) Açık birimli tek değer
+        # ── 2) Acik birimli tek deger
         patterns = [
             (r"(\d+\.?\d*)\s*°?\s*[Ff](?:ahrenheit)?", "fahrenheit"),
             (r"(\d+\.?\d*)\s*°?\s*[Cc](?:elsius)?", "celsius"),
@@ -220,7 +216,7 @@ class MarketParser:
                 except ValueError:
                     continue
 
-        # ── 3) Birimsiz sayı kalıpları (exceed, above, below, be, over, under)
+        # ── 3) Birimsiz sayi kaliplari (exceed, above, below, be, over, under)
         unitless_patterns = [
             r"exceed\s+(\d+\.?\d*)",
             r"above\s+(\d+\.?\d*)",
@@ -266,11 +262,7 @@ class MarketParser:
                 # current year. The "on" prefix pattern uses \s+ (regex
                 # whitespace), not a literal space, so detect it by checking
                 # the pattern start instead of substring.
-                if (
-                    pattern.startswith(r"\bon")
-                    or pattern.startswith("on")
-                    or "on " in pattern
-                ):
+                if pattern.startswith(r"\bon") or pattern.startswith("on") or "on " in pattern:
                     date_str = f"{date_str} {datetime.now().year}"
                 for fmt in [
                     "%B %d, %Y",
@@ -289,7 +281,7 @@ class MarketParser:
         return None
 
     def _extract_metric(self, question: str) -> str:
-        """Ne ölçülüyor?"""
+        """Ne olculuyor?"""
         q = question.lower()
 
         if any(
@@ -305,9 +297,7 @@ class MarketParser:
             ]
         ):
             return "temperature_max"
-        if any(
-            w in q for w in ["low temp", "min temp", "below", "under", "cold", "lowest"]
-        ):
+        if any(w in q for w in ["low temp", "min temp", "below", "under", "cold", "lowest"]):
             return "temperature_min"
         if any(w in q for w in ["rain", "precipitation", "rainfall"]):
             return "precipitation_mm"
@@ -319,7 +309,7 @@ class MarketParser:
         return "temperature_max"  # Default
 
     def parse_and_update(self, market_id: str) -> bool:
-        """Bir marketi parse et ve DB'yi güncelle."""
+        """Bir marketi parse et ve DB'yi guncelle."""
         with get_session() as session:
             market = session.query(WeatherMarket).filter_by(id=market_id).first()
             if not market:
@@ -366,14 +356,12 @@ class MarketParser:
             return parsed
 
     def parse_all_unparsed(self) -> int:
-        """Parse edilmemiş tüm marketleri parse et."""
+        """Parse edilmemis tum marketleri parse et."""
         count = 0
         with get_session() as session:
             unparsed = (
                 session.query(WeatherMarket)
-                .filter(
-                    WeatherMarket.city.is_(None) | WeatherMarket.target_date.is_(None)
-                )
+                .filter(WeatherMarket.city.is_(None) | WeatherMarket.target_date.is_(None))
                 .all()
             )
             market_ids = [m.id for m in unparsed]
@@ -383,7 +371,7 @@ class MarketParser:
                 if self.parse_and_update(mid):
                     count += 1
             except Exception as e:
-                logger.error(f"Parse hatası {mid}: {e}")
+                logger.error(f"Parse hatasi {mid}: {e}")
                 continue
 
         return count

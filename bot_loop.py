@@ -13,33 +13,34 @@ from datetime import date, datetime, timezone, timedelta
 from database.db import get_session
 from database.models import OPEN_BET_STATUSES, Bet, WeatherMarket
 
+_verify_ui: object | None = None
+_verify_poly: object | None = None
 try:
     from scripts.verify_ui_markets import verify_all_open_dates as _verify_ui
     from scripts.verify_ui_markets import verify_db_vs_poly as _verify_poly
 except ImportError:
-    _verify_ui = None
-    _verify_poly = None
+    pass
 
 logger = logging.getLogger("BOT_LOOP")
 
 # Timeout values (seconds)
-_FETCH_TIMEOUT = 180
-_CYCLE_TIMEOUT = 600
+_FETCH_TIMEOUT = 60
+_CYCLE_TIMEOUT = 180
 _CLEANUP_TIMEOUT = 60
 
-# Akıllı tarama ayarları
+# Akilli tarama ayarlari
 _FAST_MODE_MINUTES = 30
 _FAST_SCAN_INTERVAL = 60
-# Tarama (bet açma) döngüsü, Polymarket fiyat çekme temposuyla aynı: 5 dk.
-# Önceden 15 dk'ydı; o süre yalnızca Open-Meteo'nin saatlik rate-limit'ini
-# beklemek içindi. Artık meteo çekimi tarama döngüsünden ayrıldı (aşağıdaki
-# "decouple" adımı), böylece bahisler Polymarket verisinin tazelendiği 5 dk
-# temposunda açılabilir.
+# Tarama (bet acma) dongusu, Polymarket fiyat cekme temposuyla ayni: 5 dk.
+# Onceden 15 dk'ydi; o sure yalnizca Open-Meteo'nin saatlik rate-limit'ini
+# beklemek icindi. Artik meteo cekimi tarama dongusunden ayrildi (asagidaki
+# "decouple" adimi), boylece bahisler Polymarket verisinin tazelendigi 5 dk
+# temposunda acilabilir.
 _NORMAL_SCAN_INTERVAL = 300  # 5 dakika (Polymarket fetch temposuyla hizali)
 
-# Fiyat poller: 2 gün sonrası (yeni tarih) marketler açıldığında 30 dk boyunca
-# her dakika fiyat çek, sonra tekrar 5 dk'ya dön. Tarih üzerinden tetikleme:
-# açık marketlerin en güncel tarihi ilerlediğinde (örn. 20/7 -> 21/7) 1 kez tetiklenir.
+# Fiyat poller: 2 gun sonrasi (yeni tarih) marketler acildiginda 30 dk boyunca
+# her dakika fiyat cek, sonra tekrar 5 dk'ya don. Tarih uzerinden tetikleme:
+# acik marketlerin en guncel tarihi ilerlediginde (orn. 20/7 -> 21/7) 1 kez tetiklenir.
 _FAST_PRICE_INTERVAL = 60  # 1 dakika
 _FAST_PRICE_WINDOW = 30 * 60  # 30 dakika
 
@@ -61,13 +62,13 @@ def _get_market_count() -> int:
 
 
 def _get_open_target_dates() -> set:
-    """Açık marketlerin hedef TARİH (takvim günü) kümesi.
+    """Acik marketlerin hedef TARIH (takvim gunu) kumesi.
 
-    2-gün-sonrası taraması TARİH üzerinden yapılır: scan loop, açık
-    marketlerin en güncel tarihinin ilerleyip ilerlemediğini takip eder.
-    Örn. açık tarihler 18-19-20/7 iken 21/7 belirirse (gece yarısından
-    saatler sonra bile) fiyat poller'ı 1 dakikaya alınır. Mevcut açık
-    tarih değişmezse (hala 18-19-20/7) 5 dk'da kalınır.
+    2-gun-sonrasi taramasi TARIH uzerinden yapilir: scan loop, acik
+    marketlerin en guncel tarihinin ilerleyip ilerlemedigini takip eder.
+    Orn. acik tarihler 18-19-20/7 iken 21/7 belirirse (gece yarisindan
+    saatler sonra bile) fiyat poller'i 1 dakikaya alinir. Mevcut acik
+    tarih degismezse (hala 18-19-20/7) 5 dk'da kalinir.
     """
     dates: set = set()
     with get_session() as db:
@@ -79,7 +80,7 @@ def _get_open_target_dates() -> set:
 
 
 def _get_open_market_count_for_date(target_day: date) -> int:
-    """Belirli bir takvim gününde açık olan market sayısı (log/tetikleme için)."""
+    """Belirli bir takvim gununde acik olan market sayisi (log/tetikleme icin)."""
     with get_session() as db:
         lo = datetime(target_day.year, target_day.month, target_day.day, 0, 0, 0)
         hi = lo + timedelta(days=1)
@@ -95,12 +96,12 @@ def _get_open_market_count_for_date(target_day: date) -> int:
 
 
 def _next_two_day_target(last_date: date | None, open_dates: set) -> tuple:
-    """2-gün-sonrası tetikleme kararı (saf fonksiyon, test edilebilir).
+    """2-gun-sonrasi tetikleme karari (saf fonksiyon, test edilebilir).
 
-    Açık marketlerin en güncel tarihi `last_date`'ten ileri taşınmışsa
-    (yeni bir tarih belirdiğinde) (yeni_tarih, True) döner — tetikle.
-    Aynı tarihte kalınıyorsa (yeni_tarih, False): zaten tetiklenmiş,
-    tekrar tetikleme (yalnızca 1 kez). Açık market yoksa (None, False).
+    Acik marketlerin en guncel tarihi `last_date`'ten ileri tasinmissa
+    (yeni bir tarih belirdiginde) (yeni_tarih, True) doner — tetikle.
+    Ayni tarihte kaliniyorsa (yeni_tarih, False): zaten tetiklenmis,
+    tekrar tetikleme (yalnizca 1 kez). Acik market yoksa (None, False).
     """
     if not open_dates:
         return None, False
@@ -157,11 +158,11 @@ async def price_poller_loop(state):
             # keeps the dashboard / PnL live through resolution.
             await asyncio.wait_for(asyncio.to_thread(run_refresh_open_prices), timeout=_FETCH_TIMEOUT)
             await asyncio.wait_for(asyncio.to_thread(run_update_prices), timeout=_FETCH_TIMEOUT)
-            # Risk yönetimini de fiyat poller'a bağla: stop-loss / take-profit /
-            # trailing stop kontrolleri artık her 5 dakikada bir (fiyat
-            # tazelemeyle aynı döngüde) çalışır. Böylece son dakikalarda hızla
-            # düşen, vadeye yakın bahisler tarama döngüsünden
-            # kaçıp settlement'e gitmez.
+            # Risk yonetimini de fiyat poller'a bagla: stop-loss / take-profit /
+            # trailing stop kontrolleri artik her 5 dakikada bir (fiyat
+            # tazelemeyle ayni dongude) calisir. Boylece son dakikalarda hizla
+            # dusen, vadeye yakin bahisler tarama dongusunden
+            # kacip settlement'e gitmez.
             await asyncio.wait_for(asyncio.to_thread(run_risk_management), timeout=_FETCH_TIMEOUT)
             state.last_price_update = datetime.now(timezone.utc).replace(tzinfo=None)
         except asyncio.CancelledError:
@@ -174,8 +175,8 @@ async def price_poller_loop(state):
             logger.error("Price poll error: %s — retry in 60s", e)
             await asyncio.sleep(60)
         else:
-            # 2 gün sonrası bahisler açıldıysa 20 dk boyunca her dakika fiyat
-            # çek (state.fast_price_until), sonra tekrar 5 dk'ya dön.
+            # 2 gun sonrasi bahisler acildiysa 20 dk boyunca her dakika fiyat
+            # cek (state.fast_price_until), sonra tekrar 5 dk'ya don.
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             interval = (
                 _FAST_PRICE_INTERVAL
@@ -187,10 +188,10 @@ async def price_poller_loop(state):
 
 
 async def scan_and_bet_loop(state):
-    """Scan loop — akıllı tarama ile.
+    """Scan loop — akilli tarama ile.
 
-    TEK try/except ile tüm while body'si korunuyor.
-    Hata durumunda loop çökmez, 60sn recovery ile devam eder.
+    TEK try/except ile tum while body'si korunuyor.
+    Hata durumunda loop cokmez, 60sn recovery ile devam eder.
     """
     from jobs.scheduler import (
         run_cycle,
@@ -203,11 +204,11 @@ async def scan_and_bet_loop(state):
     last_day = None
     previous_market_count = 0
     fast_mode_until = None
-    last_weather_fetch = None  # Son weather fetch zamanı
-    last_two_day_date = None  # En son tetiklenen 2-gün (yeni tarih) açık market tarihi
+    last_weather_fetch = None  # Son weather fetch zamani
+    last_two_day_date = None  # En son tetiklenen 2-gun (yeni tarih) acik market tarihi
     model_run_fast_until: datetime | None = None  # Model run fast mode end time
-    poly_verify_counter = 0  # 2 saatte bir DB vs Polymarket kontrolü
-    _POLY_VERIFY_INTERVAL = 24  # 5 dk döngü × 24 = 120 dk (2 saat)
+    poly_verify_counter = 0  # 2 saatte bir DB vs Polymarket kontrolu
+    _POLY_VERIFY_INTERVAL = 24  # 5 dk dongu × 24 = 120 dk (2 saat)
 
     try:
         previous_market_count = _get_market_count()
@@ -217,7 +218,7 @@ async def scan_and_bet_loop(state):
         logger.warning("Could not get initial market state: %s", e)
 
     while state.is_running:
-        try:  # ← TEK TRY — her şey içeride
+        try:  # ← TEK TRY — her sey iceride
             state.last_scan = datetime.now(timezone.utc).replace(tzinfo=None)
             scan_start = datetime.now(timezone.utc)
 
@@ -228,31 +229,38 @@ async def scan_and_bet_loop(state):
 
             if is_new_day:
                 logger.info("Midnight detected — running immediate scan")
-                # UI doğrulama: Polymarket'teki yeni gün marketlerini DB ile kıyasla
+                # UI dogrulama: Polymarket'teki yeni gun marketlerini DB ile kiyasla
                 if _verify_ui:
                     try:
                         _verify_ui()
                     except Exception as e:
-                        logger.warning("UI doğrulama hatası (yeni gün): %s", e)
+                        logger.warning("UI dogrulama hatasi (yeni gun): %s", e)
 
-            # STEP 1: Fetch markets (Polymarket) — her döngü
-            await asyncio.wait_for(asyncio.to_thread(run_fetch_markets), timeout=_FETCH_TIMEOUT)
+            # STEP 1: Fetch markets (Polymarket) — her dongu
+            # Ag hatasi (DNS/timeout) cycle'in geri kalanini DURDURMASIN:
+            # analiz/bet eski veriyle devam edebilir, sadece market listesi tazelenmez.
+            try:
+                await asyncio.wait_for(asyncio.to_thread(run_fetch_markets), timeout=_FETCH_TIMEOUT)
+            except asyncio.TimeoutError:
+                logger.error("Fetch markets timed out (%ds) — continuing with stale data", _FETCH_TIMEOUT)
+            except Exception as e:
+                logger.error("Fetch markets failed (%s) — continuing with stale data", e)
 
-            # STEP 2: Parse — her döngü (cache'lenmiş meteo verisiyle)
+            # STEP 2: Parse — her dongu (cache'lenmis meteo verisiyle)
             try:
                 await asyncio.wait_for(asyncio.to_thread(run_parse_markets), timeout=_FETCH_TIMEOUT)
             except Exception as e:
                 logger.error("Parse step error: %s", e)
 
-            # STEP 3: Run cycle (analyze -> place bets). Meteo çekimini BEKLEMEDEN
-            # hemen cache'den açılır. Böylece bahisler Polymarket verisinin
-            # tazelendiği 5 dk temposunda açılır; meteo saatte 1 kez yenilenir
-            # ve bahis açılımını bloklamaz.
+            # STEP 3: Run cycle (analyze -> place bets). Meteo cekimini BEKLEMEDEN
+            # hemen cache'den acilir. Boylece bahisler Polymarket verisinin
+            # tazelendigi 5 dk temposunda acilir; meteo saatte 1 kez yenilenir
+            # ve bahis acilimini bloklamaz.
             await asyncio.wait_for(asyncio.to_thread(run_cycle), timeout=_CYCLE_TIMEOUT)
 
-            # STEP 4: Meteo tazeleme — SADECE saatte 1 kez ve bahis açılımından
-            # SONRA (bet opening'ı bloklamaz). Önceki saatlik veri zaten cache'te,
-            # dolayısıyla meteo kaydı çekmekle vakit kaybedilmez.
+            # STEP 4: Meteo tazeleme — SADECE saatte 1 kez ve bahis acilimindan
+            # SONRA (bet opening'i bloklamaz). Onceki saatlik veri zaten cache'te,
+            # dolayisiyla meteo kaydi cekmekle vakit kaybedilmez.
             now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
             should_fetch_weather = (
                 last_weather_fetch is None or (now_utc - last_weather_fetch).total_seconds() >= _WEATHER_FETCH_INTERVAL
@@ -290,7 +298,7 @@ async def scan_and_bet_loop(state):
             except Exception as e:
                 logger.debug("Model run detection error: %s", e)
 
-            # Yeni market algılama (scan hızlı modu için)
+            # Yeni market algilama (scan hizli modu icin)
             try:
                 current_count = _get_market_count()
                 if current_count > previous_market_count:
@@ -308,11 +316,11 @@ async def scan_and_bet_loop(state):
             except Exception as e:
                 logger.warning("Market count check failed: %s", e)
 
-            # 2 gün sonrası (yeni tarih) marketler 'açılır açılmaz' fiyat poller'ını
-            # 30 dk boyunca her dakika çalıştır. TARİH üzerinden: açık marketlerin
-            # en güncel tarihi ilerlediğinde (örn. 20/7 -> 21/7) tetiklenir, yalnızca
-            # 1 kez (gece yarısından saatler sonra bile). Mevcut açık tarih değişmezse
-            # (hala 18-19-20/7) 5 dk'da kalır.
+            # 2 gun sonrasi (yeni tarih) marketler 'acilir acilmaz' fiyat poller'ini
+            # 30 dk boyunca her dakika calistir. TARIH uzerinden: acik marketlerin
+            # en guncel tarihi ilerlediginde (orn. 20/7 -> 21/7) tetiklenir, yalnizca
+            # 1 kez (gece yarisindan saatler sonra bile). Mevcut acik tarih degismezse
+            # (hala 18-19-20/7) 5 dk'da kalir.
             try:
                 open_dates = _get_open_target_dates()
                 new_date, trigger = _next_two_day_target(last_two_day_date, open_dates)
@@ -328,18 +336,18 @@ async def scan_and_bet_loop(state):
                         _FAST_PRICE_WINDOW // 60,
                     )
                     last_two_day_date = new_date
-                    # UI doğrulama: yeni tarih için Polymarket marketlerini kontrol et
+                    # UI dogrulama: yeni tarih icin Polymarket marketlerini kontrol et
                     if _verify_ui:
                         try:
                             _verify_ui()
                         except Exception as e:
-                            logger.warning("UI doğrulama hatası (tarih=%s): %s", new_date.isoformat(), e)
+                            logger.warning("UI dogrulama hatasi (tarih=%s): %s", new_date.isoformat(), e)
                 elif new_date is not None:
                     last_two_day_date = new_date
             except Exception as e:
                 logger.warning("2-day-ahead detection failed: %s", e)
 
-            # Stale cleanup her 10 döngüde
+            # Stale cleanup her 10 dongude
             stale_check_counter += 1
             if stale_check_counter >= 10:
                 stale_check_counter = 0
@@ -348,7 +356,7 @@ async def scan_and_bet_loop(state):
                 except Exception as e:
                     logger.warning("Stale cleanup failed: %s", e)
 
-            # DB vs Polymarket karşılaştırma: 2 saatte bir
+            # DB vs Polymarket karsilastirma: 2 saatte bir
             poly_verify_counter += 1
             if poly_verify_counter >= _POLY_VERIFY_INTERVAL and _verify_poly:
                 poly_verify_counter = 0
@@ -357,9 +365,9 @@ async def scan_and_bet_loop(state):
                     if report:
                         logger.warning("DB vs Polymarket uyumsuzluk:\n%s", report)
                     else:
-                        logger.info("DB vs Polymarket: tüm bet'ler eşleşiyor")
+                        logger.info("DB vs Polymarket: tum bet'ler eslesiyor")
                 except Exception as e:
-                    logger.warning("DB vs Polymarket kontrol hatası: %s", e)
+                    logger.warning("DB vs Polymarket kontrol hatasi: %s", e)
 
             # Scan duration log
             scan_duration = (datetime.now(timezone.utc) - scan_start).total_seconds()
@@ -393,8 +401,8 @@ async def scan_and_bet_loop(state):
 async def settlement_loop(state):
     """Settlement loop + scan loop watchdog.
 
-    Scan loop 30dk+ süredir çalışmıyorsa log yazıyor.
-    1 saati aşkın süredir çalışmıyorsa bot'u durduruyor.
+    Scan loop 30dk+ suredir calismiyorsa log yaziyor.
+    1 saati askin suredir calismiyorsa bot'u durduruyor.
     """
     from jobs.scheduler import run_settle
 
@@ -403,7 +411,7 @@ async def settlement_loop(state):
 
     while state.is_running:
         try:
-            # ── Watchdog: scan loop sağlık kontrolü ──
+            # ── Watchdog: scan loop saglik kontrolu ──
             now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
             if state.last_scan:
                 elapsed = (now_utc - state.last_scan).total_seconds()
@@ -429,7 +437,7 @@ async def settlement_loop(state):
                     logger.warning("SCAN LOOP WATCHDOG: last_scan is None (never ran?)")
                     scan_healthy = False
 
-            # ── Normal settlement işlemi ──
+            # ── Normal settlement islemi ──
             await asyncio.to_thread(run_settle)
 
             today = datetime.now(timezone.utc).date()

@@ -31,16 +31,16 @@ def make_risk_manager(risk_cfg=None):
 
 
 def make_mock_bet(**kwargs):
-    """RiskManager'ın okuduğu alanları olan mock bet."""
+    """RiskManager'in okudugu alanlari olan mock bet."""
     bet = MagicMock()
     bet.entry_price = kwargs.get("entry_price", 0.50)
     bet.price = kwargs.get("price", 0.50)
     bet.result_data = kwargs.get("result_data", None)
-    # Yeni partial-TP alanları: gerçek Bet gibi varsayılan False / 0.0
+    # Yeni partial-TP alanlari: gercek Bet gibi varsayilan False / 0.0
     bet.partial_tp_done = kwargs.get("partial_tp_done", False)
     bet.covered_fraction = kwargs.get("covered_fraction", 0.0)
-    # placed_at: check_early_exit minimum hold kontrolü için
-    # Varsayılan olarak 10 dakika önce — minimum hold'u geçer
+    # placed_at: check_early_exit minimum hold kontrolu icin
+    # Varsayilan olarak 10 dakika once — minimum hold'u gecer
     bet.placed_at = kwargs.get(
         "placed_at",
         datetime.now(timezone.utc) - timedelta(minutes=10),
@@ -62,10 +62,10 @@ def make_mock_market(**kwargs):
 
 
 class TestTakeProfit:
-    """Take-profit mekanizması - bu testler format string bug'ını yakalar."""
+    """Take-profit mekanizmasi - bu testler format string bug'ini yakalar."""
 
     def test_take_profit_at_100_percent(self):
-        """Tam %100 kârda tetiklenmeli."""
+        """Tam %100 karda tetiklenmeli."""
         rm = make_risk_manager()
         bet = make_mock_bet(entry_price=0.25)
         should_exit, reason = rm.check_take_profit(bet, 0.50)
@@ -73,7 +73,7 @@ class TestTakeProfit:
         assert "take_profit" in reason
 
     def test_take_profit_above_100_percent(self):
-        """%100'ün üstünde tetiklenmeli."""
+        """%100'un ustunde tetiklenmeli."""
         rm = make_risk_manager()
         bet = make_mock_bet(entry_price=0.25)
         should_exit, reason = rm.check_take_profit(bet, 0.80)
@@ -81,7 +81,7 @@ class TestTakeProfit:
         assert "take_profit" in reason
 
     def test_take_profit_below_100_percent(self):
-        """%98'de tetiklenmemeli (near_certain_win değil, TP de değil)."""
+        """%98'de tetiklenmemeli (near_certain_win degil, TP de degil)."""
         rm = make_risk_manager()
         # entry=0.50, current=0.90 → ratio=0.80 < 1.0
         bet = make_mock_bet(entry_price=0.50)
@@ -89,7 +89,7 @@ class TestTakeProfit:
         assert should_exit is False
 
     def test_take_profit_exactly_at_threshold(self):
-        """Tam eşiğe ulaştığında tetiklenmeli."""
+        """Tam esige ulastiginda tetiklenmeli."""
         rm = make_risk_manager()
         # entry=0.30, current=0.60 → ratio=1.00
         bet = make_mock_bet(entry_price=0.30)
@@ -97,7 +97,7 @@ class TestTakeProfit:
         assert should_exit is True
 
     def test_take_profit_just_below_threshold(self):
-        """Eşiğin hemen altında tetiklenmemeli."""
+        """Esigin hemen altinda tetiklenmemeli."""
         rm = make_risk_manager()
         # entry=0.30, current=0.599 → ratio=0.9967
         bet = make_mock_bet(entry_price=0.30)
@@ -105,7 +105,7 @@ class TestTakeProfit:
         assert should_exit is False
 
     def test_near_certain_win_at_098(self):
-        """Fiyat 0.98'e ulaştığında near_certain_win artık tetiklenmez (kaldırıldı).
+        """Fiyat 0.98'e ulastiginda near_certain_win artik tetiklenmez (kaldirildi).
         take_profit_pct=999.0 oldugu icin normal TP de tetiklenmez."""
         rm = make_risk_manager()
         bet = make_mock_bet(entry_price=0.50)
@@ -113,7 +113,7 @@ class TestTakeProfit:
         assert should_exit is False
 
     def test_near_certain_win_at_099(self):
-        """Fiyat 0.99'da near_certain_win artık tetiklenmez (kaldırıldı).
+        """Fiyat 0.99'da near_certain_win artik tetiklenmez (kaldirildi).
         take_profit_pct=999.0 oldugu icin normal TP de tetiklenmez."""
         rm = make_risk_manager()
         bet = make_mock_bet(entry_price=0.50)
@@ -121,7 +121,7 @@ class TestTakeProfit:
         assert should_exit is False
 
     def test_real_scenario_tokyo_170_percent(self):
-        """Gerçek senaryo: Tokyo entry=0.27, current=0.73 → %170 kâr."""
+        """Gercek senaryo: Tokyo entry=0.27, current=0.73 → %170 kar."""
         rm = make_risk_manager()
         bet = make_mock_bet(entry_price=0.27)
         should_exit, reason = rm.check_take_profit(bet, 0.73)
@@ -130,7 +130,7 @@ class TestTakeProfit:
         assert profit_ratio == pytest.approx(1.7037, abs=0.01)
 
     def test_real_scenario_chicago_148_percent(self):
-        """Gerçek senaryo: Chicago entry=0.29, current=0.72 → %148 kâr."""
+        """Gercek senaryo: Chicago entry=0.29, current=0.72 → %148 kar."""
         rm = make_risk_manager()
         bet = make_mock_bet(entry_price=0.29)
         should_exit, reason = rm.check_take_profit(bet, 0.72)
@@ -139,28 +139,28 @@ class TestTakeProfit:
         assert profit_ratio == pytest.approx(1.4828, abs=0.01)
 
     def test_should_not_close_at_48_percent(self):
-        """%48 kârda kapanmamalı."""
+        """%48 karda kapanmamali."""
         rm = make_risk_manager()
         bet = make_mock_bet(entry_price=0.30)
         should_exit, reason = rm.check_take_profit(bet, 0.444)
         assert should_exit is False
 
     def test_entry_zero_no_crash(self):
-        """entry_price=0'da crash olmamalı."""
+        """entry_price=0'da crash olmamali."""
         rm = make_risk_manager()
         bet = make_mock_bet(entry_price=0.0)
         should_exit, reason = rm.check_take_profit(bet, 0.99)
         assert isinstance(should_exit, bool)
 
     def test_format_string_not_double_multiply(self):
-        """Format string %10000 gibi absürt değer göstermemeli.
+        """Format string %10000 gibi absurt deger gostermemeli.
 
-        Bu test, {pct:.1%} bug'ını yakalar.
-        Eğer format string {pct:.1%} kullanılırsa:
+        Bu test, {pct:.1%} bug'ini yakalar.
+        Eger format string {pct:.1%} kullanilirsa:
             profit_pct(0.73, 0.27) = 170.37
-            {170.37:.1%} = '17037.0%' → BU YANLIŞ
+            {170.37:.1%} = '17037.0%' → BU YANLIS
 
-        Doğru:
+        Dogru:
             f"{ratio:.1%}" ratio = 1.7037 → '170.4%'
         """
         rm = make_risk_manager()
@@ -178,7 +178,7 @@ class TestTakeProfit:
 
 
 class TestStopLoss:
-    """Stop-loss mekanizması."""
+    """Stop-loss mekanizmasi."""
 
     def test_stop_loss_at_30_percent(self):
         """Tam %30 zararda tetiklenmeli."""
@@ -190,7 +190,7 @@ class TestStopLoss:
         assert "stop_loss" in reason
 
     def test_stop_loss_above_threshold(self):
-        """%20 zararda tetiklenmemeli (%25 eşiği)."""
+        """%20 zararda tetiklenmemeli (%25 esigi)."""
         normal_risk = RiskConfig(stop_loss_pct=0.25)
         rm = make_risk_manager(normal_risk)
         bet = make_mock_bet(entry_price=0.50)
@@ -210,13 +210,13 @@ class TestStopLoss:
 
 
 class TestTrailingStop:
-    """Trailing stop mekanizması."""
+    """Trailing stop mekanizmasi."""
 
     def test_trailing_stop_drops_from_peak(self):
-        """Tepeden %15+ düşüşte tetiklenmeli."""
+        """Tepeden %15+ dususte tetiklenmeli."""
         normal_risk = RiskConfig(trailing_stop_pct=0.10)
         rm = make_risk_manager(normal_risk)
-        # peak 0.60'a çıkmış, sonra 0.50'ye düşmüş → %16.7 düşüş
+        # peak 0.60'a cikmis, sonra 0.50'ye dusmus → %16.7 dusus
         peak_data = json.dumps({"peak_price": 0.60})
         bet = make_mock_bet(entry_price=0.30, result_data=peak_data)
         should_exit, reason = rm.check_trailing_stop(bet, 0.50)
@@ -224,7 +224,7 @@ class TestTrailingStop:
         assert "trailing_stop" in reason
 
     def test_trailing_stop_no_drop(self):
-        """Tepeden az düşüşte tetiklenmemeli."""
+        """Tepeden az dususte tetiklenmemeli."""
         normal_risk = RiskConfig(trailing_stop_pct=0.10)
         rm = make_risk_manager(normal_risk)
         peak_data = json.dumps({"peak_price": 0.60})
@@ -233,7 +233,7 @@ class TestTrailingStop:
         assert should_exit is False
 
     def test_trailing_stop_never_profitable(self):
-        """Hiç kâra geçmemiş pozisyonda tetiklenmemeli."""
+        """Hic kara gecmemis pozisyonda tetiklenmemeli."""
         normal_risk = RiskConfig(trailing_stop_pct=0.10)
         rm = make_risk_manager(normal_risk)
         bet = make_mock_bet(entry_price=0.50, result_data=None)
@@ -245,13 +245,13 @@ class TestTrailingStop:
 
 
 class TestExitInteraction:
-    """Birden fazla exit mekanizmasının etkileşimi."""
+    """Birden fazla exit mekanizmasinin etkilesimi."""
 
     def test_stop_loss_checked_before_take_profit(self):
-        """check_early_exit'te stop_loss önce kontrol edilir."""
+        """check_early_exit'te stop_loss once kontrol edilir."""
         normal_risk = RiskConfig(stop_loss_pct=0.25)
         rm = make_risk_manager(normal_risk)
-        # Hem stop_loss hem take_profit tetiklenebilir (olası durum)
+        # Hem stop_loss hem take_profit tetiklenebilir (olasi durum)
         bet = make_mock_bet(entry_price=0.50)
         market = make_mock_market()
         should_exit, reason = rm.check_early_exit(bet, 0.30, market)
@@ -270,7 +270,7 @@ class TestExitInteraction:
         assert "take_profit" in reason
 
     def test_no_exit_when_profitable_but_below_tp(self):
-        """Kârda ama TP altında → çıkış olmamalı."""
+        """Karda ama TP altinda → cikis olmamali."""
         normal_risk = RiskConfig(take_profit_pct=1.0)
         rm = make_risk_manager(normal_risk)
         bet = make_mock_bet(entry_price=0.50)
@@ -283,10 +283,10 @@ class TestExitInteraction:
 
 
 class TestFormulaConsistency:
-    """Tüm exit check'lerin aynı hesaplama pattern'ini kullandığını doğrula."""
+    """Tum exit check'lerin ayni hesaplama pattern'ini kullandigini dogrula."""
 
     def test_all_exit_checks_return_bool_str_tuple(self):
-        """Tüm exit check'leri (bool, str) tuple döndürmeli."""
+        """Tum exit check'leri (bool, str) tuple dondurmeli."""
         rm = make_risk_manager()
         bet = make_mock_bet(entry_price=0.50)
         market = make_mock_market()
@@ -305,12 +305,12 @@ class TestFormulaConsistency:
             assert isinstance(result[1], str)
 
     def test_ratio_based_comparison(self):
-        """Tüm exit check'ler ratio (0-1) bazında karşılaştırma yapmalı,
-        percentage (0-100) DEĞİL.
+        """Tum exit check'ler ratio (0-1) bazinda karsilastirma yapmali,
+        percentage (0-100) DEGIL.
 
-        Bu, {pct:.1%} format bug'ının tekrarlanmasını önler:
-        Eski hata: profit_pct() %100 ile çarpıyordu, sonra format string
-        tekrar çarpıyordu → asla tetiklenmiyordu.
+        Bu, {pct:.1%} format bug'inin tekrarlanmasini onler:
+        Eski hata: profit_pct() %100 ile carpiyordu, sonra format string
+        tekrar carpiyordu → asla tetiklenmiyordu.
         """
         rm = make_risk_manager()
 

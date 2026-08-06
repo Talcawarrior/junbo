@@ -116,7 +116,7 @@ def _orderbook_slippage(
         else:
             from data_pipeline.resolvedmarkets_ingest import ResolvedMarketsClient
 
-            ob = ResolvedMarketsClient().get_live_orderbook(condition_id)
+            ob = ResolvedMarketsClient().get_live_orderbook(condition_id or "")
             asks = ob.get("asks", []) if ob else []
             bids = ob.get("bids", []) if ob else []
         if not asks and not bids:

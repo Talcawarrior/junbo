@@ -1,4 +1,4 @@
-"""Sinyal analizi, Kelly kasa yönetimi ve risk kontrolü."""
+"""Sinyal analizi, Kelly kasa yonetimi ve risk kontrolu."""
 
 import json
 import logging
@@ -144,16 +144,16 @@ class RiskManager:
         return True
 
     def _conservative_portfolio_value(self) -> float:
-        """Portfolio = dünkü kapanış sermayesi (bugünkü realize edilmemiş).
+        """Portfolio = dunku kapanis sermayesi (bugunku realize edilmemis).
 
-        Bugünden önce kapanan bahislerin PnL'i hesaba katılır.
-        Bugün realizado olan kârlar bugünkü exposure cap'ini şişirmez.
-        Yarınki başlangıç = bugünkü kapanış.
+        Bugunden once kapanan bahislerin PnL'i hesaba katilir.
+        Bugun realizado olan karlar bugunku exposure cap'ini sisirmez.
+        Yarinki baslangic = bugunku kapanis.
 
         Bu sayede:
-        - Daily starting capital = önceki günün kapanış sermayesi
-        - Max exposure = %25 × dünkü kapanış
-        - Feedback loop önlenir (unrealized PnL dahil edilmez)
+        - Daily starting capital = onceki gunun kapanis sermayesi
+        - Max exposure = %25 × dunku kapanis
+        - Feedback loop onlenir (unrealized PnL dahil edilmez)
 
         Formula from: utils/formulas.py → conservative_portfolio_value()
         """
@@ -167,7 +167,7 @@ class RiskManager:
             from database.models import Bet
 
             initial = self.config.INITIAL_PORTFOLIO
-            # Sadece BUGÜNDEN ÖNCE kapanan bahislerin PnL'i
+            # Sadece BUGUNDEN ONCE kapanan bahislerin PnL'i
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
             realized = float(
@@ -190,7 +190,7 @@ class RiskManager:
 
     @property
     def daily_loss_limit_amount(self) -> float:
-        """Günlük zarar limiti = dünkü kapanış sermayesi × DAILY_LOSS_LIMIT."""
+        """Gunluk zarar limiti = dunku kapanis sermayesi × DAILY_LOSS_LIMIT."""
         return self._conservative_portfolio_value() * self.config.DAILY_LOSS_LIMIT
 
     def is_bot_locked(self) -> bool:
@@ -278,14 +278,14 @@ class RiskManager:
         return False, ""
 
     def check_take_profit(self, bet, current_price: float, market=None) -> tuple:  # pylint: disable=unused-argument
-        """Take-profit: pozisyon %take_profit_pct'den fazla kardaysa veya fiyat 0.98'e ulaştıysa kapat.
+        """Take-profit: pozisyon %take_profit_pct'den fazla kardaysa veya fiyat 0.98'e ulastiysa kapat.
 
-        Partial take-profit: düşük girişli ("lottery ticket") bahislerde,
-        ~%100 kârda sadece ana parayı kurtaracak kadar satılır, kalan pozisyon
-        trailing stop ile "free ride" devam eder. (Bizim RiskConfig flat'tır;
-        spec'teki tier sistemi YOK — sadece entry fiyatı + kâr ile tetiklenir.)
-        Bu fonksiyon SADECE karar verir; pozisyon küçültme + muhasebe
-        scheduler._partial_close_early içinde yapılır (çift mutasyon yok).
+        Partial take-profit: dusuk girisli ("lottery ticket") bahislerde,
+        ~%100 karda sadece ana parayi kurtaracak kadar satilir, kalan pozisyon
+        trailing stop ile "free ride" devam eder. (Bizim RiskConfig flat'tir;
+        spec'teki tier sistemi YOK — sadece entry fiyati + kar ile tetiklenir.)
+        Bu fonksiyon SADECE karar verir; pozisyon kucultme + muhasebe
+        scheduler._partial_close_early icinde yapilir (cift mutasyon yok).
         """
         from utils.formulas import pnl_ratio
 
@@ -295,17 +295,17 @@ class RiskManager:
         if entry <= 0:
             return False, ""
 
-        # Partial TP: zaten yapıldıysa tekrar tetikleme (trailing stop'a bırak)
+        # Partial TP: zaten yapildiysa tekrar tetikleme (trailing stop'a birak)
         if bool(getattr(bet, "partial_tp_done", False)):
             return False, ""
 
-        # Partial TP: düşük giriş (<=0.35) ve ~%100 kâr
+        # Partial TP: dusuk giris (<=0.35) ve ~%100 kar
         if entry <= 0.35 and current_price > 0:
             profit_pct = (current_price - entry) / entry
             if profit_pct >= 1.0:
                 fraction_to_sell = entry / current_price
                 if 0 < fraction_to_sell < 1:
-                    # Karar yeterli; scheduler pozisyonu küçültür.
+                    # Karar yeterli; scheduler pozisyonu kucultur.
                     return (
                         True,
                         f"partial_take_profit: sold {fraction_to_sell:.1%} @ {current_price:.2f}",
@@ -334,7 +334,7 @@ class RiskManager:
             now = datetime.now(timezone.utc)
             hours_left = (resolution - now).total_seconds() / 3600
             if hours_left <= 0:
-                return False, ""  # Zaten geçmiş, settlement halleder
+                return False, ""  # Zaten gecmis, settlement halleder
             if hours_left <= cfg.time_decay_hours:
                 raw = bet.entry_price if bet.entry_price is not None else bet.price
                 entry = float(raw) if raw is not None else 0.0
@@ -350,10 +350,10 @@ class RiskManager:
         return False, ""
 
     def check_trailing_stop(self, bet, current_price: float) -> tuple:
-        """Trailing stop: en yüksek fiyattan %trailing_stop_pct düşüşte kapat.
+        """Trailing stop: en yuksek fiyattan %trailing_stop_pct dususte kapat.
 
-        Sadece pozisyon kâra geçmişse (peak > entry) tetiklenir.
-        Peak <= entry ise pozisyon hiç kâra geçmemiş, TS koruma sağlamaz.
+        Sadece pozisyon kara gecmisse (peak > entry) tetiklenir.
+        Peak <= entry ise pozisyon hic kara gecmemis, TS koruma saglamaz.
         """
         from utils.formulas import drop_ratio
 
@@ -363,7 +363,7 @@ class RiskManager:
         if entry <= 0:
             return False, ""
 
-        # Peak price'ı result_data'dan oku veya ilk defa set et
+        # Peak price'i result_data'dan oku veya ilk defa set et
         peak = entry
         if bet.result_data:
             try:
@@ -372,10 +372,10 @@ class RiskManager:
             except Exception:
                 peak = entry
 
-        # Yeni tepe noktası var mı?
+        # Yeni tepe noktasi var mi?
         if current_price > peak:
             peak = current_price
-            # Güncellenmiş peak değerini kaydet
+            # Guncellenmis peak degerini kaydet
             try:
                 data = json.loads(bet.result_data) if isinstance(bet.result_data, str) else {}
                 if not isinstance(data, dict):
@@ -385,12 +385,12 @@ class RiskManager:
             except Exception:
                 pass
 
-        # Sadece pozisyon kâra geçmişse (peak > entry) TS uygula
-        # Peak <= entry ise pozisyon hiç kâra geçmemiş, TS tetiklenmesin
+        # Sadece pozisyon kara gecmisse (peak > entry) TS uygula
+        # Peak <= entry ise pozisyon hic kara gecmemis, TS tetiklenmesin
         if peak <= entry:
             return False, ""
 
-        # Tepeden düşüş kontrolü
+        # Tepeden dusus kontrolu
         if peak > 0:
             ratio = drop_ratio(peak, current_price)
             if ratio >= cfg.trailing_stop_pct:
@@ -402,23 +402,10 @@ class RiskManager:
         return False, ""
 
     def check_early_exit(self, bet, current_price: float, market=None) -> tuple:
-        """Tüm erken çıkış kontrollerini sırayla çalıştır.
+        """Tum erken cikis kontrollerini sirayla calistir.
 
         Returns: (should_exit: bool, reason: str)
         """
-        # Minimum hold: bet aynı scan döngüsünde açıldıysa kapatma.
-        # Bu, resolve edilmiş market'lere anında bet açılıp kapanmasını engeller.
-        from datetime import datetime, timezone
-
-        now = datetime.now(timezone.utc)
-        placed = getattr(bet, "placed_at", None)
-        if placed:
-            if placed.tzinfo is None:
-                placed = placed.replace(tzinfo=timezone.utc)
-            hold_seconds = (now - placed).total_seconds()
-            if hold_seconds < 21600:  # 6 saat minimum hold (piyasa gurultusu rotasyonlari engelle)
-                return False, "Hold (minimum hold period: 6h)"
-
         # 1. Stop-loss (range betlerde devre disi)
         order_id = getattr(bet, "order_id", "") or ""
         is_range = isinstance(order_id, str) and order_id.startswith("range_")
@@ -447,9 +434,9 @@ class RiskManager:
         return False, "Hold"
 
     def check_rebalance(self, new_signal, active_bets: list) -> object:
-        """Yeni yüksek-edge fırsatı için eski pozisyonu kapatmaya değer mi?
+        """Yeni yuksek-edge firsati icin eski pozisyonu kapatmaya deger mi?
 
-        Returns: Kapatılacak Bet nesnesi veya None
+        Returns: Kapatilacak Bet nesnesi veya None
         """
         cfg = self._get_risk_config()
         new_edge = getattr(new_signal, "edge", 0.0) or (isinstance(new_signal, dict) and new_signal.get("edge", 0.0))
@@ -461,23 +448,23 @@ class RiskManager:
             bet_stake = float(getattr(bet, "stake", bet.amount or 1))
             bet_return_pct = bet_pnl / bet_stake if bet_stake > 0 else 0
 
-            # Yeni edge eski edge'in min_rebalance_edge_ratio katı mı?
+            # Yeni edge eski edge'in min_rebalance_edge_ratio kati mi?
             if bet_edge > 0 and new_edge > bet_edge * cfg.min_rebalance_edge_ratio:
-                # Eski pozisyon zararda mı?
+                # Eski pozisyon zararda mi?
                 if bet_return_pct <= cfg.rebalance_min_loss:
                     return bet
 
         return None
 
     def check_model_reversal(self, bet, analysis) -> tuple:
-        """Model olasılığı ters yönde önemli ölçüde değiştiyse erken çık.
+        """Model olasiligi ters yonde onemli olcude degistiyse erken cik.
 
         Returns: (should_exit: bool, reason: str)
         """
         if not analysis:
             return False, ""
         try:
-            # Bet'in açıldığı andaki model prob'u fair_value'da saklı
+            # Bet'in acildigi andaki model prob'u fair_value'da sakli
             entry_prob = float(getattr(bet, "fair_value", 0.5) or 0.5)
             current_prob = float(getattr(analysis, "estimated_probability", 0.5) or 0.5)
 
@@ -489,14 +476,14 @@ class RiskManager:
             bet_stake = float(getattr(bet, "stake", bet.amount or 1))
             return_pct = bet_pnl / bet_stake if bet_stake > 0 else 0
 
-            # Model prob'u %20+ ters yönde değiştiyse ve zarardaysak çık
+            # Model prob'u %20+ ters yonde degistiyse ve zarardaysak cik
             if prob_change <= -0.20 and return_pct <= -0.10:
                 return (
                     True,
                     f"model_reversal: prob {entry_prob:.0%}->{current_prob:.0%} ({prob_change:.0%})",
                 )
 
-            # Model prob'u %30+ ters yönde değiştiyse (karda da olsak çık)
+            # Model prob'u %30+ ters yonde degistiyse (karda da olsak cik)
             if prob_change <= -0.30:
                 return (
                     True,
@@ -510,12 +497,12 @@ class RiskManager:
     def calculate_position_size_with_risk(self, signal, portfolio_value: float) -> float:
         """Kelly + risk limitleri ile pozisyon boyutu hesapla.
 
-        Akış:
+        Akis:
         1. Kelly criterion ile ideal boyut
-        2. max_bet_pct (%3) sınırı
+        2. max_bet_pct (%3) siniri
         3. Smart pool (%40 dokunulmaz)
         4. Exposure cap (%25)
-        5. City cap kontrolü
+        5. City cap kontrolu
         """
         model_prob = getattr(
             signal,
@@ -580,8 +567,8 @@ class BettingEngine:
         # Tek kaynak: bot_config.strategy.current_fee_rate (dinamik fee)
         fee_rate = bot_config.strategy.current_fee_rate
         ev = edge - fee_rate * market_price * (1 - market_price)
-        # min_edge check calculator.py'de effective_min_edge ile yapılıyor.
-        # Burada sadece EV pozitif mi diye bakıyoruz — çifte kontrol kaldırıldı.
+        # min_edge check calculator.py'de effective_min_edge ile yapiliyor.
+        # Burada sadece EV pozitif mi diye bakiyoruz — cifte kontrol kaldirildi.
         is_eligible = ev > 0
 
         if not is_eligible:
@@ -654,7 +641,7 @@ class BettingEngine:
             yes_price = getattr(market_data, "yes_price", 0.5) or getattr(market_data, "current_yes_bid", 0.5)
 
         model_prob = 0.55
-        side = "YES"  # YES-only: asla NO bahis açma
+        side = "YES"  # YES-only: asla NO bahis acma
         if forecast:
             from utils.probability import estimate_probability as _ep
 

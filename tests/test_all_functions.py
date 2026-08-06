@@ -24,19 +24,32 @@ def _clean_db():
 
 def _add_portfolio(session, cash=1000.0):
     from database.models import Portfolio
+
     session.add(Portfolio(id=1, cash_balance=cash, total_value=cash, initial_value=1000.0))
     session.commit()
 
 
 def _add_market(session, mid="m1", yes_price=0.50, city="Testville"):
     from database.models import WeatherMarket
-    session.add(WeatherMarket(
-        id=mid, question="Test?", city=city, city_code="TEST",
-        metric="temperature_max", threshold=25.0,
-        target_date=(datetime.now(timezone.utc) + timedelta(days=2)).replace(hour=23, minute=59, second=59, microsecond=0),
-        yes_price=yes_price, no_price=1.0 - yes_price, status="open",
-        latitude=41.0, longitude=29.0,
-    ))
+
+    session.add(
+        WeatherMarket(
+            id=mid,
+            question="Test?",
+            city=city,
+            city_code="TEST",
+            metric="temperature_max",
+            threshold=25.0,
+            target_date=(datetime.now(timezone.utc) + timedelta(days=2)).replace(
+                hour=23, minute=59, second=59, microsecond=0
+            ),
+            yes_price=yes_price,
+            no_price=1.0 - yes_price,
+            status="open",
+            latitude=41.0,
+            longitude=29.0,
+        )
+    )
     session.commit()
 
 
@@ -49,17 +62,20 @@ class TestDebitStake:
     def test_debit_reduces_cash(self):
         from database.db import get_session
         from utils.accounting import debit_stake
+
         with get_session() as s:
             _add_portfolio(s, 1000.0)
             result = debit_stake(s, 100.0, "test:open")
             assert result == 900.0
             from database.models import Portfolio
+
             pf = s.query(Portfolio).filter(Portfolio.id == 1).first()
             assert pf.cash_balance == 900.0
 
     def test_debit_exact_balance(self):
         from database.db import get_session
         from utils.accounting import debit_stake
+
         with get_session() as s:
             _add_portfolio(s, 100.0)
             result = debit_stake(s, 100.0, "test:exact")
@@ -68,6 +84,7 @@ class TestDebitStake:
     def test_debit_exceeds_balance_raises(self):
         from database.db import get_session
         from utils.accounting import debit_stake
+
         with get_session() as s:
             _add_portfolio(s, 50.0)
             with pytest.raises(ValueError, match="Insufficient cash"):
@@ -76,6 +93,7 @@ class TestDebitStake:
     def test_debit_zero_amount(self):
         from database.db import get_session
         from utils.accounting import debit_stake
+
         with get_session() as s:
             _add_portfolio(s, 1000.0)
             result = debit_stake(s, 0.0, "test:zero")
@@ -86,6 +104,7 @@ class TestCreditSale:
     def test_credit_increases_cash(self):
         from database.db import get_session
         from utils.accounting import credit_sale
+
         with get_session() as s:
             _add_portfolio(s, 100.0)
             result = credit_sale(s, 50.0, "test:sell")
@@ -94,6 +113,7 @@ class TestCreditSale:
     def test_credit_zero(self):
         from database.db import get_session
         from utils.accounting import credit_sale
+
         with get_session() as s:
             _add_portfolio(s, 100.0)
             result = credit_sale(s, 0.0, "test:zero")
@@ -104,6 +124,7 @@ class TestCreditSettlement:
     def test_credit_settlement_increases_cash(self):
         from database.db import get_session
         from utils.accounting import credit_settlement
+
         with get_session() as s:
             _add_portfolio(s, 100.0)
             result = credit_settlement(s, 200.0, 0.0, "test:settle")
@@ -112,6 +133,7 @@ class TestCreditSettlement:
     def test_credit_settlement_with_fee(self):
         from database.db import get_session
         from utils.accounting import credit_settlement
+
         with get_session() as s:
             _add_portfolio(s, 100.0)
             result = credit_settlement(s, 200.0, 10.0, "test:fee")
@@ -127,13 +149,16 @@ class TestOpenBetOnMarket:
     def test_opens_paper_bet(self):
         from database.db import get_session
         from executor.bet_placer import BetPlacer
+
         with get_session() as s:
             _add_portfolio(s, 1000.0)
             _add_market(s, "m1", 0.50)
             bp = BetPlacer()
-            market = s.query(
-                __import__("database.models", fromlist=["WeatherMarket"]).WeatherMarket
-            ).filter_by(id="m1").first()
+            market = (
+                s.query(__import__("database.models", fromlist=["WeatherMarket"]).WeatherMarket)
+                .filter_by(id="m1")
+                .first()
+            )
             result = bp.open_bet_on_market(market, s)
             assert result is not None
             assert result.status == "placed"
@@ -143,26 +168,32 @@ class TestOpenBetOnMarket:
     def test_rejects_high_price(self):
         from database.db import get_session
         from executor.bet_placer import BetPlacer
+
         with get_session() as s:
             _add_portfolio(s, 1000.0)
             _add_market(s, "m2", 0.96)
             bp = BetPlacer()
-            market = s.query(
-                __import__("database.models", fromlist=["WeatherMarket"]).WeatherMarket
-            ).filter_by(id="m2").first()
+            market = (
+                s.query(__import__("database.models", fromlist=["WeatherMarket"]).WeatherMarket)
+                .filter_by(id="m2")
+                .first()
+            )
             result = bp.open_bet_on_market(market, s)
             assert result is None
 
     def test_rejects_low_price(self):
         from database.db import get_session
         from executor.bet_placer import BetPlacer
+
         with get_session() as s:
             _add_portfolio(s, 1000.0)
             _add_market(s, "m3", 0.05)
             bp = BetPlacer()
-            market = s.query(
-                __import__("database.models", fromlist=["WeatherMarket"]).WeatherMarket
-            ).filter_by(id="m3").first()
+            market = (
+                s.query(__import__("database.models", fromlist=["WeatherMarket"]).WeatherMarket)
+                .filter_by(id="m3")
+                .first()
+            )
             result = bp.open_bet_on_market(market, s)
             assert result is None
 
@@ -170,15 +201,28 @@ class TestOpenBetOnMarket:
         from database.db import get_session
         from executor.bet_placer import BetPlacer
         from database.models import Bet
+
         with get_session() as s:
             _add_portfolio(s, 1000.0)
             _add_market(s, "m4", 0.50)
-            s.add(Bet(market_id="m4", city="Testville", city_code="TEST", side="YES", amount=10.0, price=0.50, status="placed"))
+            s.add(
+                Bet(
+                    market_id="m4",
+                    city="Testville",
+                    city_code="TEST",
+                    side="YES",
+                    amount=10.0,
+                    price=0.50,
+                    status="placed",
+                )
+            )
             s.commit()
             bp = BetPlacer()
-            market = s.query(
-                __import__("database.models", fromlist=["WeatherMarket"]).WeatherMarket
-            ).filter_by(id="m4").first()
+            market = (
+                s.query(__import__("database.models", fromlist=["WeatherMarket"]).WeatherMarket)
+                .filter_by(id="m4")
+                .first()
+            )
             result = bp.open_bet_on_market(market, s)
             assert result is None
 
@@ -186,15 +230,27 @@ class TestOpenBetOnMarket:
         from database.db import get_session
         from executor.bet_placer import BetPlacer
         from database.models import WeatherMarket
+
         with get_session() as s:
             _add_portfolio(s, 1000.0)
             # Past target_date
             past = (datetime.now(timezone.utc) - timedelta(days=1)).replace(tzinfo=None)
-            s.add(WeatherMarket(
-                id="m5", question="Q?", city="Testville", city_code="TEST",
-                metric="temperature_max", threshold=25.0, target_date=past,
-                yes_price=0.50, no_price=0.50, status="open", latitude=41.0, longitude=29.0,
-            ))
+            s.add(
+                WeatherMarket(
+                    id="m5",
+                    question="Q?",
+                    city="Testville",
+                    city_code="TEST",
+                    metric="temperature_max",
+                    threshold=25.0,
+                    target_date=past,
+                    yes_price=0.50,
+                    no_price=0.50,
+                    status="open",
+                    latitude=41.0,
+                    longitude=29.0,
+                )
+            )
             s.commit()
             bp = BetPlacer()
             market = s.query(WeatherMarket).filter_by(id="m5").first()
@@ -205,17 +261,30 @@ class TestOpenBetOnMarket:
         from database.db import get_session
         from executor.bet_placer import BetPlacer
         from database.models import Bet
+
         with get_session() as s:
             _add_portfolio(s, 1000.0)
             _add_market(s, "m6", 0.50)
             # 950 exposure already
             for i in range(95):
-                s.add(Bet(market_id=f"ex_{i}", city="Testville", city_code="TEST", side="YES", amount=10.0, price=0.50, status="placed"))
+                s.add(
+                    Bet(
+                        market_id=f"ex_{i}",
+                        city="Testville",
+                        city_code="TEST",
+                        side="YES",
+                        amount=10.0,
+                        price=0.50,
+                        status="placed",
+                    )
+                )
             s.commit()
             bp = BetPlacer()
-            market = s.query(
-                __import__("database.models", fromlist=["WeatherMarket"]).WeatherMarket
-            ).filter_by(id="m6").first()
+            market = (
+                s.query(__import__("database.models", fromlist=["WeatherMarket"]).WeatherMarket)
+                .filter_by(id="m6")
+                .first()
+            )
             result = bp.open_bet_on_market(market, s)
             # flat_bet=1000 but only 50 room → capped to 50
             if result is not None:
@@ -225,6 +294,7 @@ class TestOpenBetOnMarket:
         from database.db import get_session
         from executor.bet_placer import BetPlacer
         from config.settings import Config
+
         with get_session() as s:
             _add_portfolio(s, 1000.0)
             _add_market(s, "m7", 0.50)
@@ -232,9 +302,11 @@ class TestOpenBetOnMarket:
             Config.DRY_RUN = True
             try:
                 bp = BetPlacer()
-                market = s.query(
-                    __import__("database.models", fromlist=["WeatherMarket"]).WeatherMarket
-                ).filter_by(id="m7").first()
+                market = (
+                    s.query(__import__("database.models", fromlist=["WeatherMarket"]).WeatherMarket)
+                    .filter_by(id="m7")
+                    .first()
+                )
                 result = bp.open_bet_on_market(market, s)
                 assert result is not None
                 assert "paper" in (result.order_id or "").lower()
@@ -246,17 +318,18 @@ class TestCloseBetForRotation:
     def test_rotation_close_updates_status(self):
         from database.db import get_session
         from executor.bet_placer import BetPlacer
-        from database.models import Bet
+
         with get_session() as s:
             _add_portfolio(s, 1000.0)
             _add_market(s, "m8", 0.50)
             bp = BetPlacer()
-            market = s.query(
-                __import__("database.models", fromlist=["WeatherMarket"]).WeatherMarket
-            ).filter_by(id="m8").first()
+            market = (
+                s.query(__import__("database.models", fromlist=["WeatherMarket"]).WeatherMarket)
+                .filter_by(id="m8")
+                .first()
+            )
             bet = bp.open_bet_on_market(market, s)
             assert bet is not None
-            old_status = bet.status
             bp.close_bet_for_rotation(bet, 0.55, s)
             assert bet.status == "closed"
             assert bet.close_reason == "rotation"
@@ -272,6 +345,7 @@ class TestCloseBetForRotation:
 class TestRunRiskManagement:
     def test_no_open_bets_returns_message(self):
         from jobs.scheduler import run_risk_management
+
         result = run_risk_management()
         assert "no open positions" in result
 
@@ -279,34 +353,112 @@ class TestRunRiskManagement:
         from database.db import get_session
         from jobs.scheduler import run_risk_management
         from database.models import Bet
+
         with get_session() as s:
             _add_portfolio(s, 1000.0)
             _add_market(s, "m9", 0.50)
-            s.add(Bet(
-                market_id="m9", city="Testville", city_code="TEST", side="YES",
-                amount=100.0, price=0.50, shares=200.0, entry_price=0.50,
-                entry_fee=0.40, status="placed",
-            ))
+            s.add(
+                Bet(
+                    market_id="m9",
+                    city="Testville",
+                    city_code="TEST",
+                    side="YES",
+                    amount=100.0,
+                    price=0.50,
+                    shares=200.0,
+                    entry_price=0.50,
+                    entry_fee=0.40,
+                    status="placed",
+                )
+            )
             s.commit()
             result = run_risk_management(session=s)
             assert "no open positions" not in result
             bet = s.query(Bet).filter_by(market_id="m9").first()
             assert bet.unrealized_pnl is not None
 
+    def test_stop_loss_closes_position(self):
+        """Fiyat %stop_loss_pct'den fazla duserse bet closed_early + close_reason alir."""
+        from database.db import get_session
+        from jobs.scheduler import run_risk_management
+        from database.models import Bet
+
+        with get_session() as s:
+            _add_portfolio(s, 1000.0)
+            _add_market(s, "m10", yes_price=0.05)  # yes_price 0.50 -> 0.05 = %90 dusus
+            s.add(
+                Bet(
+                    market_id="m10",
+                    city="Testville",
+                    city_code="TEST",
+                    side="YES",
+                    amount=100.0,
+                    price=0.50,
+                    shares=200.0,
+                    entry_price=0.50,
+                    entry_fee=0.40,
+                    status="placed",
+                )
+            )
+            s.commit()
+            run_risk_management(session=s)
+            bet = s.query(Bet).filter_by(market_id="m10").first()
+            assert bet.status == "closed_early"
+            assert bet.close_reason and "stop_loss" in bet.close_reason
+            assert bet.closed_at is not None
+
+    def test_stop_loss_holds_when_price_ok(self):
+        """Fiyat makul seviyedeyse bet acik kalir."""
+        from database.db import get_session
+        from jobs.scheduler import run_risk_management
+        from database.models import Bet
+
+        with get_session() as s:
+            _add_portfolio(s, 1000.0)
+            _add_market(s, "m11", yes_price=0.48)  # %4 dusus < %20 stop-loss
+            s.add(
+                Bet(
+                    market_id="m11",
+                    city="Testville",
+                    city_code="TEST",
+                    side="YES",
+                    amount=100.0,
+                    price=0.50,
+                    shares=200.0,
+                    entry_price=0.50,
+                    entry_fee=0.40,
+                    status="placed",
+                )
+            )
+            s.commit()
+            run_risk_management(session=s)
+            bet = s.query(Bet).filter_by(market_id="m11").first()
+            assert bet.status == "placed"
+
 
 class TestRunUpdatePrices:
     def test_updates_current_price(self):
         from database.db import get_session
         from jobs.scheduler import run_update_prices
-        from database.models import Bet, WeatherMarket
+        from database.models import Bet
+
         with get_session() as s:
             _add_portfolio(s, 1000.0)
             _add_market(s, "m10", 0.60)
-            s.add(Bet(
-                market_id="m10", city="Testville", city_code="TEST", side="YES",
-                amount=100.0, price=0.50, shares=200.0, entry_price=0.50,
-                entry_fee=0.40, status="placed",
-            ))
+            s.add(
+                Bet(
+                    market_id="m10",
+                    city="Testville",
+                    city_code="TEST",
+                    side="YES",
+                    amount=100.0,
+                    price=0.50,
+                    shares=200.0,
+                    entry_price=0.50,
+                    entry_fee=0.40,
+                    status="placed",
+                )
+            )
             s.commit()
             run_update_prices(session=s)
             bet = s.query(Bet).filter_by(market_id="m10").first()
@@ -323,6 +475,7 @@ class TestApiStatus:
         from fastapi.testclient import TestClient
         from api import app
         from database.db import get_session
+
         with get_session() as s:
             _add_portfolio(s, 1000.0)
         client = TestClient(app)
@@ -342,6 +495,7 @@ class TestApiStatus:
         from fastapi.testclient import TestClient
         from api import app
         from database.db import get_session
+
         with get_session() as s:
             _add_portfolio(s, 1000.0)
         client = TestClient(app)
@@ -356,6 +510,7 @@ class TestApiHealth:
     def test_health_endpoint(self):
         from fastapi.testclient import TestClient
         from api import app
+
         client = TestClient(app)
         r = client.get("/api/health-check")
         assert r.status_code == 200
@@ -369,46 +524,56 @@ class TestApiHealth:
 class TestFormulas:
     def test_unrealized_pnl_with_fee(self):
         from utils.formulas import unrealized_pnl
+
         assert abs(unrealized_pnl(200, 0.60, 0.50) - 20.0) < 0.01
 
     def test_unrealized_pnl_loss(self):
         from utils.formulas import unrealized_pnl
+
         assert abs(unrealized_pnl(200, 0.40, 0.50) - (-20.0)) < 0.01
 
     def test_unrealized_pnl_zero(self):
         from utils.formulas import unrealized_pnl
+
         assert unrealized_pnl(200, 0.50, 0.50) == 0.0
 
     def test_bet_shares(self):
         from utils.formulas import bet_shares
+
         assert bet_shares(10.0, 0.50) == 20.0
 
     def test_portfolio_total_value(self):
         from utils.formulas import portfolio_total_value
+
         assert portfolio_total_value(500.0, 300.0) == 800.0
 
     def test_max_exposure_cap(self):
         from utils.formulas import max_exposure_cap
+
         assert max_exposure_cap(1000.0, 0.0, 0.6) == 600.0
         assert max_exposure_cap(1000.0, -100.0, 0.6) == 540.0
 
     def test_polymarket_fee(self):
         from utils.formulas import polymarket_fee
+
         fee = polymarket_fee(100.0, 0.50, 0.05)
         assert fee > 0
 
     def test_roi_pct(self):
         from utils.formulas import roi_pct
+
         assert roi_pct(10.0, 100.0) == 10.0
         assert roi_pct(-5.0, 100.0) == -5.0
 
     def test_settlement_pnl_won(self):
         from utils.formulas import settlement_pnl
+
         pnl = settlement_pnl(10.0, 0.50, 0.40, True)
         assert pnl > 0  # Won: payout > stake
 
     def test_settlement_pnl_lost(self):
         from utils.formulas import settlement_pnl
+
         pnl = settlement_pnl(10.0, 0.50, 0.40, False)
         assert abs(pnl - (-10.4)) < 0.01  # Lost: -(stake + entry_fee)
 
@@ -425,6 +590,7 @@ class TestDryRunIntegration:
         from executor.bet_placer import BetPlacer
         from jobs.scheduler import run_update_prices
         from config.settings import Config
+
         with get_session() as s:
             _add_portfolio(s, 1000.0)
             _add_market(s, "dry1", 0.50)
@@ -432,15 +598,14 @@ class TestDryRunIntegration:
             Config.DRY_RUN = True
             try:
                 bp = BetPlacer()
-                market = s.query(
-                    __import__("database.models", fromlist=["WeatherMarket"]).WeatherMarket
-                ).filter_by(id="dry1").first()
+                market = (
+                    s.query(__import__("database.models", fromlist=["WeatherMarket"]).WeatherMarket)
+                    .filter_by(id="dry1")
+                    .first()
+                )
                 bet = bp.open_bet_on_market(market, s)
                 assert bet is not None
                 assert bet.status == "placed"
-                cash_after_open = s.query(
-                    __import__("database.models", fromlist=["Portfolio"]).Portfolio
-                ).filter(__import__("database.models", fromlist=["Portfolio"]).Portfolio.id == 1).first().cash_balance
 
                 # Price moves up
                 market.yes_price = 0.70

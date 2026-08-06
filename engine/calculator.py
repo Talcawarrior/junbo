@@ -1,4 +1,4 @@
-"""Matematiksel olasılık, Kelly kriteri hesaplayıcısı ve WeatherEngine konsensüs birleşimi."""
+"""Matematiksel olasilik, Kelly kriteri hesaplayicisi ve WeatherEngine konsensus birlesimi."""
 
 import json
 import logging
@@ -24,7 +24,7 @@ from utils.model_blacklist import get_blacklisted_models
 
 logger = logging.getLogger("ENGINE_CALCULATOR")
 
-# Global rate-limit flag: ilk 429'te 5dk boyunca tüm Open-Meteo isteklerini durdur
+# Global rate-limit flag: ilk 429'te 5dk boyunca tum Open-Meteo isteklerini durdur
 import time as _time  # noqa: E402
 
 _RATE_LIMITED_UNTIL = 0.0  # monotonic timestamp
@@ -42,7 +42,7 @@ class Calculator:
         range_low: float | None = None,
         range_high: float | None = None,
     ) -> float:
-        """Tahmin değerlerinden, market tipine göre YES olasılığını hesapla.
+        """Tahmin degerlerinden, market tipine gore YES olasiligini hesapla.
 
         Delegates to :func:`utils.probability.estimate_probability`.
         """
@@ -80,7 +80,7 @@ class Calculator:
         with get_session_or(session) as session:
             market = session.query(WeatherMarket).filter_by(id=market_id).first()
             if not market:
-                logger.warning(f"Market bulunamadı: {market_id}")
+                logger.warning(f"Market bulunamadi: {market_id}")
                 return None
 
             if not all([market.city, market.threshold, market.target_date, market.metric]):
@@ -110,7 +110,7 @@ class Calculator:
                 .all()
             )
 
-            # Her kaynaktan en son tahmini al + ağırlıkları topla
+            # Her kaynaktan en son tahmini al + agirliklari topla
             latest_by_source = {}
             source_weights = {}
             for f in forecasts:
@@ -191,7 +191,7 @@ class Calculator:
 
             days_ahead_for_check = max(days_ahead, 1)
 
-            # Olasılık hesapla — weighted mean/std ile (market_type-aware)
+            # Olasilik hesapla — weighted mean/std ile (market_type-aware)
             # RANGE markets: pass explicit bucket bounds if stored
             range_low = None
             range_high = None
@@ -234,11 +234,11 @@ class Calculator:
             raw_edge = estimated_prob - market_implied
 
             if raw_edge > 0:
-                # YES tarafı
+                # YES tarafi
                 kelly_frac = self.kelly_criterion(estimated_prob, market_implied, bot_config.strategy.kelly_fraction)
                 recommended_side = "YES"
             else:
-                # YES-only: model_prob <= market_implied ise bahis açılmaz
+                # YES-only: model_prob <= market_implied ise bahis acilmaz
                 kelly_frac = 0
                 recommended_side = None
 
@@ -274,19 +274,19 @@ class Calculator:
             )
             slippage_est = estimate_slippage(entry_price_for_cost, condition_id=condition_id)
 
-            # Bet miktarı — gerçek portföyden oku (using net_edge now)
+            # Bet miktari — gercek portfoyden oku (using net_edge now)
             raw_kelly_amount = min(kelly_frac * bankroll, max_bet_cap(bankroll, Config.MAX_BET_PCT))
             # Reduce Kelly size by estimated slippage cost
             recommended_amount = adjust_kelly_for_slippage(raw_kelly_amount, entry_price_for_cost)
 
-            # Bet açılmalı mı?
+            # Bet acilmali mi?
             # NOTE: Polymarket'te public-search'ten gelen marketlerin
-            # `liquidity` alanı genelde 0 (price bize zaten gerçek bilgi veriyor),
-            # bu yüzden likidite kontrolünü kaldırıyoruz — gerçek piyasa sinyali
-            # `volume` veya `volume24hr` alanlarından biridir; bunlar da yoksa
-            # `current_price` zaten likiditeyi yansıtır.
-            # Yine de kullanıcı isterse `bot_config.strategy.min_liquidity`
-            # değerini 0 yaparak bunu bypass edebilir.
+            # `liquidity` alani genelde 0 (price bize zaten gercek bilgi veriyor),
+            # bu yuzden likidite kontrolunu kaldiriyoruz — gercek piyasa sinyali
+            # `volume` veya `volume24hr` alanlarindan biridir; bunlar da yoksa
+            # `current_price` zaten likiditeyi yansitir.
+            # Yine de kullanici isterse `bot_config.strategy.min_liquidity`
+            # degerini 0 yaparak bunu bypass edebilir.
             liquidity_ok = (
                 market.liquidity or 0
             ) >= bot_config.strategy.min_liquidity or bot_config.strategy.min_liquidity <= 0
@@ -306,6 +306,7 @@ class Calculator:
 
             should_bet = (
                 recommended_side == "YES"  # YES-only: asla NO
+                and net_edge >= effective_min_edge  # post-cost edge gate
                 and len(forecast_values) >= bot_config.strategy.min_sources
                 and 0 <= days_ahead <= bot_config.strategy.max_days_ahead
                 and liquidity_ok
@@ -318,16 +319,16 @@ class Calculator:
                 reason_parts.append("YES-only mode: NO side rejected")
             if net_edge < effective_min_edge:
                 reason_parts.append(
-                    f"Net edge düşük: {net_edge:.2%} (raw={raw_edge:.2%}, slip={slippage_est.slippage_pct:.2%})"
+                    f"Net edge dusuk: {net_edge:.2%} (raw={raw_edge:.2%}, slip={slippage_est.slippage_pct:.2%})"
                 )
             if len(forecast_values) < bot_config.strategy.min_sources:
                 reason_parts.append(f"Az kaynak: {len(forecast_values)}")
             if days_ahead > bot_config.strategy.max_days_ahead:
-                reason_parts.append(f"Çok uzak: {days_ahead} gün")
+                reason_parts.append(f"Cok uzak: {days_ahead} gun")
             if (market.liquidity or 0) < bot_config.strategy.min_liquidity:
-                reason_parts.append(f"Düşük likidite: ${market.liquidity}")
+                reason_parts.append(f"Dusuk likidite: ${market.liquidity}")
             if not settlement_ok:
-                reason_parts.append(f"Settlement'a {settlement_hours_left:.1f}s kaldı (8s min)")
+                reason_parts.append(f"Settlement'a {settlement_hours_left:.1f}s kaldi (8s min)")
 
             if not reason_parts:
                 reason = (
@@ -404,7 +405,7 @@ class WeatherEngine:
         # Local cache for the current session to avoid redundant fetches (e.g. max/min overlap)
         self._forecast_cache = {}
 
-    # _compute_effective_min_edge Calculator sınıfında (satır 364) tanımlı.
+    # _compute_effective_min_edge Calculator sinifinda (satir 364) tanimli.
 
     async def get_multi_model_forecast(
         self,
@@ -425,7 +426,7 @@ class WeatherEngine:
             target_date = datetime.now(timezone.utc).replace(tzinfo=None)
 
         global _RATE_LIMITED_UNTIL, _time
-        # Global rate-limit kontrolü
+        # Global rate-limit kontrolu
         if _time.monotonic() < _RATE_LIMITED_UNTIL:
             logger.debug("Rate-limited, skipping API call for %s", city_code)
             return None
@@ -458,7 +459,7 @@ class WeatherEngine:
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
                     async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                         if resp.status == 429:
-                            # Global rate-limit: tüm döngü boyunca API'yi engelle
+                            # Global rate-limit: tum dongu boyunca API'yi engelle
                             _RATE_LIMITED_UNTIL = _time.monotonic() + 300  # 5dk
                             logger.warning("Ensemble 429 — all API calls paused for 5min")
                             return None

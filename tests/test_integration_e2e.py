@@ -1,4 +1,4 @@
-"""Integration/E2E Tests - Tüm pipeline'ı uçtan uca test eder."""
+"""Integration/E2E Tests - Tum pipeline'i uctan uca test eder."""
 
 import pytest
 from datetime import datetime, timezone, timedelta
@@ -8,7 +8,7 @@ class TestFullPipelineE2E:
     """Tam pipeline E2E testi."""
 
     def test_fetch_to_bet_pipeline(self):
-        """Veri çekme → analiz → fee hesaplama pipeline'ı."""
+        """Veri cekme → analiz → fee hesaplama pipeline'i."""
         # Step 1: Market data (mock)
         mock_market = {
             "id": "test_123",
@@ -42,10 +42,10 @@ class TestFullPipelineE2E:
 
 
 class TestRiskManagementE2E:
-    """Risk yönetimi E2E testi."""
+    """Risk yonetimi E2E testi."""
 
     def test_exposure_cap_enforcement(self):
-        """Exposure cap uygulanmalı."""
+        """Exposure cap uygulanmali."""
         from utils.formulas import max_exposure_cap
 
         max_exp = max_exposure_cap(1000.0, 50.0, 0.25)
@@ -54,7 +54,7 @@ class TestRiskManagementE2E:
         assert current_exposure + new_bet <= max_exp
 
     def test_city_cap_enforcement(self):
-        """City cap uygulanmalı — no city exceeds cap."""
+        """City cap uygulanmali — no city exceeds cap."""
         from config.settings import bot_config
 
         city_cap = bot_config.city_cap
@@ -62,7 +62,7 @@ class TestRiskManagementE2E:
             assert bets <= city_cap, f"{city} has {bets} bets, exceeds cap {city_cap}"
 
     def test_daily_loss_limit(self):
-        """Daily loss limit uygulanmalı."""
+        """Daily loss limit uygulanmali."""
         daily_loss_limit_pct = 0.05  # Test formula with active limit
         initial_capital = 1000.0
         daily_loss_limit_amount = initial_capital * daily_loss_limit_pct
@@ -78,7 +78,7 @@ class TestDatabaseE2E:
     """Database E2E testi."""
 
     def test_market_creation_and_query(self):
-        """Market oluşturma ve sorgulama."""
+        """Market olusturma ve sorgulama."""
         from database.db import get_session
         from database.models import WeatherMarket
 
@@ -108,7 +108,7 @@ class TestDatabaseE2E:
             session.commit()
 
     def test_bet_creation_and_query(self):
-        """Bet oluşturma ve sorgulama."""
+        """Bet olusturma ve sorgulama."""
         from database.db import get_session
         from database.models import Bet
 

@@ -13,32 +13,40 @@ import os
 
 
 # ============================================================================
-# 2. FORMÜL TESTLERİ
+# 2. FORMUL TESTLERI
 # ============================================================================
 
 
 class TestFinancialFormulas:
-    """Finansal formüller için testler."""
+    """Finansal formuller icin testler."""
 
     def test_polymarket_fee(self):
-        """Polymarket fee formülünü test et."""
+        """Polymarket fee formulunu test et (weather exponent=0.5)."""
+        from config.settings import bot_config
         from utils.formulas import polymarket_fee
 
         result = polymarket_fee(shares=100, price=0.55, fee_rate=0.05)
-        expected = 100 * 0.05 * 0.55 * (1 - 0.55)
+        # Weather kategorisi flatter fee curve kullanir: fee = C·rate·p·(1-p)^0.5
+        exponent = getattr(bot_config.strategy, "fee_exponent", 1.0)
+        expected = 100 * 0.05 * 0.55 * ((1 - 0.55) ** exponent)
         assert abs(result - expected) < 0.0001
 
     def test_polymarket_fee_edge_cases(self):
         """Polymarket fee edge case testleri."""
+        from config.settings import bot_config
         from utils.formulas import polymarket_fee
 
-        # price=0.01: 100 * 0.05 * 0.01 * 0.99 = 0.0495
-        result = polymarket_fee(shares=100, price=0.01, fee_rate=0.05)
-        assert abs(result - 0.0495) < 0.0001
+        exponent = getattr(bot_config.strategy, "fee_exponent", 1.0)
 
-        # price=0.99: 100 * 0.05 * 0.99 * 0.01 = 0.0495
+        # price=0.01: 100 * 0.05 * 0.01 * 0.99^exp
+        result = polymarket_fee(shares=100, price=0.01, fee_rate=0.05)
+        expected = 100 * 0.05 * 0.01 * (0.99**exponent)
+        assert abs(result - expected) < 0.0001
+
+        # price=0.99: 100 * 0.05 * 0.99 * 0.01^exp
         result = polymarket_fee(shares=100, price=0.99, fee_rate=0.05)
-        assert abs(result - 0.0495) < 0.0001
+        expected = 100 * 0.05 * 0.99 * (0.01**exponent)
+        assert abs(result - expected) < 0.0001
 
         # price=1.00: fee = 0
         result = polymarket_fee(shares=100, price=1.00, fee_rate=0.05)
@@ -70,7 +78,7 @@ class TestFinancialFormulas:
         assert est.slippage_pct == 0.005
 
     def test_kelly_criterion(self):
-        """Kelly criterion formülünü test et."""
+        """Kelly criterion formulunu test et."""
         from utils.kelly import kelly_bet_amount
 
         kelly_size = kelly_bet_amount(1000.0, 0.10, 0.55)
@@ -78,7 +86,7 @@ class TestFinancialFormulas:
         assert kelly_size >= 0
 
     def test_kelly_fraction_variations(self):
-        """Kelly fraction çeşitlerini test et."""
+        """Kelly fraction cesitlerini test et."""
         from utils.kelly import kelly_bet_amount
 
         for frac in [0.10, 0.15, 0.20]:
@@ -106,12 +114,12 @@ class TestFinancialFormulas:
 
 
 # ============================================================================
-# 3. API ENDPOINT TESTLERİ
+# 3. API ENDPOINT TESTLERI
 # ============================================================================
 
 
 class TestAPIEndpoints:
-    """API endpoint'leri için testler."""
+    """API endpoint'leri icin testler."""
 
     def test_health_check_endpoint(self, test_client):
         """Health check endpoint testi."""
@@ -138,15 +146,15 @@ class TestAPIEndpoints:
 
 
 # ============================================================================
-# 4. RISK YÖNETİMİ TESTLERİ
+# 4. RISK YONETIMI TESTLERI
 # ============================================================================
 
 
 class TestRiskManagement:
-    """Risk yönetimi testleri."""
+    """Risk yonetimi testleri."""
 
     def test_max_exposure_enforcement(self):
-        """Max exposure kuralını test et."""
+        """Max exposure kuralini test et."""
         from utils.formulas import max_exposure_cap
 
         max_exposure = max_exposure_cap(1000.0, 50.0, 0.25)
@@ -167,7 +175,7 @@ class TestRiskManagement:
 
 
 # ============================================================================
-# 5. E2E TESTLERİ
+# 5. E2E TESTLERI
 # ============================================================================
 
 
@@ -175,7 +183,7 @@ class TestE2E:
     """End-to-End workflow testleri."""
 
     def test_complete_betting_cycle(self, test_client):
-        """Market endpoint yanıt yapısını test et."""
+        """Market endpoint yanit yapisini test et."""
         response = test_client.get("/api/markets")
         assert response.status_code == 200
         data = response.json()
@@ -183,7 +191,7 @@ class TestE2E:
         assert isinstance(data["markets"], list)
 
     def test_historical_calibrations_test(self):
-        """Historical calibrations parquet dosyasını test et."""
+        """Historical calibrations parquet dosyasini test et."""
         import pandas as pd
 
         path = "data/archive/historical_calibrations_20260630.parquet"
@@ -195,7 +203,7 @@ class TestE2E:
 
 
 # ============================================================================
-# 6. DASHBOARD TESTLERİ
+# 6. DASHBOARD TESTLERI
 # ============================================================================
 
 
@@ -208,7 +216,7 @@ class TestDashboard:
         assert response.status_code == 200
 
     def test_yes_no_buttons_working(self, test_client):
-        """YES/NO fiyatlarının market verisinde olduğunu test et."""
+        """YES/NO fiyatlarinin market verisinde oldugunu test et."""
         response = test_client.get("/api/markets")
         assert response.status_code == 200
         data = response.json()
@@ -229,6 +237,11 @@ def test_client():
     """FastAPI test client."""
     from fastapi.testclient import TestClient
     from main import app
+    from database.db import ensure_initial_portfolio
+
+    # TestClient lifesp'a event'leri calistirmaz; get_status portfolio
+    # satiri olmadan None crash'i verir. Temp DB'ye portfolio ekle.
+    ensure_initial_portfolio()
 
     return TestClient(app)
 

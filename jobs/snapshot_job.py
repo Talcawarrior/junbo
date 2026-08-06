@@ -31,7 +31,7 @@ def take_market_snapshots() -> int:
     olanlar kaydedilir; %1'in altinda kalan tail bucket'lari atlanir.
 
     Ayni market'e ait snapshot'lar saatlik guncellenir
-    (aynı saat icin tekrar kayit yapilmaz).
+    (ayni saat icin tekrar kayit yapilmaz).
 
     Returns: Kaydedilen yeni snapshot sayisi.
     """

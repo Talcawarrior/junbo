@@ -5,8 +5,6 @@ import logging
 import re
 from datetime import datetime, timezone
 
-UTC = timezone.utc
-
 import requests
 
 from config.settings import bot_config, config
@@ -14,8 +12,9 @@ from database.db import get_session
 from database.models import WeatherMarket
 from engine.market_parser import MarketParser
 from scrapers.async_client import AsyncHttpClient
-
 from utils.retry import retry
+
+UTC = timezone.utc
 
 logger = logging.getLogger("SCRAPER_POLYMARKET")
 
@@ -45,7 +44,7 @@ class PolymarketScraper:
 
     @retry(max_attempts=3, delay=5, exceptions=(requests.RequestException,))
     def _fetch_raw_markets(self) -> list[dict]:
-        """Polymarket'ten ham veri çek — public-search + today+2 gün + parallel.
+        """Polymarket'ten ham veri cek — public-search + today+2 gun + parallel.
 
         Tier 3 #12: parallel path now goes through AsyncHttpClient which
         uses aiohttp + bounded concurrency (8) + 250 ms per-host throttle
@@ -229,7 +228,7 @@ class PolymarketScraper:
                     m.setdefault("event_slug", slug)
                     all_events.append(m)
 
-        logger.info(f"Toplam {len(all_events)} market çekildi ({len(seen_slugs)} event, {len(queries)} sorgu)")
+        logger.info(f"Toplam {len(all_events)} market cekildi ({len(seen_slugs)} event, {len(queries)} sorgu)")
         return all_events
 
     async def fetch_polymarket_events(self, limit: int = 100) -> list[dict]:
@@ -287,7 +286,7 @@ class PolymarketScraper:
         return True
 
     def _parse_market(self, raw: dict) -> dict:
-        """Ham marketi yapılandırılmış veriye çevir."""
+        """Ham marketi yapilandirilmis veriye cevir."""
         # 1) outcomePrices — CANONICAL source (Gamma API v2 format).
         #    Tokens[] often returns broken prices (e.g. both sides 0.75),
         #    while outcomePrices reflects actual trade prices.
@@ -458,7 +457,7 @@ class PolymarketScraper:
                     if threshold_c == 0.0:
                         logger.warning(f"Skipping market {parsed['id']}: threshold is 0.0")
                         continue
-                    # Sanity guard: Celsius değer -40..55 aralığında değilse atla
+                    # Sanity guard: Celsius deger -40..55 araliginda degilse atla
                     if threshold_c < -40 or threshold_c > 55:
                         logger.warning(
                             "Skipping market %s: threshold %.1f°C outside sane range [-40, 55] — question=%r",
@@ -550,10 +549,10 @@ class PolymarketScraper:
                     _seen_strikes.add(_strike_key)
 
                 except Exception as e:
-                    logger.error(f"Market parse hatası {raw.get('id')}: {e}")
+                    logger.error(f"Market parse hatasi {raw.get('id')}: {e}")
                     continue
 
-            logger.info(f"{saved} market kaydedildi/güncellendi")
+            logger.info(f"{saved} market kaydedildi/guncellendi")
         return saved
 
     @staticmethod

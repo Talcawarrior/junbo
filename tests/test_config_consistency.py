@@ -22,10 +22,17 @@ def test_strategy_config_min_edge_default():
 
 
 def test_config_kelly_fraction_matches_strategy():
-    """Config.KELLY_FRACTION should equal the default StrategyConfig.kelly_fraction."""
-    from config.settings import StrategyConfig, config
+    """Config.KELLY_FRACTION proxy should stay in sync with its real source.
 
-    s = StrategyConfig()
-    assert config.KELLY_FRACTION == s.kelly_fraction, (
-        f"KELLY_FRACTION={config.KELLY_FRACTION} != default strategy.kelly_fraction={s.kelly_fraction}"
+    KELLY_FRACTION is an env-overridable lever (settings.py:567), and
+    conftest's _reset_strategy_params fixture normalizes it (and the proxy)
+    to 0.15 for test isolation. Comparing against the proxy's actual source
+    (bot_config.strategy.kelly_fraction) is the stable sync check; comparing
+    against a fresh StrategyConfig() default (0.25) breaks whenever conftest
+    overrides the lever.
+    """
+    from config.settings import bot_config, config
+
+    assert config.KELLY_FRACTION == bot_config.strategy.kelly_fraction, (
+        f"KELLY_FRACTION={config.KELLY_FRACTION} != strategy.kelly_fraction={bot_config.strategy.kelly_fraction}"
     )

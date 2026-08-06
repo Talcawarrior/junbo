@@ -193,7 +193,7 @@ class TestTimeDecay:
     """RiskManager.check_time_decay tests."""
 
     def test_time_decay_exit_within_window_in_loss(self):
-        """Settlement'a <24h kala ve %10+ zarardaysa çık."""
+        """Settlement'a <24h kala ve %10+ zarardaysa cik."""
         rm = make_risk_manager(NORMAL_RISK)
         bet = make_mock_bet(entry_price=0.50)
         market = make_mock_market(resolution_date=datetime.now(timezone.utc) + timedelta(hours=20))
@@ -225,7 +225,7 @@ class TestTimeDecay:
         assert should_exit is False
 
     def test_time_decay_market_passed(self):
-        """Settlement zamanı geçmişse tetiklenmemeli (settlement halleder)."""
+        """Settlement zamani gecmisse tetiklenmemeli (settlement halleder)."""
         rm = make_risk_manager(NORMAL_RISK)
         bet = make_mock_bet(entry_price=0.50)
         market = make_mock_market(resolution_date=datetime.now(timezone.utc) - timedelta(hours=2))
@@ -240,7 +240,7 @@ class TestTrailingStop:
     """RiskManager.check_trailing_stop tests."""
 
     def test_trailing_stop_drop_from_peak(self):
-        """Tepeden %15+ düşüşte trailing stop tetiklenmeli."""
+        """Tepeden %15+ dususte trailing stop tetiklenmeli."""
         rm = make_risk_manager(NORMAL_RISK)
         bet = make_mock_bet(entry_price=0.50, result_data=json.dumps({"peak_price": 0.90}))
         should_exit, reason = rm.check_trailing_stop(bet, 0.70)
@@ -248,17 +248,17 @@ class TestTrailingStop:
         assert "trailing_stop" in reason.lower()
 
     def test_trailing_stop_small_drop(self):
-        """%5 düşüşte tetiklenmemeli."""
+        """%5 dususte tetiklenmemeli."""
         rm = make_risk_manager(NORMAL_RISK)
         bet = make_mock_bet(entry_price=0.50, result_data=json.dumps({"peak_price": 0.80}))
         should_exit, reason = rm.check_trailing_stop(bet, 0.77)
         assert should_exit is False
 
     def test_trailing_stop_new_peak_updates(self):
-        """Yeni tepe noktası peak_price'ı güncellemeli."""
+        """Yeni tepe noktasi peak_price'i guncellemeli."""
         rm = make_risk_manager(NORMAL_RISK)
         bet = make_mock_bet(entry_price=0.50, result_data=json.dumps({"peak_price": 0.60}))
-        # Fiyat 0.80'e çıktı -> peak güncellenmeli
+        # Fiyat 0.80'e cikti -> peak guncellenmeli
         rm.check_trailing_stop(bet, 0.80)
         data = json.loads(bet.result_data)
         assert data["peak_price"] == 0.80
@@ -289,7 +289,7 @@ class TestEarlyExit:
     """RiskManager.check_early_exit — stop-loss, take-profit, trailing-stop combined."""
 
     def test_early_exit_stop_loss(self):
-        """Stop-loss öncelikli tetiklenmeli."""
+        """Stop-loss oncelikli tetiklenmeli."""
         rm = make_risk_manager(NORMAL_RISK)
         bet = make_mock_bet(entry_price=0.50)
         market = make_mock_market()
@@ -316,7 +316,7 @@ class TestEarlyExit:
         assert "trailing_stop" in reason.lower()
 
     def test_early_exit_hold(self):
-        """Hiçbir koşul yoksa Hold dönmeli."""
+        """Hicbir kosul yoksa Hold donmeli."""
         rm = make_risk_manager(NORMAL_RISK)
         bet = make_mock_bet(entry_price=0.50)
         market = make_mock_market()
@@ -325,7 +325,7 @@ class TestEarlyExit:
         assert reason == "Hold"
 
     def test_early_exit_no_market(self):
-        """Market yoksa time-decay atlanır ama stop-loss/take-profit çalışır."""
+        """Market yoksa time-decay atlanir ama stop-loss/take-profit calisir."""
         rm = make_risk_manager(NORMAL_RISK)
         bet = make_mock_bet(entry_price=0.50)
         # Stop-loss tetiklenmeli (market=None olsa da)
@@ -341,7 +341,7 @@ class TestRebalance:
     """RiskManager.check_rebalance tests."""
 
     def test_rebalance_high_edge_opportunity(self):
-        """Yeni edge 2x+ ise ve eski pozisyon zarardaysa rebalance önerir."""
+        """Yeni edge 2x+ ise ve eski pozisyon zarardaysa rebalance onerir."""
         rm = make_risk_manager(NORMAL_RISK)
         old_bet = make_mock_bet(expected_value=0.10, unrealized_pnl=-20.0, stake=100.0)
         new_signal = make_mock_signal(edge=0.40)  # 4x eski
@@ -349,7 +349,7 @@ class TestRebalance:
         assert result is not None
 
     def test_rebalance_low_edge_no_action(self):
-        """Yeni edge yeterli değilse None dönmeli."""
+        """Yeni edge yeterli degilse None donmeli."""
         rm = make_risk_manager(NORMAL_RISK)
         old_bet = make_mock_bet(expected_value=0.20, unrealized_pnl=-20.0, stake=100.0)
         new_signal = make_mock_signal(edge=0.25)  # 1.25x < 2.0
@@ -357,7 +357,7 @@ class TestRebalance:
         assert result is None
 
     def test_rebalance_profitable_position_kept(self):
-        """Eski pozisyon kardaysa rebalance yapılmaz."""
+        """Eski pozisyon kardaysa rebalance yapilmaz."""
         rm = make_risk_manager(NORMAL_RISK)
         old_bet = make_mock_bet(expected_value=0.10, unrealized_pnl=10.0, stake=100.0)
         new_signal = make_mock_signal(edge=0.40)
@@ -365,7 +365,7 @@ class TestRebalance:
         assert result is None
 
     def test_rebalance_no_active_bets(self):
-        """Aktif bahis yoksa None dönmeli."""
+        """Aktif bahis yoksa None donmeli."""
         rm = make_risk_manager(NORMAL_RISK)
         new_signal = make_mock_signal(edge=0.40)
         result = rm.check_rebalance(new_signal, [])
@@ -379,21 +379,21 @@ class TestModelReversal:
     """RiskManager.check_model_reversal tests."""
 
     def test_model_reversal_strong_reversal(self):
-        """Model prob %20+ ters yönde değiştiyse ve zarardaysak çık."""
+        """Model prob %20+ ters yonde degistiyse ve zarardaysak cik."""
         rm = make_risk_manager()
         bet = make_mock_bet(fair_value=0.80, unrealized_pnl=-15.0, stake=100.0)
         analysis = MagicMock()
-        analysis.estimated_probability = 0.40  # 0.80 -> 0.40 = -0.50 değişim
+        analysis.estimated_probability = 0.40  # 0.80 -> 0.40 = -0.50 degisim
         should_exit, reason = rm.check_model_reversal(bet, analysis)
         assert should_exit is True
         assert "model_reversal" in reason.lower()
 
     def test_model_reversal_no_reversal(self):
-        """Model prob değişmediyse çıkılmaz."""
+        """Model prob degismediyse cikilmaz."""
         rm = make_risk_manager()
         bet = make_mock_bet(fair_value=0.55, unrealized_pnl=-5.0, stake=100.0)
         analysis = MagicMock()
-        analysis.estimated_probability = 0.53  # Küçük değişim
+        analysis.estimated_probability = 0.53  # Kucuk degisim
         should_exit, reason = rm.check_model_reversal(bet, analysis)
         assert should_exit is False
 
@@ -405,7 +405,7 @@ class TestModelReversal:
         assert should_exit is False
 
     def test_model_reversal_strong_reversal_any_pnl(self):
-        """Model prob %30+ ters yönde değiştiyse karda da çık."""
+        """Model prob %30+ ters yonde degistiyse karda da cik."""
         rm = make_risk_manager()
         bet = make_mock_bet(fair_value=0.80, unrealized_pnl=10.0, stake=100.0)
         analysis = MagicMock()
@@ -421,7 +421,7 @@ class TestPositionSizing:
     """RiskManager.calculate_position_size_with_risk tests."""
 
     def test_position_size_respects_max_bet_pct(self):
-        """Max bet %3'ü aşmamalı."""
+        """Max bet %3'u asmamali."""
         rm = make_risk_manager()
         signal = _SignalObj(model_prob=0.90, entry_price=0.50)
         size = rm.calculate_position_size_with_risk(signal, 10000)
@@ -430,15 +430,15 @@ class TestPositionSizing:
         assert size <= 5000  # must be positive and reasonable
 
     def test_position_size_minimum_bet(self):
-        """Minimum bet boyutundan küçük olmamalı."""
+        """Minimum bet boyutundan kucuk olmamali."""
         rm = make_risk_manager()
-        # Çok düşük Kelly için
+        # Cok dusuk Kelly icin
         signal = _SignalObj(model_prob=0.51, entry_price=0.49)
         size = rm.calculate_position_size_with_risk(signal, 1000)
         assert size >= 1.0  # MIN_BET_SIZE
 
     def test_position_size_sifir_prob(self):
-        """Model prob 0'sa 0 dönmeli."""
+        """Model prob 0'sa 0 donmeli."""
         rm = make_risk_manager()
         signal = _SignalObj(model_prob=0.0, entry_price=0.50)
         size = rm.calculate_position_size_with_risk(signal, 1000)
@@ -452,28 +452,28 @@ class TestEdgeCases:
     """RiskManager safety and edge case tests."""
 
     def test_check_early_exit_corrupted_bet(self):
-        """Eksik alanları olan bet'te crash olmamalı."""
+        """Eksik alanlari olan bet'te crash olmamali."""
         rm = make_risk_manager()
         bet = make_mock_bet(entry_price=0.0, fair_value=None, shares=None)
         should_exit, reason = rm.check_early_exit(bet, 0.50, None)
-        # should_exit False olabilir ama crash olmamalı
+        # should_exit False olabilir ama crash olmamali
         assert isinstance(should_exit, bool)
         assert isinstance(reason, str)
 
     def test_stop_loss_configurable_threshold(self):
-        """Farklı stop_loss_pct değerleriyle test."""
-        # Varsayılan %25
+        """Farkli stop_loss_pct degerleriyle test."""
+        # Varsayilan %25
         rm = make_risk_manager()
         bet = make_mock_bet(entry_price=0.50)
         should_exit, _ = rm.check_stop_loss(bet, 0.40)  # %20 zarar
-        assert should_exit is False  # %25'i geçmedi
+        assert should_exit is False  # %25'i gecmedi
 
     def test_take_profit_configurable_threshold(self):
-        """Farklı take_profit_pct değerleriyle test."""
+        """Farkli take_profit_pct degerleriyle test."""
         rm = make_risk_manager()
         bet = make_mock_bet(entry_price=0.50)
         should_exit, _ = rm.check_take_profit(bet, 0.95)  # %90 kar
-        assert should_exit is False  # %100'ü geçmedi
+        assert should_exit is False  # %100'u gecmedi
 
     def test_rebalance_with_dict_signal(self):
         """Signal dict olarak da gelebilmeli."""
@@ -499,7 +499,7 @@ class TestEdgeCases:
         assert should_exit is False
 
     def test_model_reversal_same_probability(self):
-        """Prob aynıysa çıkılmaz."""
+        """Prob ayniysa cikilmaz."""
         rm = make_risk_manager()
         bet = make_mock_bet(fair_value=0.55)
         analysis = MagicMock()
@@ -508,7 +508,7 @@ class TestEdgeCases:
         assert should_exit is False
 
     def test_early_exit_no_crash_on_none_values(self):
-        """None değerlerde crash olmamalı."""
+        """None degerlerde crash olmamali."""
         rm = make_risk_manager()
         bet = make_mock_bet(entry_price=None, price=None, shares=None)
         should_exit, reason = rm.check_early_exit(bet, 0.50, None)

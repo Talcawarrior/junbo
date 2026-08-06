@@ -36,10 +36,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-UTC = timezone.utc
-
 import pandas as pd
 import requests
+
+UTC = timezone.utc
 
 logger = logging.getLogger("WEATHER_ENSEMBLE")
 
@@ -52,9 +52,7 @@ OPEN_METEO_ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 # Historical Forecast API: returns per-model 0-day-ahead (analysis) forecasts
 # for past dates. Free, no API key. Docs:
 # https://open-meteo.com/en/docs/historical-forecast-api
-OPEN_METEO_HISTORICAL_FORECAST_URL = (
-    "https://historical-forecast-api.open-meteo.com/v1/forecast"
-)
+OPEN_METEO_HISTORICAL_FORECAST_URL = "https://historical-forecast-api.open-meteo.com/v1/forecast"
 
 DEFAULT_MODELS = (
     "gfs_seamless",
@@ -138,18 +136,14 @@ def fetch_forecast_ensemble(
         resp.raise_for_status()
         payload = resp.json()
     except Exception as exc:
-        logger.warning(
-            "Ensemble fetch failed for (%s, %s): %s", latitude, longitude, exc
-        )
+        logger.warning("Ensemble fetch failed for (%s, %s): %s", latitude, longitude, exc)
         return None
 
     # Open-Meteo returns a SINGLE `daily` dict. Per-model values are encoded
     # as "<variable>_<model>" keys (e.g. temperature_2m_max_gfs_seamless).
     daily = payload.get("daily", {})
     if not isinstance(daily, dict) or "time" not in daily:
-        logger.warning(
-            "Empty daily block from Open-Meteo for (%s, %s)", latitude, longitude
-        )
+        logger.warning("Empty daily block from Open-Meteo for (%s, %s)", latitude, longitude)
         return None
 
     times = daily["time"]
@@ -239,9 +233,7 @@ def fetch_archive_actuals(
         resp.raise_for_status()
         payload = resp.json()
     except Exception as exc:
-        logger.warning(
-            "Archive fetch failed for (%s, %s): %s", latitude, longitude, exc
-        )
+        logger.warning("Archive fetch failed for (%s, %s): %s", latitude, longitude, exc)
         return pd.DataFrame()
 
     daily = payload.get("daily", {})
@@ -339,9 +331,7 @@ def fetch_historical_forecast_ensemble(
     }
 
     try:
-        resp = requests.get(
-            OPEN_METEO_HISTORICAL_FORECAST_URL, params=params, timeout=timeout
-        )
+        resp = requests.get(OPEN_METEO_HISTORICAL_FORECAST_URL, params=params, timeout=timeout)
         resp.raise_for_status()
         payload = resp.json()
     except Exception as exc:
@@ -567,16 +557,10 @@ def brier_score_per_model(
         return {}
 
     # Pivot forecasts to wide
-    var_col = (
-        forecasts_df["variable"].iloc[0]
-        if "variable" in forecasts_df.columns
-        else "temperature_2m_max"
-    )
+    var_col = forecasts_df["variable"].iloc[0] if "variable" in forecasts_df.columns else "temperature_2m_max"
     fc_wide = (
         forecasts_df[forecasts_df["variable"] == var_col]
-        .pivot_table(
-            index=["city", "date"], columns="model", values="value", aggfunc="first"
-        )
+        .pivot_table(index=["city", "date"], columns="model", values="value", aggfunc="first")
         .reset_index()
     )
 
@@ -598,9 +582,7 @@ def brier_score_per_model(
     # (this is a simplified scorer; full calibration uses normal CDF in
     # utils/probability.py — here we just measure raw model spread)
     scores: dict[str, float] = {}
-    model_cols = [
-        c for c in merged.columns if c not in {"city", "date", "actual", "outcome"}
-    ]
+    model_cols = [c for c in merged.columns if c not in {"city", "date", "actual", "outcome"}]
     for m in model_cols:
         series = merged[m]
         if series.isna().all():
@@ -620,9 +602,7 @@ def brier_score_per_model(
 # ---------------------------------------------------------------------------
 
 
-def _normalize_weights(
-    weights: dict[str, float], models: Iterable[str]
-) -> dict[str, float]:
+def _normalize_weights(weights: dict[str, float], models: Iterable[str]) -> dict[str, float]:
     """Ensure weights are non-negative and sum to 1, covering all models."""
     out = {m: max(0.0, weights.get(m, 0.0)) for m in models}
     total = sum(out.values())
@@ -632,9 +612,7 @@ def _normalize_weights(
     return {m: v / total for m, v in out.items()}
 
 
-def _weighted_stats(
-    df: pd.DataFrame, weights: dict[str, float]
-) -> tuple[dict[str, float], dict[str, float]]:
+def _weighted_stats(df: pd.DataFrame, weights: dict[str, float]) -> tuple[dict[str, float], dict[str, float]]:
     """Compute weighted mean and std per variable across models."""
     wmean: dict[str, float] = {}
     wstd: dict[str, float] = {}
@@ -658,9 +636,7 @@ def _weighted_stats(
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s  %(name)-22s  %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(name)-22s  %(message)s")
 
     # Quick smoke test: 1 city, 7 days backfill
     print("\n=== Live ensemble forecast (Miami) ===")
@@ -692,10 +668,6 @@ if __name__ == "__main__":
     )
     if not hist.empty:
         print(f"rows={len(hist)} models={sorted(hist['model'].unique())}")
-        print(
-            hist.pivot_table(
-                index="date", columns="model", values="value", aggfunc="first"
-            ).head(15)
-        )
+        print(hist.pivot_table(index="date", columns="model", values="value", aggfunc="first").head(15))
     else:
         print("(empty)")

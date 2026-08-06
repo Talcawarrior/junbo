@@ -1,9 +1,9 @@
-"""Property-Based Testing - Hypothesis ile rastgele üretilen girdilerle invariant testleri.
+"""Property-Based Testing - Hypothesis ile rastgele uretilen girdilerle invariant testleri.
 
-Finansal/olasılıksal hesaplamalarda sabit örnekler yerine binlerce rastgele
-girdiyle invariant'ları test et. Bu, edge case'leri yakalamak için en iyi yoldur.
+Finansal/olasiliksal hesaplamalarda sabit ornekler yerine binlerce rastgele
+girdiyle invariant'lari test et. Bu, edge case'leri yakalamak icin en iyi yoldur.
 
-Kullanım:
+Kullanim:
     pip install hypothesis
     pytest tests/test_property_based.py -v
 """
@@ -15,12 +15,12 @@ from hypothesis.stateful import rule, invariant, initialize, RuleBasedStateMachi
 
 
 # ============================================================================
-# 1. FEE FORMÜLÜ PROPERTIES
+# 1. FEE FORMULU PROPERTIES
 # ============================================================================
 
 
 class TestFeeFormulas:
-    """Fee formülü invariant'ları."""
+    """Fee formulu invariant'lari."""
 
     @given(
         shares=st.floats(min_value=0.01, max_value=10000),
@@ -28,7 +28,7 @@ class TestFeeFormulas:
         fee_rate=st.floats(min_value=0.0, max_value=0.20),
     )
     def test_fee_never_negative(self, shares, price, fee_rate):
-        """Fee hiçbir zaman negatif olmamalı."""
+        """Fee hicbir zaman negatif olmamali."""
         from utils.formulas import polymarket_fee
 
         fee = polymarket_fee(shares, price, fee_rate)
@@ -40,7 +40,7 @@ class TestFeeFormulas:
         fee_rate=st.floats(min_value=0.0, max_value=0.20),
     )
     def test_fee_bounded_by_stake(self, shares, price, fee_rate):
-        """Fee her zaman pay kadar küçük olmalı."""
+        """Fee her zaman pay kadar kucuk olmali."""
         from utils.formulas import polymarket_fee
 
         fee = polymarket_fee(shares, price, fee_rate)
@@ -54,15 +54,15 @@ class TestFeeFormulas:
         fee_rate=st.floats(min_value=0.01, max_value=0.20),
     )
     def test_fee_symmetric_at_05(self, shares, price, fee_rate):
-        """Fee p=0.5'te simetrik olmalı."""
+        """Fee p=0.5'te simetrik olmali."""
         from utils.formulas import polymarket_fee
 
-        # p=0.5 ve p=0.5 civarında fee aynı olmalı
+        # p=0.5 ve p=0.5 civarinda fee ayni olmali
         fee_at_05 = polymarket_fee(shares, 0.5, fee_rate)
         fee_at_049 = polymarket_fee(shares, 0.49, fee_rate)
         fee_at_051 = polymarket_fee(shares, 0.51, fee_rate)
 
-        # 0.49 ve 0.51 fee'leri birbirine yakın olmalı
+        # 0.49 ve 0.51 fee'leri birbirine yakin olmali
         assert abs(fee_at_049 - fee_at_051) < fee_at_05 * 0.1
 
 
@@ -72,14 +72,14 @@ class TestFeeFormulas:
 
 
 class TestKellyCriterion:
-    """Kelly criterion invariant'ları."""
+    """Kelly criterion invariant'lari."""
 
     @given(
         prob=st.floats(min_value=0.01, max_value=0.99),
         price=st.floats(min_value=0.01, max_value=0.99),
     )
     def test_kelly_in_01_range(self, prob, price):
-        """Kelly fraction 0-1 arasında olmalı."""
+        """Kelly fraction 0-1 arasinda olmali."""
         from utils.kelly import kelly_fraction
 
         kelly = kelly_fraction(prob, price)
@@ -91,7 +91,7 @@ class TestKellyCriterion:
         price=st.floats(min_value=0.01, max_value=0.99),
     )
     def test_kelly_positive_edge(self, prob, price):
-        """Pozitif edge'de Kelly pozitif olmalı."""
+        """Pozitif edge'de Kelly pozitif olmali."""
         from utils.kelly import kelly_fraction
 
         assume(prob > price)  # Pozitif edge
@@ -105,7 +105,7 @@ class TestKellyCriterion:
         price=st.floats(min_value=0.51, max_value=0.99),
     )
     def test_kelly_negative_edge_zero(self, prob, price):
-        """Negatif edge'de Kelly sıfır olmalı."""
+        """Negatif edge'de Kelly sifir olmali."""
         from utils.kelly import kelly_fraction
 
         assume(prob < price)  # Negatif edge
@@ -119,7 +119,7 @@ class TestKellyCriterion:
         price=st.floats(min_value=0.01, max_value=0.49),
     )
     def test_kelly_with_fraction_multiplier(self, prob, price):
-        """Kelly fraction multiplier doğru çalışmalı."""
+        """Kelly fraction multiplier dogru calismali."""
         from utils.kelly import kelly_bet_amount
 
         kelly_full = kelly_bet_amount(1000, prob, price, fraction=1.0)
@@ -136,7 +136,7 @@ class TestKellyCriterion:
 
 
 class TestProbabilityEstimation:
-    """Olasılık tahmini invariant'ları."""
+    """Olasilik tahmini invariant'lari."""
 
     @settings(suppress_health_check=[HealthCheck.too_slow], deadline=None)
     @given(
@@ -145,7 +145,7 @@ class TestProbabilityEstimation:
         threshold=st.floats(min_value=0.0, max_value=100.0),
     )
     def test_probability_in_01_range(self, mean, std, threshold):
-        """Olasılık her zaman 0-1 arasında olmalı."""
+        """Olasilik her zaman 0-1 arasinda olmali."""
         from utils.probability import estimate_probability
 
         prob = estimate_probability(
@@ -164,13 +164,13 @@ class TestProbabilityEstimation:
         threshold=st.floats(min_value=0.0, max_value=100.0),
     )
     def test_high_market_higher_threshold_lower_prob(self, mean, std, threshold):
-        """HIGH market'ta daha yüksek threshold = daha düşük olasılık."""
+        """HIGH market'ta daha yuksek threshold = daha dusuk olasilik."""
         from utils.probability import estimate_probability
 
         prob_low_threshold = estimate_probability(mean, std, threshold - 5, 1, "HIGH")
         prob_high_threshold = estimate_probability(mean, std, threshold + 5, 1, "HIGH")
 
-        # Daha yüksek threshold = daha düşük olasılık
+        # Daha yuksek threshold = daha dusuk olasilik
         assert prob_low_threshold >= prob_high_threshold
 
     @given(
@@ -179,13 +179,13 @@ class TestProbabilityEstimation:
         threshold=st.floats(min_value=0.0, max_value=100.0),
     )
     def test_low_market_inverted(self, mean, std, threshold):
-        """LOW market'ta threshold ilişkisi ters olmalı."""
+        """LOW market'ta threshold iliskisi ters olmali."""
         from utils.probability import estimate_probability
 
         prob_low_threshold = estimate_probability(mean, std, threshold - 5, 1, "LOW")
         prob_high_threshold = estimate_probability(mean, std, threshold + 5, 1, "LOW")
 
-        # LOW market'ta daha yüksek threshold = daha yüksek olasılık
+        # LOW market'ta daha yuksek threshold = daha yuksek olasilik
         assert prob_high_threshold >= prob_low_threshold
 
 
@@ -195,7 +195,7 @@ class TestProbabilityEstimation:
 
 
 class TestPortfolioFormulas:
-    """Portfolio formülü invariant'ları."""
+    """Portfolio formulu invariant'lari."""
 
     @given(
         initial=st.floats(min_value=0.0, max_value=100000),
@@ -216,7 +216,7 @@ class TestPortfolioFormulas:
         realized_before_today=st.floats(min_value=-50000, max_value=50000),
     )
     def test_max_exposure_cap_positive(self, initial, realized_before_today):
-        """Max exposure cap her zaman pozitif olmalı."""
+        """Max exposure cap her zaman pozitif olmali."""
         from utils.formulas import max_exposure_cap
 
         total_exposure_pct = 0.25
@@ -232,7 +232,7 @@ class TestPortfolioFormulas:
         entry_price=st.floats(min_value=0.01, max_value=0.99),
     )
     def test_bet_shares_positive(self, stake, entry_price):
-        """Bet shares her zaman pozitif olmalı."""
+        """Bet shares her zaman pozitif olmali."""
         from utils.formulas import bet_shares
 
         shares = bet_shares(stake, entry_price)
@@ -246,7 +246,7 @@ class TestPortfolioFormulas:
 
 
 class TestEdgeCalculation:
-    """Edge hesaplama invariant'ları."""
+    """Edge hesaplama invariant'lari."""
 
     @given(
         prob=st.floats(min_value=0.01, max_value=0.99),
@@ -269,11 +269,11 @@ class TestEdgeCalculation:
         price=st.floats(min_value=0.01, max_value=0.49),
     )
     def test_positive_edge_betting(self, prob, price):
-        """Pozitif edge'de bahis yapılmalı."""
+        """Pozitif edge'de bahis yapilmali."""
         edge = prob - price
 
         if edge > 0:
-            # Bahis yapılmalı
+            # Bahis yapilmali
             assert edge > 0
 
     @given(
@@ -281,11 +281,11 @@ class TestEdgeCalculation:
         price=st.floats(min_value=0.51, max_value=0.99),
     )
     def test_negative_edge_no_betting(self, prob, price):
-        """Negatif edge'de bahis yapılmamalı."""
+        """Negatif edge'de bahis yapilmamali."""
         edge = prob - price
 
         if edge < 0:
-            # Bahis yapılmamalı
+            # Bahis yapilmamali
             assert edge < 0
 
 
@@ -312,7 +312,7 @@ class PortfolioStateMachine(RuleBasedStateMachine):
         entry_price=st.floats(min_value=0.1, max_value=0.9),
     )
     def place_bet(self, stake, entry_price):
-        """Bahis yerleştir."""
+        """Bahis yerlestir."""
         if stake <= self.portfolio:
             self.portfolio -= stake
             self.bets.append(
@@ -327,17 +327,17 @@ class PortfolioStateMachine(RuleBasedStateMachine):
         won=st.booleans(),
     )
     def settle_bet(self, won):
-        """Bahisi sonlandır."""
+        """Bahisi sonlandir."""
         if self.bets:
             bet = self.bets.pop(0)
             if won:
                 payout = bet["stake"] / bet["entry_price"]
                 self.portfolio += payout
-            # Kaybeden bahiste para kaybedildi (zaten düşüldü)
+            # Kaybeden bahiste para kaybedildi (zaten dusuldu)
 
     @invariant()
     def portfolio_never_negative(self):
-        """Portfolio hiçbir zaman negatif olmamalı."""
+        """Portfolio hicbir zaman negatif olmamali."""
         assert self.portfolio >= 0, f"Negative portfolio: {self.portfolio}"
 
 

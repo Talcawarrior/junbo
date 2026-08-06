@@ -39,7 +39,7 @@ from engine.calculator import Calculator  # noqa: E402
 
 
 def test_analysis_via_metric_map():
-    """METRIC_MAP ile metric eşlemesi doğru çalışıyor mu?"""
+    """METRIC_MAP ile metric eslemesi dogru calisiyor mu?"""
     print("=" * 60)
     print("TEST 1: Metric Mapping via Calculator.analyze_market()")
     print("=" * 60)
@@ -61,9 +61,7 @@ def test_analysis_via_metric_map():
             session.commit()
 
         # Create a target date 2 days in the future
-        target_date = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
-            days=2
-        )
+        target_date = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=2)
         target_date = target_date.replace(hour=23, minute=59, second=59)
 
         # Step 1: Create market with metric="temperature_max" (Faz 1 format)
@@ -113,9 +111,7 @@ def test_analysis_via_metric_map():
             )
             session.add(wf)
         session.commit()
-        print(
-            f"  Forecasts created: {len(forecasts_data)} rows, metric='temperature_max'"
-        )
+        print(f"  Forecasts created: {len(forecasts_data)} rows, metric='temperature_max'")
 
         # Step 3: Run Calculator.analyze_market()
         calc = Calculator()
@@ -129,14 +125,10 @@ def test_analysis_via_metric_map():
         # Restore
         settings.bot_config.strategy.min_edge = orig_min_edge
 
-        assert analysis_instance is not None, (
-            "❌ Analysis is NULL! METRIC_MAP not working."
-        )
+        assert analysis_instance is not None, "❌ Analysis is NULL! METRIC_MAP not working."
 
         # Re-query from DB to avoid DetachedInstanceError
-        analysis = (
-            session.query(Analysis).filter(Analysis.market_id == "test-e2e-001").first()
-        )
+        analysis = session.query(Analysis).filter(Analysis.market_id == "test-e2e-001").first()
 
         assert analysis is not None, "❌ Analysis not found in DB!"
         print(f"  Analysis created: id={analysis.id}")
@@ -151,12 +143,8 @@ def test_analysis_via_metric_map():
         assert analysis.num_sources == len(forecasts_data), (
             f"❌ Expected {len(forecasts_data)} sources, got {analysis.num_sources}"
         )
-        assert analysis.edge > 0, (
-            "❌ edge should be positive (forecasts > threshold 30C)"
-        )
-        assert analysis.should_bet is True, (
-            f"❌ should_bet={analysis.should_bet} — METRIC_MAP may not be working"
-        )
+        assert analysis.edge > 0, "❌ edge should be positive (forecasts > threshold 30C)"
+        assert analysis.should_bet is True, f"❌ should_bet={analysis.should_bet} — METRIC_MAP may not be working"
         assert analysis.recommended_amount > 0, "❌ recommended_amount is 0!"
 
         print("\n  ✅ TEST 1 PASSED: METRIC_MAP works correctly")
@@ -186,9 +174,7 @@ def test_analysis_via_metric_map():
         print(f"    price={bet.price:.4f}")
         print(f"    shares={bet.shares:.4f}")
 
-        assert bet.status == "placed", (
-            f"❌ Bet status is '{bet.status}', expected 'placed'"
-        )
+        assert bet.status == "placed", f"❌ Bet status is '{bet.status}', expected 'placed'"
         assert bet.amount > 0, "❌ Bet amount is 0!"
         assert bet.price > 0, "❌ Bet price is 0!"
 
@@ -217,12 +203,8 @@ def test_scheduler_uses_calculator():
     import jobs.scheduler as scheduler
 
     src = inspect.getsource(scheduler.run_analyze)
-    assert "from engine.calculator import Calculator" in src, (
-        "❌ scheduler.run_analyze does not import Calculator!"
-    )
-    assert "calc.analyze_market" in src, (
-        "❌ scheduler.run_analyze does not call Calculator.analyze_market!"
-    )
+    assert "from engine.calculator import Calculator" in src, "❌ scheduler.run_analyze does not import Calculator!"
+    assert "calc.analyze_market" in src, "❌ scheduler.run_analyze does not call Calculator.analyze_market!"
     print("✅ TEST 4 PASSED: scheduler.run_analyze uses Calculator.analyze_market()")
 
 

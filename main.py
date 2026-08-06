@@ -124,7 +124,7 @@ def run_cli():
     parser.add_argument("command")
     args = parser.parse_args()
 
-    # Bot başlamadan önce DB backup al
+    # Bot baslamadan once DB backup al
     try:
         from db_backup import create_backup
 
@@ -225,14 +225,14 @@ def run_cli():
         _ensure_port_free(config.PORT, config.HOST)
         uvicorn.run(app, host=config.HOST, port=config.PORT)
     elif args.command == "reset":
-        # Silmeden ÖNCE backup al
+        # Silmeden ONCE backup al
         try:
             from db_backup import create_backup
 
             create_backup("pre_reset_cli")
         except Exception:
             pass
-        # Bets ve portfolio'yu parquet'a arşivle
+        # Bets ve portfolio'yu parquet'a arsivle
         try:
             from database.db_cleanup import archive_bets_and_portfolio
 

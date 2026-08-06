@@ -447,9 +447,7 @@ class BetPlacer:
 
     def _count_today_rotations(self, session) -> int:
         """Bugun yapilan rotasyon sayisini say (close_reason='rotation')."""
-        today_start = datetime.now(timezone.utc).replace(tzinfo=None).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        today_start = datetime.now(timezone.utc).replace(tzinfo=None).replace(hour=0, minute=0, second=0, microsecond=0)
         count = (
             session.query(func.count(Bet.id))
             .filter(
@@ -489,12 +487,7 @@ class BetPlacer:
         """
         min_edge = float(getattr(bot_config.strategy, "min_edge", 0.04) or 0.04)
 
-        analysis = (
-            session.query(Analysis)
-            .filter(Analysis.market_id == market.id)
-            .order_by(Analysis.id.desc())
-            .first()
-        )
+        analysis = session.query(Analysis).filter(Analysis.market_id == market.id).order_by(Analysis.id.desc()).first()
         if not analysis:
             logger.warning(
                 "Rotation edge check: no analysis for market %s, skipping rotation",
@@ -518,7 +511,7 @@ class BetPlacer:
         """Tum acik Polymarket weather marketleri icin bet ac.
         Analiz sonucuna bakilmaz — Polymarket'te hangi derece en yuksek
         fiyatlanmissa ona bet acilir. Smart rotation: ayni grupta daha iyi
-        fiyatlı market bulunursa eski bet kapatilir, yenisi acilir.
+        fiyatli market bulunursa eski bet kapatilir, yenisi acilir.
 
         UZELTI KONTROLLER (rotasyon icin):
         - Gunluk rotasyon siniri (max_daily_rotations)
@@ -556,6 +549,8 @@ class BetPlacer:
                 # Rotasyon yok ama yeni bahis acilabilir (pencere dahilinde)
 
             # 1) Tum acik ve gelecek tarihli marketleri cek
+            # Son 24 saat kurali: sadece 24 saat icinde settle olacak
+            # marketlere bet acilir. Uzun vade (2+ gun) betler acilmaz.
             open_markets = (
                 session.query(WeatherMarket)
                 .filter(
@@ -564,6 +559,7 @@ class BetPlacer:
                     WeatherMarket.yes_price.isnot(None),
                     WeatherMarket.yes_price > 0,
                     WeatherMarket.target_date > now + timedelta(hours=8),
+                    WeatherMarket.target_date <= now + timedelta(hours=24),
                     WeatherMarket.city != "Unknown",
                 )
                 .all()
@@ -626,6 +622,7 @@ class BetPlacer:
                         daily_rotation_limit,
                         rotations_today,
                     )
+            can_rotate = rotations_today < daily_rotation_limit
             for city, td, metric, best_mkt, best_price in best_markets:
                 key = (city, td, metric)
                 group_bets = active_by_group.get(key, [])
@@ -673,7 +670,9 @@ class BetPlacer:
                         for old_bet in group_bets:
                             old_mkt = session.query(WeatherMarket).filter_by(id=old_bet.market_id).first()
                             old_price = float(old_mkt.yes_price or 0) if old_mkt else 0
-                            logger.info("Closing bet#%s %s %s (price=%.4f)", old_bet.id, city, str(td.date()), old_price)
+                            logger.info(
+                                "Closing bet#%s %s %s (price=%.4f)", old_bet.id, city, str(td.date()), old_price
+                            )
                             self.close_bet_for_rotation(old_bet, old_price, session)
                             rotated += 1
                     else:

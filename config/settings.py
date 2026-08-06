@@ -145,7 +145,7 @@ class StrategyConfig:
     gas_cost_usd: float = 0.10  # Polygon gas per round-trip
 
     # ── Flat bet override & Daily loss limit (synced from Config) ─────────
-    flat_bet_usd: float = 10.0  # Fixed $10 per bet
+    flat_bet_usd: float = 2.0  # Fixed $2 per bet
     daily_loss_limit: float = 0.0  # Disabled: no daily loss circuit breaker
 
     # ── Tie betting: ayni en yuksek fiyata sahip marketlere ayni anda ac ─
@@ -184,7 +184,7 @@ class RiskConfig:
     trailing_stop_pct: float = 999.0  # %999 trailing drop = asla tetiklenmez
 
     # Time-based exits
-    time_decay_hours: int = 0  # 0 saat = time decay devre dışı
+    time_decay_hours: int = 0  # 0 saat = time decay devre disi
     time_decay_threshold: float = -999.0  # %999 zararda kapat = asla tetiklenmez
 
     # Rebalancing (disabled via extreme ratio)
@@ -418,7 +418,7 @@ class BotConfig:
     fee_exponent: float = 0.5  # Weather category: 0.5 (flatter curve)
 
     # ── Intervals ──────────────────────────────────────────────────
-    scan_interval: int = 900  # 15 dakika (Open-Meteo rate limit için)
+    scan_interval: int = 900  # 15 dakika (Open-Meteo rate limit icin)
     settlement_interval: int = 120
     # Midnight scan: after 00:00, scan every N seconds for the first
     # MIDNIGHT_SCAN_WINDOW minutes to catch 2-day-ahead markets early
@@ -468,9 +468,9 @@ class BotConfig:
         # ── Betting windows initialization ──────────────────────────
         if self.strategy.betting_windows is None:
             self.strategy.betting_windows = [
-                (3, 6),    # Pencere 1: 03:00-06:00 UTC (GFS+ECMWF taze veri)
+                (3, 6),  # Pencere 1: 03:00-06:00 UTC (GFS+ECMWF taze veri)
                 (12, 15),  # Pencere 2: 12:00-15:00 UTC (2-gun pazarlari oturdu)
-                (19, 22),  # Pencere 3: 19:00-22:00 UTC (akşam runu + likidite)
+                (19, 22),  # Pencere 3: 19:00-22:00 UTC (aksam runu + likidite)
             ]
 
         # ── Override from .env (single source: .env > dataclass defaults) ──

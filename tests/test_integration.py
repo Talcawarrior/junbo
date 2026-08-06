@@ -1,4 +1,4 @@
-"""Integration testler - Bot loop'ları, veri pipeline, API endpoints."""
+"""Integration testler - Bot loop'lari, veri pipeline, API endpoints."""
 
 import pytest
 import asyncio
@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch, AsyncMock
 
 
 class TestBotStartup:
-    """Bot başlatma ve çalışma testleri."""
+    """Bot baslatma ve calisma testleri."""
 
     def test_bot_lifespan_startup(self):
         """Bot lifespan startup testi."""
@@ -25,7 +25,7 @@ class TestBotStartup:
             assert p is not None
 
     def test_stop_bot(self):
-        """Bot state nesnesi çalışıyor mu."""
+        """Bot state nesnesi calisiyor mu."""
         from api import state
 
         assert hasattr(state, "is_running")
@@ -56,7 +56,7 @@ class TestDataPipeline:
         pytest.skip("Requires full bot initialization with DB + weather data")
 
     def test_place_bet(self):
-        """Bet yerleştirme — skip (bet placement in executor now)."""
+        """Bet yerlestirme — skip (bet placement in executor now)."""
         pytest.skip("Bet placement moved to executor module")
 
 
@@ -153,7 +153,7 @@ class TestUIComponents:
         assert win_rate == pytest.approx(55.0, abs=0.1)
 
     def test_open_position_display(self):
-        """Açık pozisyon PnL hesaplama."""
+        """Acik pozisyon PnL hesaplama."""
         entry = 0.50
         current = 0.52
         shares = 6.0
@@ -162,7 +162,7 @@ class TestUIComponents:
 
 
 class TestRiskManagement:
-    """Risk yönetimi testleri."""
+    """Risk yonetimi testleri."""
 
     def test_exposure_cap_validation(self):
         """Exposure cap validasyonu."""

@@ -44,14 +44,14 @@ OPEN_BET_STATUSES = ("active", "open", "placed", "pending")
 
 
 class WeatherMarket(Base):
-    """Polymarket'ten çekilen açık hava betleri."""
+    """Polymarket'ten cekilen acik hava betleri."""
 
     __tablename__ = "weather_markets"
 
     id = Column(String, primary_key=True)
     question = Column(String, nullable=False)
 
-    # Parse edilmiş bilgiler
+    # Parse edilmis bilgiler
     city = Column(String)  # "New York"
     city_code = Column(String, default="")  # ICAO/city code
     metric = Column(String)  # "temperature_max"
@@ -64,7 +64,7 @@ class WeatherMarket(Base):
     longitude = Column(Float)  # Longitude
     market_type = Column(String, nullable=True)  # "HIGH", "LOW", or "RANGE"
 
-    # Polymarket fiyatları
+    # Polymarket fiyatlari
     yes_price = Column(Float)  # 0.35
     no_price = Column(Float)  # 0.65
     volume = Column(Float)  # $50,000
@@ -84,7 +84,7 @@ class WeatherMarket(Base):
 
 
 class WeatherForecast(Base):
-    """Meteoroloji API'lerinden çekilen tahminler."""
+    """Meteoroloji API'lerinden cekilen tahminler."""
 
     __tablename__ = "weather_forecasts"
 
@@ -94,7 +94,7 @@ class WeatherForecast(Base):
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    market_id = Column(String)  # Hangi market için
+    market_id = Column(String)  # Hangi market icin
 
     # Konum
     city = Column(String)
@@ -105,7 +105,7 @@ class WeatherForecast(Base):
     target_date = Column(DateTime)
     metric = Column(String)  # "temperature_max"
 
-    # Farklı kaynaklardan gelen değerler
+    # Farkli kaynaklardan gelen degerler
     source = Column(String)  # "openmeteo", "weatherapi", "accuweather"
     predicted_value = Column(Float)  # 92.5
     confidence = Column(Float)  # Varsa
@@ -116,7 +116,7 @@ class WeatherForecast(Base):
 
 
 class Analysis(Base):
-    """Analiz sonuçları."""
+    """Analiz sonuclari."""
 
     __tablename__ = "analyses"
 
@@ -125,25 +125,25 @@ class Analysis(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     market_id = Column(String)
 
-    # Hesaplanan değerler
-    estimated_probability = Column(Float)  # 0.72 (gerçek olasılık tahmini)
-    market_implied_prob = Column(Float)  # 0.35 (Polymarket'in fiyatı)
+    # Hesaplanan degerler
+    estimated_probability = Column(Float)  # 0.72 (gercek olasilik tahmini)
+    market_implied_prob = Column(Float)  # 0.35 (Polymarket'in fiyati)
     edge = Column(Float)  # 0.37 (fark) — now net edge after slippage+fee
     raw_edge = Column(Float, nullable=True)  # pre-cost raw edge
     slippage_pct = Column(Float, nullable=True)  # estimated slippage at fill
 
-    # Kaynak detayları
+    # Kaynak detaylari
     avg_forecast_value = Column(Float)  # Ortalama tahmin: 92.5°F
     std_forecast_value = Column(Float)  # Standart sapma
-    num_sources = Column(Integer)  # Kaç kaynakta veri var
+    num_sources = Column(Integer)  # Kac kaynakta veri var
 
     # Karar
     recommended_side = Column(String)  # "YES" veya "NO"
     recommended_amount = Column(Float)  # Kelly criterion sonucu
     confidence_score = Column(Float)  # 0-1
 
-    should_bet = Column(Boolean, default=False)  # Bet açılmalı mı?
-    reason = Column(String)  # Neden evet/hayır
+    should_bet = Column(Boolean, default=False)  # Bet acilmali mi?
+    reason = Column(String)  # Neden evet/hayir
 
     # Per-model predictions.
     # JSON: {"model_temps": {"gfs_seamless": 32.5, ...},
@@ -154,7 +154,7 @@ class Analysis(Base):
 
 
 class Bet(Base):
-    """Açılan betler."""
+    """Acilan betler."""
 
     __tablename__ = "bets"
 
@@ -198,7 +198,7 @@ class Bet(Base):
     placed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     settled_at = Column(DateTime)
     close_reason = Column(String, nullable=True)
-    closed_at = Column(DateTime, nullable=True)  # Early exit zamanı
+    closed_at = Column(DateTime, nullable=True)  # Early exit zamani
 
     # Partial take-profit state (principal recovery without full closure)
     partial_tp_done = Column(Boolean, default=False, nullable=False)

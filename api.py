@@ -34,7 +34,7 @@ from engine.calculator import WeatherEngine
 from engine.strategy import BettingEngine, RiskManager
 from executor.settler import SettlementEngine
 from scrapers.polymarket import PolymarketScraper
-from utils.formulas import max_exposure_cap, portfolio_current_value, roi_pct, win_rate_pct
+from utils.formulas import max_exposure_cap, roi_pct, win_rate_pct
 from utils.price_sanity import safe_ev
 
 setup_logging()
@@ -127,7 +127,7 @@ async def lifespan(_app: FastAPI):
     """Lifespan context manager for startup and shutdown."""
     logger.info("Junbo Weather Prediction Bot starting...")
 
-    # Startup'ta DB backup al (API ile başlatılsa bile)
+    # Startup'ta DB backup al (API ile baslatilsa bile)
     try:
         from db_backup import create_backup
 
@@ -158,7 +158,7 @@ async def lifespan(_app: FastAPI):
         state.tasks.clear()
 
 
-app = FastAPI(title="âš¡ Junbo - Self-Evolving Predictor", lifespan=lifespan)
+app = FastAPI(title="aš¡ Junbo - Self-Evolving Predictor", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -253,7 +253,7 @@ def get_status():
             db.query(func.coalesce(func.sum(Bet.unrealized_pnl), 0.0)).filter(Bet.status.in_(open_statuses)).scalar()
         ) or 0.0
 
-        # 3. Counts â€” win/loss based on PnL (includes closed_early)
+        # 3. Counts a€” win/loss based on PnL (includes closed_early)
         _all_closed = db.query(Bet.realized_pnl).filter(Bet.status.in_(_closed_statuses)).all()
         win_count = sum(1 for b in _all_closed if (b.realized_pnl or 0) > 0)
         loss_count = sum(1 for b in _all_closed if (b.realized_pnl or 0) <= 0)
@@ -293,12 +293,10 @@ def get_status():
         ) or 0.0
 
         initial_capital = float(pf.initial_value) if pf and pf.initial_value else float(state.config.INITIAL_PORTFOLIO)
-        # --- Doğru muhasebe katmanları ---
-        # 1) "Net kapanmış PnL": sadece kapanan betlerin realized_pnl toplamı
+        # --- Dogru muhasebe katmanlari ---
+        # 1) "Net kapanmis PnL": sadece kapanan betlerin realized_pnl toplami
         closed_realized = (
-            db.query(func.coalesce(func.sum(Bet.realized_pnl), 0.0))
-            .filter(Bet.status.in_(_closed_statuses))
-            .scalar()
+            db.query(func.coalesce(func.sum(Bet.realized_pnl), 0.0)).filter(Bet.status.in_(_closed_statuses)).scalar()
         ) or 0.0
         closed_partial_tp = (
             db.query(func.coalesce(func.sum(Bet.realized_pnl), 0.0))
@@ -307,19 +305,15 @@ def get_status():
         ) or 0.0
         realized_pnl_db = round(float(closed_realized) + float(closed_partial_tp), 2)
 
-        # 2) "Kapalı+Acık PnL" ve "Toplam PnL": realized + unrealized
-        equity_cash = float(pf.cash_balance or 0.0) + float(exposure_db) + float(unrealized_pnl_db)
+        # 2) "Kapali+Acik PnL" ve "Toplam PnL": realized + unrealized
+        equity_cash = (float(pf.cash_balance or 0.0) if pf else 0.0) + float(exposure_db) + float(unrealized_pnl_db)
         total_pnl = round(realized_pnl_db + float(unrealized_pnl_db), 2)
 
         # 3) Toplam entry fee (tum betlerden)
-        total_entry_fees = (
-            db.query(func.coalesce(func.sum(Bet.entry_fee), 0.0))
-            .scalar()
-        ) or 0.0
+        total_entry_fees = (db.query(func.coalesce(func.sum(Bet.entry_fee), 0.0)).scalar()) or 0.0
 
         # 4. Available Cash (from Portfolio table)
         pf = db.query(Portfolio).filter(Portfolio.id == 1).first()
-        print(f"DEBUG: pf={pf}, cash_balance={pf.cash_balance if pf else None}")
         available_cash = float(pf.cash_balance) if pf and pf.cash_balance is not None else 0.0
 
         # Total amount staked in settled bets (sum of all bet amounts
@@ -382,7 +376,7 @@ def get_status():
                 if dd > max_drawdown_pct:
                     max_drawdown_pct = round(dd, 2)
 
-        # Scan loop sağlık kontrolü
+        # Scan loop saglik kontrolu
         scan_health = "unknown"
         minutes_since_scan = None
         if state.last_scan:
@@ -395,7 +389,7 @@ def get_status():
             else:
                 scan_health = "dead"
 
-        # Price poller sağlık kontrolü (her 5 dk'da bir çalışır)
+        # Price poller saglik kontrolu (her 5 dk'da bir calisir)
         price_poller_health = "unknown"
         minutes_since_price_update = None
         if state.last_price_update:
@@ -410,9 +404,9 @@ def get_status():
         price_poller_running = bool(state.tasks.get("price_poller") and not state.tasks["price_poller"].done())
 
         # Calculate derived values
-        equity = equity_cash  # Portföy Değeri = cash + açık pozisyon + unrealized
-        available_cash = float(pf.cash_balance or 0.0) if pf else 0.0  # Nakit (Hemen Çekilebilir)
-        exposure = float(exposure_db)  # Açık Pozisyonlar Toplamı
+        equity = equity_cash  # Portfoy Degeri = cash + acik pozisyon + unrealized
+        available_cash = float(pf.cash_balance or 0.0) if pf else 0.0  # Nakit (Hemen Cekilebilir)
+        exposure = float(exposure_db)  # Acik Pozisyonlar Toplami
         max_exposure_allowed = round(
             max_exposure_cap(
                 initial_capital,
@@ -434,31 +428,31 @@ def get_status():
             "last_price_update": state.last_price_update.isoformat() + "Z" if state.last_price_update else None,
             "minutes_since_last_price_update": minutes_since_price_update,
             "portfolio": {
-                # Yeni Türkçe alanlar (yeni format)
-                "sermaye": initial_capital,  # Başlangıç Sermayesi
-                "nakit": available_cash,  # Çekilebilir Nakit (Free Cash)
-                "portfoy_degeri": equity,  # Portföy Değeri = Sermaye + Realized PnL + Unrealized PnL
-                "acik_pozisyonlar": exposure,  # Açık Pozisyonlar Toplamı (Bet Tutarı)
-                "maks_pozisyon": max_exposure_allowed,  # İzin Verilen Maksimum Pozisyon
+                # Yeni Turkce alanlar (yeni format)
+                "sermaye": initial_capital,  # Baslangic Sermayesi
+                "nakit": available_cash,  # Cekilebilir Nakit (Free Cash)
+                "portfoy_degeri": equity,  # Portfoy Degeri = Sermaye + Realized PnL + Unrealized PnL
+                "acik_pozisyonlar": exposure,  # Acik Pozisyonlar Toplami (Bet Tutari)
+                "maks_pozisyon": max_exposure_allowed,  # Izin Verilen Maksimum Pozisyon
                 "kullanilan_pozisyon_pct": round(
                     (exposure / max_exposure_allowed * 100) if max_exposure_allowed > 0 else 0, 1
                 ),
-                # Meta kutuları
+                # Meta kutulari
                 "sermayeden_kalan": round(float(available_cash), 2),
-                # Sermayeden Kalan = Mevcut Nakit Bakiyesi (çekilebilir para)
+                # Sermayeden Kalan = Mevcut Nakit Bakiyesi (cekilebilir para)
                 "acik_betlerin_net_pnl": round(float(exposure) + float(unrealized_pnl_db), 2),
-                # Açık Betlerin Net PnL = Açık Betlerin Toplamı + Gerçekleşmemiş PnL
-                # Açık betlerin toplam maliyeti ile şu anki değerleri arasındaki fark
+                # Acik Betlerin Net PnL = Acik Betlerin Toplami + Gerceklesmemis PnL
+                # Acik betlerin toplam maliyeti ile su anki degerleri arasindaki fark
                 # PnL
                 "gunluk_pnl": daily_pnl,
                 "gunluk_roi_pct": daily_roi,
                 "gerceklenmis_pnl": float(realized_pnl_db),  # Kapanan Betlerden Kar/Zarar
-                "gerceklenmemis_pnl": float(unrealized_pnl_db),  # Açık Pozisyonlardan Kar/Zarar (Kağıt Üzerinde)
-                "toplam_pnl": total_pnl,  # Toplam Kar/Zarar = Gerçekleşmiş + Gerçekleşmemiş
+                "gerceklenmemis_pnl": float(unrealized_pnl_db),  # Acik Pozisyonlardan Kar/Zarar (Kagit Uzerinde)
+                "toplam_pnl": total_pnl,  # Toplam Kar/Zarar = Gerceklesmis + Gerceklesmemis
                 "toplam_roi_pct": total_roi,
-                "toplam_entry_fee": round(float(total_entry_fees), 2),  # Toplam giriş ücreti
-                "gercek_kayip": round(float(initial_capital - equity_cash), 2),  # Gercek toplam kayıp (fee dahil)
-                # Eski İngilizce alanlar (Geriye uyumluluk - Frontend için)
+                "toplam_entry_fee": round(float(total_entry_fees), 2),  # Toplam giris ucreti
+                "gercek_kayip": round(float(initial_capital - equity_cash), 2),  # Gercek toplam kayip (fee dahil)
+                # Eski Ingilizce alanlar (Geriye uyumluluk - Frontend icin)
                 "initial": initial_capital,
                 "current": equity,
                 "free_cash": available_cash,
@@ -469,18 +463,17 @@ def get_status():
                 "total_pnl": total_pnl,
                 "total_roi": total_roi,
                 "total_entry_fee": round(float(total_entry_fees), 2),
-                "gercek_kayip": round(float(initial_capital - equity_cash), 2),
                 "exposure": exposure,
                 "max_exposure": max_exposure_allowed,
                 "capital_basis": round(capital_basis, 2),
                 "previous_day_realized_pnl": round(float(realized_before_today), 2),
-                # Formüller (Şeffaflık için)
+                # Formuller (Seffaflik icin)
                 "formullar": {
-                    "portfoy_degeri": "Sermaye + Gerçekleşmiş PnL + Gerçekleşmemiş PnL",
-                    "nakit": "Sermaye - Açık Pozisyonlar Toplamı + Gerçekleşmiş Kazançlar",
-                    "acik_pozisyonlar": "Tüm Açık Bet Tutarı Toplamı",
-                    "toplam_pnl": "Gerçekleşmiş PnL + Gerçekleşmemiş PnL",
-                    "sermaye_bazı": "Başlangıç sermayesi + bugünden önce kapanan betlerin net PnL'i",
+                    "portfoy_degeri": "Sermaye + Gerceklesmis PnL + Gerceklesmemis PnL",
+                    "nakit": "Sermaye - Acik Pozisyonlar Toplami + Gerceklesmis Kazanclar",
+                    "acik_pozisyonlar": "Tum Acik Bet Tutari Toplami",
+                    "toplam_pnl": "Gerceklesmis PnL + Gerceklesmemis PnL",
+                    "sermaye_bazi": "Baslangic sermayesi + bugunden once kapanan betlerin net PnL'i",
                 },
             },
             "stats": {
@@ -830,7 +823,7 @@ def get_city_bets():
                 city_key = (b.city or "").lower()
                 by_city[city_key].append(b)
 
-        # Aktif bet olan şehirleri listele (city-bets = açık pozisyonlar)
+        # Aktif bet olan sehirleri listele (city-bets = acik pozisyonlar)
         cities_out = []
         for city_key in sorted(by_city):
             city = by_city[city_key][0].city
@@ -944,7 +937,7 @@ def get_history():
         )
         avg_edge = float(avg_edge_q or 0.0)
 
-        # Partial TP: open betlerde partial_tp_done=True olanlar (işlem geçmişinde göster)
+        # Partial TP: open betlerde partial_tp_done=True olanlar (islem gecmisinde goster)
         partial_tp_bets = (
             db.query(Bet)
             .filter(Bet.status.in_(OPEN_BET_STATUSES), Bet.partial_tp_done.is_(True))
@@ -1212,7 +1205,7 @@ def get_slippage():
         for analysis, city, _bet_side, entry_price, bet_pnl, _bet_status in rows:
             # Use Analysis fields for expected values, Bet fields for actuals
             expected_price = round(float(analysis.market_implied_prob or 0), 4)
-            side = analysis.recommended_side or "â€”"
+            side = analysis.recommended_side or "a€”"
             # entry_price: 0 if no bet placed (frontend expects number)
             entry_price_val = round(float(entry_price), 4) if entry_price is not None else 0.0
             # result: PENDING if no bet, WIN/LOSS if bet settled
@@ -1223,7 +1216,7 @@ def get_slippage():
             entries.append(
                 {
                     "id": str(analysis.id),
-                    "city": city or "â€”",
+                    "city": city or "a€”",
                     "side": side,
                     "expected_price": expected_price,
                     "entry_price": entry_price_val,
@@ -1303,7 +1296,7 @@ async def stop_bot(_key: str = Depends(verify_api_key)):
 @app.post("/api/reset")
 async def reset_bot(_key: str = Depends(verify_api_key)):
     """Reset the bot state and clear in-flight DB rows WITHOUT auto-restart."""
-    # Silmeden ÖNCE backup al — asla veri kaybı olmasın
+    # Silmeden ONCE backup al — asla veri kaybi olmasin
     try:
         from db_backup import create_backup
 
@@ -1311,7 +1304,7 @@ async def reset_bot(_key: str = Depends(verify_api_key)):
     except Exception as e:
         logger.warning("Pre-reset backup failed: %s", e)
 
-    # Bets ve portfolio'yu parquet'a arşivle (reset sonrası kurtarma için)
+    # Bets ve portfolio'yu parquet'a arsivle (reset sonrasi kurtarma icin)
     try:
         from database.db_cleanup import archive_bets_and_portfolio
 
@@ -1500,7 +1493,7 @@ def get_health_check():
             else:
                 losses_by_exit[code] = losses_by_exit.get(code, 0) + 1
 
-        # 5. Red Flags â€” son 48 saatlik verilere gÃ¶re
+        # 5. Red Flags a€” son 48 saatlik verilere gÃ¶re
         red_flags = []
 
         # Son 48 saatteki kayÄ±plarÄ± say

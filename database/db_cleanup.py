@@ -206,9 +206,9 @@ def auto_cleanup(hot_days: int = 10, cold_days: int = 120) -> dict:
 
 
 def archive_bets_and_portfolio():
-    """Settlement/reset ÖNCESI bets ve portfolio'yu parquet'a arşivle.
+    """Settlement/reset ONCESI bets ve portfolio'yu parquet'a arsivle.
 
-    Silindikten sonra kurtarma için kullanılır.
+    Silindikten sonra kurtarma icin kullanilir.
     Dosyalar: data/archive/bets_snapshot_YYYYMMDD_HHMMSS.parquet
               data/archive/portfolio_snapshot_YYYYMMDD_HHMMSS.parquet
     """
@@ -217,7 +217,7 @@ def archive_bets_and_portfolio():
     conn = sqlite3.connect(config.DB_PATH)
     result = {}
 
-    # Bets tablosunu arşivle
+    # Bets tablosunu arsivle
     try:
         df = pd.read_sql_query("SELECT * FROM bets", conn)
         if not df.empty:

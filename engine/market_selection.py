@@ -17,9 +17,7 @@ def market_group_key(market) -> tuple[str, str, str]:
     )
 
 
-def select_highest_yes_candidates(
-    markets, min_entry_price: float = 0.10, max_entry_price: float = 0.95
-) -> list:
+def select_highest_yes_candidates(markets, min_entry_price: float = 0.10, max_entry_price: float = 0.95) -> list:
     """Select all tied maximum-YES candidates in each strategy group.
 
     The max-price rule is applied before the strict max-entry-price gate so a
@@ -33,7 +31,7 @@ def select_highest_yes_candidates(
         if key[0] and key[1] and key[2] and yes_price is not None:
             groups[key].append(market)
 
-    selected = []
+    selected: list = []
     for candidates in groups.values():
         best = max(float(m.yes_price) for m in candidates)
         if best < min_entry_price or best >= max_entry_price:

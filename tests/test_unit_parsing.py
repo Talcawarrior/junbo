@@ -1,13 +1,13 @@
 """Test unit detection and threshold extraction in MarketParser.
 
-Görev gereksinimleri (test_unit_parsing.md):
+Gorev gereksinimleri (test_unit_parsing.md):
 - test_explicit_f: "be between 88-89°F" → low=31.1, high=31.7 (±0.1).
 - test_explicit_c: "be 18°C" → 18.0, low/high None.
 - test_unitless_us_city: "Will the high in Miami exceed 90 on July 4?" → 32.2°C.
-  [Regresyon: önceki kod 90.0°C veriyordu — Miami ABD olduğu için °F dönüşümü].
+  [Regresyon: onceki kod 90.0°C veriyordu — Miami ABD oldugu icin °F donusumu].
 - test_unitless_intl_city: "Will the temperature in London be above 20?" → 20.0°C.
 - test_no_false_f_from_words: "'f' in 'highest' tetiklememeli" → 25.0°C.
-- test_sanity_guard_celsius: "be 90°C in Miami" → threshold None (90°C saçma).
+- test_sanity_guard_celsius: "be 90°C in Miami" → threshold None (90°C sacma).
 """
 
 import os
@@ -48,7 +48,7 @@ class TestUnitParsing:
         assert unit == "celsius"
         return (value_c, low_c, high_c)
 
-    # ── 1) Açık °F aralık ──────────────────────────────────────────
+    # ── 1) Acik °F aralik ──────────────────────────────────────────
 
     def test_explicit_f(self):
         """'be between 88-89°F' → low=31.1, high=31.7 (±0.1)."""
@@ -61,7 +61,7 @@ class TestUnitParsing:
         # value_c should be mid-point
         assert abs(value_c - (31.1 + 31.7) / 2) < 0.2
 
-    # ── 2) Açık °C tek değer ───────────────────────────────────────
+    # ── 2) Acik °C tek deger ───────────────────────────────────────
 
     def test_explicit_c(self):
         """'be 18°C' → 18.0, low/high None."""
@@ -72,7 +72,7 @@ class TestUnitParsing:
         assert low_c is None
         assert high_c is None
 
-    # ── 3) Birimsiz US şehir (Miami=K→°F) ──────────────────────────
+    # ── 3) Birimsiz US sehir (Miami=K→°F) ──────────────────────────
 
     def test_unitless_us_city(self):
         """'Will the high in Miami exceed 90 on July 4?' → 32.2°C (90°F≈32.2)."""
@@ -80,13 +80,11 @@ class TestUnitParsing:
         assert r is not None, "expected a result"
         value_c, low_c, high_c = r
         # 90°F → 32.22°C
-        assert abs(value_c - 32.2) < 0.2, (
-            f"Miami should be Fahrenheit: got {value_c}°C, expected ~32.2"
-        )
+        assert abs(value_c - 32.2) < 0.2, f"Miami should be Fahrenheit: got {value_c}°C, expected ~32.2"
         assert low_c is None
         assert high_c is None
 
-    # ── 4) Birimsiz uluslararası şehir ──────────────────────────────
+    # ── 4) Birimsiz uluslararasi sehir ──────────────────────────────
 
     def test_unitless_intl_city(self):
         """'Will the temperature in London be above 20?' → 20.0°C."""
@@ -97,10 +95,10 @@ class TestUnitParsing:
         assert low_c is None
         assert high_c is None
 
-    # ── 5) 'f' içeren kelimeler yanlış tetiklememeli ────────────────
+    # ── 5) 'f' iceren kelimeler yanlis tetiklememeli ────────────────
 
     def test_no_false_f_from_words(self):
-        """'highest' içindeki 'f' °F tetiklememeli; °C açık olduğu için."""
+        """'highest' icindeki 'f' °F tetiklememeli; °C acik oldugu icin."""
         r = self._extract("Will the highest temperature in Paris be 25°C or higher?")
         assert r is not None, "expected a result"
         value_c, low_c, high_c = r
@@ -108,10 +106,10 @@ class TestUnitParsing:
         assert low_c is None
         assert high_c is None
 
-    # ── 6) Sanity guard: saçma Celsius değer → None ─────────────────
+    # ── 6) Sanity guard: sacma Celsius deger → None ─────────────────
 
     def test_sanity_guard_celsius(self):
-        """'be 90°C in Miami' → threshold None (90°C saçma)."""
+        """'be 90°C in Miami' → threshold None (90°C sacma)."""
         r = self._extract("Will the temperature in Miami be 90°C on July 4?")
         # _extract_threshold performs conversion but does NOT filter extreme
         # values — that's the caller's (parse_market) responsibility.
@@ -171,11 +169,7 @@ class TestRangeParisAndParseUpdate:
         assert ok, "parse_and_update should succeed"
 
         with get_session() as session:
-            m2 = (
-                session.query(WeatherMarket)
-                .filter_by(id="test-range-paris-001")
-                .first()
-            )
+            m2 = session.query(WeatherMarket).filter_by(id="test-range-paris-001").first()
             assert m2 is not None
             assert m2.threshold_low is not None, "threshold_low should be set"
             assert m2.threshold_high is not None, "threshold_high should be set"
@@ -209,11 +203,7 @@ class TestRangeParisAndParseUpdate:
         assert ok
 
         with get_session() as session:
-            m2 = (
-                session.query(WeatherMarket)
-                .filter_by(id="test-plain-london-002")
-                .first()
-            )
+            m2 = session.query(WeatherMarket).filter_by(id="test-plain-london-002").first()
             assert m2 is not None
             assert m2.threshold_low is None
             assert m2.threshold_high is None

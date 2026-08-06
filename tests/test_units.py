@@ -1,7 +1,7 @@
-"""Unit testler - Calculator, Formulas, Probability modülleri.
+"""Unit testler - Calculator, Formulas, Probability modulleri.
 
 Test cases:
-✅ Calculator.estimate_probability - Olasılık hesaplama
+✅ Calculator.estimate_probability - Olasilik hesaplama
 ✅ Calculator.kelly_criterion - Kelly staking
 ✅ Formulas.max_bet_cap - Maksimum bet limiti
 ✅ Formulas.max_exposure_cap - Maksimum exposure limiti
@@ -14,7 +14,7 @@ Test cases:
 import pytest
 from unittest.mock import Mock
 
-# Eklenecek modüller
+# Eklenecek moduller
 from engine.calculator import Calculator
 from utils.formulas import (
     max_bet_cap,
@@ -35,15 +35,15 @@ from config.settings import bot_config
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-# 1. CALCULATOR - Olasılık ve Kelly Kriteri Testleri
+# 1. CALCULATOR - Olasilik ve Kelly Kriteri Testleri
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 
 class TestCalculatorEstimateProbability:
-    """Tahmin olasılık hesaplama testleri."""
+    """Tahmin olasilik hesaplama testleri."""
 
     def test_single_forecast(self):
-        """Tek tahmin varken olasılık hesaplaması."""
+        """Tek tahmin varken olasilik hesaplamasi."""
         calc = Calculator()
 
         # Tek tahmin = mean, std = 2.0 default
@@ -57,7 +57,7 @@ class TestCalculatorEstimateProbability:
         assert prob > 0.5  # mean(0.65) > threshold(0.55)
 
     def test_multiple_forecasts(self):
-        """Birden fazla tahmin varken olasılık hesaplama."""
+        """Birden fazla tahmin varken olasilik hesaplama."""
         calc = Calculator()
         forecasts = [0.6, 0.7, 0.65, 0.55, 0.75]
 
@@ -71,7 +71,7 @@ class TestCalculatorEstimateProbability:
         assert prob > 0.5  # mean = 0.65 > threshold = 0.60
 
     def test_forecast_std_impact(self):
-        """Std'sız etkisi."""
+        """Std'siz etkisi."""
         calc = Calculator()
         forecasts_high_std = [0.2, 0.8, 0.5, 0.3, 0.7]  # High variance
         forecasts_low_std = [0.6, 0.6, 0.6, 0.6, 0.6]  # Low variance
@@ -88,13 +88,13 @@ class TestCalculatorEstimateProbability:
             days_ahead=1,
         )
 
-        # High std -> olasılık dağılması daha geniş (daha konservatif)
+        # High std -> olasilik dagilmasi daha genis (daha konservatif)
         # Low std -> daha kesin tahmin
-        # (örnek: 0.6 threshold için high std de düşük olasılık verir)
+        # (ornek: 0.6 threshold icin high std de dusuk olasilik verir)
         assert prob_high < 0.7  # daha konservatif
 
     def test_days_ahead_effect(self):
-        """Gün ilerisi etkisi - zaman gecikmesi."""
+        """Gun ilerisi etkisi - zaman gecikmesi."""
         calc = Calculator()
         forecasts = [0.6, 0.7, 0.65]
 
@@ -110,7 +110,7 @@ class TestCalculatorEstimateProbability:
             days_ahead=2,
         )
 
-        # Daha uzun günlerde daha konservatif tahmin
+        # Daha uzun gunlerde daha konservatif tahmin
         assert prob_day_0 >= prob_day_2
 
     def test_market_type_high(self):
@@ -141,8 +141,8 @@ class TestCalculatorEstimateProbability:
         )
 
         assert 0.0 <= prob <= 1.0
-        # LOW market için YES = p(X > threshold)
-        # mean = 0.65, threshold = 0.6 -> YES olasılığı düşük
+        # LOW market icin YES = p(X > threshold)
+        # mean = 0.65, threshold = 0.6 -> YES olasiligi dusuk
 
     def test_range_market(self):
         """RANGE market tipi testi."""
@@ -173,10 +173,10 @@ class TestCalculatorKellyCriterion:
         kelly = calc.kelly_criterion(prob, price, fraction=0.15)
 
         assert kelly > 0
-        assert kelly <= 1.0  # Kelly %'i 100% altında
+        assert kelly <= 1.0  # Kelly %'i 100% altinda
 
     def test_kelly_low_prob(self):
-        """Düşük olasılıkta Kelly."""
+        """Dusuk olasilikta Kelly."""
         calc = Calculator()
         prob = 0.3
         price = 0.25
@@ -184,7 +184,7 @@ class TestCalculatorKellyCriterion:
         kelly = calc.kelly_criterion(prob, price, fraction=0.15)
 
         assert kelly >= 0
-        # Low edge = düşük Kelly
+        # Low edge = dusuk Kelly
 
     def test_kelly_negative_edge(self):
         """Negatif edge'de Kelly = 0."""
@@ -211,7 +211,7 @@ class TestCalculatorKellyCriterion:
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-# 2. FORMULAS - Finansal Formül Testleri
+# 2. FORMULAS - Finansal Formul Testleri
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 
@@ -225,15 +225,15 @@ class TestMaxBetCap:
         max_cap = max_bet_cap(portfolio, max_pct)
 
         assert max_cap == pytest.approx(10.0)
-        assert max_cap <= portfolio  # Max bet % portfolio'dan küçük
+        assert max_cap <= portfolio  # Max bet % portfolio'dan kucuk
 
     def test_max_bet_cap_zero_portfolio(self):
-        """Sıfır portföyde."""
+        """Sifir portfoyde."""
         max_cap = max_bet_cap(0.0, 0.01)
         assert max_cap == 0.0
 
     def test_max_bet_cap_zero_pct(self):
-        """Sıfır max bet %."""
+        """Sifir max bet %."""
         max_cap = max_bet_cap(1000.0, 0.0)
         assert max_cap == 0.0
 
@@ -261,7 +261,7 @@ class TestMaxExposureCap:
         cons_val = conservative_portfolio_value(initial, realized_before_today)
 
         assert cons_val == initial + realized_before_today
-        assert cons_val < 1000.0 + 1000.0  # Unrealized dahil değil
+        assert cons_val < 1000.0 + 1000.0  # Unrealized dahil degil
 
     def test_max_exposure_cap_with_negative_realized(self):
         """Negatif realized PnL."""
@@ -279,7 +279,7 @@ class TestPolymarketFee:
     """Polymarket fee hesaplama testleri."""
 
     def test_polymarket_fee_high_price(self):
-        """Yüksek fiyatda fee (weather exponent=0.5)."""
+        """Yuksek fiyatda fee (weather exponent=0.5)."""
         shares = 100.0
         price = 0.75  # Close to 1.0
         fee_rate = 0.05
@@ -304,7 +304,7 @@ class TestPolymarketFee:
         assert fee == pytest.approx(expected, abs=0.01)
 
     def test_polymarket_fee_low_price(self):
-        """Düşük fiyatda fee (weather exponent=0.5)."""
+        """Dusuk fiyatda fee (weather exponent=0.5)."""
         shares = 100.0
         price = 0.10  # Low price
         fee_rate = 0.05
@@ -371,7 +371,7 @@ class TestSettlementPnL:
 
 
 class TestPortfolioValues:
-    """Portfolio hesaplamaları testleri."""
+    """Portfolio hesaplamalari testleri."""
 
     def test_unrealized_pnl(self):
         """Unrealized PnL hesaplama."""
@@ -427,7 +427,7 @@ class TestPortfolioValues:
         assert roi == pytest.approx(expected, abs=0.01)
 
     def test_roi_pct_zero_stake(self):
-        """Sıfır stake'de ROI."""
+        """Sifir stake'de ROI."""
         roi = roi_pct(10.0, 0.0)
         assert roi == 0.0
 
@@ -456,7 +456,7 @@ class TestPortfolioValues:
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-# 3. SLIPPAGE & GAS FEE MODÜLLERİ (Test için mock kullanılacak)
+# 3. SLIPPAGE & GAS FEE MODULLERI (Test icin mock kullanilacak)
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 
@@ -466,8 +466,8 @@ class TestSlippageModels:
     def test_orderbook_slippage_estimation(self):
         """Orderbook slippage tahmini."""
         # TODO: utils/slippage.py mock testi
-        # condition_id varken orderbook depth bazlı slippage hesapla
-        # Varsayılan: slippage = entry_price * 0.005 (0.5%)
+        # condition_id varken orderbook depth bazli slippage hesapla
+        # Varsayilan: slippage = entry_price * 0.005 (0.5%)
         pass
 
     def test_tiered_slippage(self):
@@ -485,7 +485,7 @@ class TestSlippageModels:
     def test_gas_cost_calculation(self):
         """Gas cost hesaplama."""
         # TODO: gas_cost_usd = $0.10 default
-        # Polygon gas fee (her round-trip için)
+        # Polygon gas fee (her round-trip icin)
         pass
 
 

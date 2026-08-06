@@ -1,10 +1,10 @@
-"""Junbo Bot Watchdog - Bot'u izler, çökerse yeniden başlatır.
+"""Junbo Bot Watchdog - Bot'u izler, cokerse yeniden baslatir.
 
-Bu script bağımsız çalışır ve bot'u izler.
-Bot 2 dakika yanıt vermezse otomatik olarak yeniden başlatır.
+Bu script bagimsiz calisir ve bot'u izler.
+Bot 2 dakika yanit vermezse otomatik olarak yeniden baslatir.
 
-Kullanım:
-    python watchdog.py              # İzleme modu (sonsuz döngü)
+Kullanim:
+    python watchdog.py              # Izleme modu (sonsuz dongu)
     python watchdog.py --check      # Sadece kontrol et
 """
 
@@ -19,7 +19,7 @@ from datetime import datetime
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
 BOT_URL = "http://127.0.0.1:8093"
 CHECK_INTERVAL = 30  # saniye
-TIMEOUT = 120  # 2 dakika yanıt yoksa restart
+TIMEOUT = 120  # 2 dakika yanit yoksa restart
 
 IS_WINDOWS = platform.system() == "Windows"
 
@@ -35,9 +35,9 @@ def _find_bot_pids():
     if IS_WINDOWS:
         try:
             out = subprocess.run(
-                ["wmic", "process", "where", "name='python.exe'",
-                 "get", "ProcessId,CommandLine", "/format:csv"],
-                capture_output=True, text=True,
+                ["wmic", "process", "where", "name='python.exe'", "get", "ProcessId,CommandLine", "/format:csv"],
+                capture_output=True,
+                text=True,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             ).stdout
             for line in out.splitlines():
@@ -57,9 +57,7 @@ def _find_bot_pids():
             pass
     else:
         try:
-            out = subprocess.run(
-                ["pgrep", "-f", "main.py bot"], capture_output=True, text=True
-            ).stdout
+            out = subprocess.run(["pgrep", "-f", "main.py bot"], capture_output=True, text=True).stdout
             for pid_s in out.split():
                 try:
                     pid = int(pid_s)
@@ -78,7 +76,8 @@ def _kill_pid(pid: int):
         if IS_WINDOWS:
             subprocess.run(
                 ["taskkill", "/F", "/PID", str(pid)],
-                capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW,
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
         else:
             subprocess.run(["kill", "-9", str(pid)], capture_output=True)
@@ -94,11 +93,11 @@ def log(msg: str):
 
 
 def is_bot_running() -> bool:
-    """Bot çalışıyor mu? Port kontrolü."""
+    """Bot calisiyor mu? Port kontrolu."""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(3)
-        result = sock.connect_ex(('127.0.0.1', 8093))
+        result = sock.connect_ex(("127.0.0.1", 8093))
         sock.close()
         return result == 0
     except Exception:
@@ -106,7 +105,7 @@ def is_bot_running() -> bool:
 
 
 def start_bot():
-    """Bot'u başlat."""
+    """Bot'u baslat."""
     cmd = [sys.executable, "main.py", "bot"]
     kwargs = {
         "cwd": BOT_DIR,
@@ -127,14 +126,14 @@ def start_bot():
 
 
 def stop_bot():
-    """Bot'u durdur — yalnızca 'main.py bot' prosesini, tüm python'ı değil."""
+    """Bot'u durdur — yalnizca 'main.py bot' prosesini, tum python'i degil."""
     killed_any = False
     # 1) Precisely tracked PID (if we started it).
     global BOT_PID
     if BOT_PID and _kill_pid(BOT_PID):
         killed_any = True
         BOT_PID = None
-    # 2) Any other 'main.py bot' proceslerini komut satırından bulup öldür.
+    # 2) Any other 'main.py bot' proceslerini komut satirindan bulup oldur.
     for pid in _find_bot_pids():
         if _kill_pid(pid):
             killed_any = True
@@ -142,19 +141,20 @@ def stop_bot():
 
 
 def watchdog_loop():
-    """Watchdog ana döngüsü."""
+    """Watchdog ana dongusu."""
     log("=== Junbo Watchdog Started ===")
 
     last_response = time.time()
 
     while True:
         try:
-            # Bot çalışıyor mu?
+            # Bot calisiyor mu?
             if is_bot_running():
                 last_response = time.time()
                 # Bot health check (HTTP)
                 try:
                     import urllib.request
+
                     req = urllib.request.urlopen(f"{BOT_URL}/api/status", timeout=5)
                     if req.status == 200:
                         log("Bot OK")
@@ -163,7 +163,7 @@ def watchdog_loop():
                 except Exception:
                     log("Bot port open but API unreachable")
             else:
-                # Bot çalışmıyor
+                # Bot calismiyor
                 elapsed = time.time() - last_response
                 if elapsed > TIMEOUT:
                     log(f"Bot DOWN for {int(elapsed)}s - restarting...")

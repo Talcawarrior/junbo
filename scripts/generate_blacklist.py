@@ -2,9 +2,12 @@
 
 Usage: python scripts/generate_blacklist.py
 """
+
 import json
 import sqlite3
-import sys; sys.path.insert(0, r"C:\Users\fdemir\Documents\New project\junbo")
+import sys
+
+sys.path.insert(0, r"C:\Users\fdemir\Documents\New project\junbo")
 from database.db import DB_PATH
 
 MAE_THRESHOLD = 2.0  # exclude model if MAE > 2.0C for a city
@@ -30,10 +33,9 @@ city_data = {}
 for city_code, model, mae, avg_bias, n in rows:
     if city_code not in city_data:
         city_data[city_code] = {"all_models": [], "blacklisted_models": []}
-    city_data[city_code]["all_models"].append({
-        "model": model, "mae": mae, "avg_bias": avg_bias, "samples": n,
-        "blacklisted": mae > MAE_THRESHOLD
-    })
+    city_data[city_code]["all_models"].append(
+        {"model": model, "mae": mae, "avg_bias": avg_bias, "samples": n, "blacklisted": mae > MAE_THRESHOLD}
+    )
     if mae > MAE_THRESHOLD:
         city_data[city_code]["blacklisted_models"].append(model)
 
@@ -46,14 +48,14 @@ for city_code, data in city_data.items():
     bl_models = [m["model"] for m in data["all_models"] if m["blacklisted"]]
     if bl_models:
         model_blacklist[city_code] = sorted(bl_models)
-    
+
     # Check city viability: remaining models = all - blacklisted
     remaining = [m for m in data["all_models"] if not m["blacklisted"]]
     if len(remaining) < MIN_MODELS:
         city_blacklist.append(city_code)
         print(f"CITY BLACKLIST: {city_code} — only {len(remaining)}/{len(data['all_models'])} models usable")
         continue
-    
+
     avg_mae = sum(m["mae"] for m in remaining) / len(remaining)
     if avg_mae > CITY_MAE_THRESHOLD:
         city_blacklist.append(city_code)
@@ -89,7 +91,7 @@ output = {
         "city_avg_mae": CITY_MAE_THRESHOLD,
         "min_models": MIN_MODELS,
     },
-    "generated_at": "2026-07-26"
+    "generated_at": "2026-07-26",
 }
 
 path = "data/model_blacklist.json"

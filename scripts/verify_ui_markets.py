@@ -1,10 +1,10 @@
-"""Polymarket UI doğrulama scripti.
+"""Polymarket UI dogrulama scripti.
 
-Gamma API'den güncel sıcaklık marketlerini çekip, DB'deki açık
-WeatherMarket'ler ile karşılaştırır. Hızlı: sadece 4 genel sorgu yapar.
+Gamma API'den guncel sicaklik marketlerini cekip, DB'deki acik
+WeatherMarket'ler ile karsilastirir. Hizli: sadece 4 genel sorgu yapar.
 
-Kullanım:
-  python scripts/verify_ui_markets.py              # tüm açık tarihler
+Kullanim:
+  python scripts/verify_ui_markets.py              # tum acik tarihler
   python scripts/verify_ui_markets.py 2026-08-03  # spesifik tarih
 """
 
@@ -30,19 +30,19 @@ GAMMA_URL = "https://gamma-api.polymarket.com"
 
 
 def _normalize_city(city: str) -> str:
-    """Şehir isimlerini normalleştir: parantezleri kaldır, küçük harfe çevir, mapping uygula."""
+    """Sehir isimlerini normallestir: parantezleri kaldir, kucuk harfe cevir, mapping uygula."""
     import re as _re
 
     city = city.strip().lower()
-    # Parantez içeriğini kaldır: "Seoul (Incheon)" -> "Seoul"
+    # Parantez icerigini kaldir: "Seoul (Incheon)" -> "Seoul"
     city = _re.sub(r"\s*\([^)]*\)", "", city)
     # "New York City" -> "New York"
     city = city.replace(" city", "")
-    # Tireleri boşlukla değiştir
+    # Tireleri boslukla degistir
     city = city.replace("-", " ")
     city = city.strip()
 
-    # Polymarket şehir isim mapping'i
+    # Polymarket sehir isim mapping'i
     _POLY_CITY_MAP = {
         "nyc": "new york",
         "mexico": "mexico city",
@@ -96,11 +96,11 @@ def _extract_metric(question: str) -> str:
 
 
 def _fetch_gamma_keyset(target_dates: set[str] | None = None) -> dict[str, dict[str, list[dict]]]:
-    """Gamma API events/keyset ile sıcaklık marketlerini çek.
+    """Gamma API events/keyset ile sicaklik marketlerini cek.
 
-    Polymarket UI'nın kullandığı aynı API. tag_slug=weather ile çeker,
-    sadece temperature piyasalarını filtreler. Hedef tarihler verilirse
-    sadece o tarihlerdeki event'leri çeker (performans için).
+    Polymarket UI'nin kullandigi ayni API. tag_slug=weather ile ceker,
+    sadece temperature piyasalarini filtreler. Hedef tarihler verilirse
+    sadece o tarihlerdeki event'leri ceker (performans icin).
 
     Returns: {date_str: {city: [market_dict]}}
     """
@@ -138,11 +138,11 @@ def _fetch_gamma_keyset(target_dates: set[str] | None = None) -> dict[str, dict[
                 title = event.get("title", "")
                 title_lower = title.lower()
 
-                # Sadece temperature piyasaları
+                # Sadece temperature piyasalari
                 if not any(t in title_lower for t in ("temperature", "°c", "°f")):
                     continue
 
-                # Tarih çıkarma
+                # Tarih cikarma
                 td_match = re.search(
                     r"on\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d+)",
                     title,
@@ -191,14 +191,14 @@ def _fetch_gamma_keyset(target_dates: set[str] | None = None) -> dict[str, dict[
                 break
 
         except Exception as e:
-            logger.error("Gamma keyset API hatası (page=%d): %s", page, e)
+            logger.error("Gamma keyset API hatasi (page=%d): %s", page, e)
             break
 
     return result
 
 
 def _fetch_gamma_quick(target_date: datetime) -> dict[str, dict[str, list[dict]]]:
-    """Hızlı Gamma API çekimi: sadece 4 genel sorgu.
+    """Hizli Gamma API cekimi: sadece 4 genel sorgu.
 
     Returns: {date_str: {city: [market_dict]}}
     """
@@ -241,7 +241,7 @@ def _fetch_gamma_quick(target_date: datetime) -> dict[str, dict[str, list[dict]]
                         continue
                     metric = _extract_metric(question)
 
-                    # Tarih çıkarma
+                    # Tarih cikarma
                     td_match = re.search(
                         r"on\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d+)",
                         title,
@@ -267,14 +267,14 @@ def _fetch_gamma_quick(target_date: datetime) -> dict[str, dict[str, list[dict]]
                     )
 
         except Exception as e:
-            logger.error("Gamma API hatası (query=%s): %s", query, e)
+            logger.error("Gamma API hatasi (query=%s): %s", query, e)
 
     return result
 
 
 def verify_all_open_dates() -> str:
-    """Tüm açık tarihler için Gamma API vs DB karşılaştırması."""
-    # DB'deki açık tarihleri bul + verileri session açıkken oku
+    """Tum acik tarihler icin Gamma API vs DB karsilastirmasi."""
+    # DB'deki acik tarihleri bul + verileri session acikken oku
     db_by_date: dict[str, dict[str, list]] = {}
     with get_session() as session:
         db_all = (
@@ -302,9 +302,9 @@ def verify_all_open_dates() -> str:
             )
 
     if not db_by_date:
-        return "DB'de açık market yok"
+        return "DB'de acik market yok"
 
-    # Her tarih için Gamma API'den çek
+    # Her tarih icin Gamma API'den cek
     all_gamma: dict[str, dict[str, list]] = {}
     unique_dates = sorted(db_by_date.keys())
     for ds in unique_dates:
@@ -316,7 +316,7 @@ def verify_all_open_dates() -> str:
             for city, markets in cities.items():
                 all_gamma[gds].setdefault(city, []).extend(markets)
 
-    # Karşılaştır
+    # Karsilastir
     report_lines = []
     all_dates = sorted(set(list(all_gamma.keys()) + list(db_by_date.keys())))
 
@@ -333,24 +333,24 @@ def verify_all_open_dates() -> str:
         report_lines.append(f"\n=== {date_str} ===")
 
         if missing:
-            report_lines.append(f"  ❌ EKSİK ({len(missing)} şehir — Polymarket'te var, DB'de yok):")
+            report_lines.append(f"  ❌ EKSIK ({len(missing)} sehir — Polymarket'te var, DB'de yok):")
             for city in sorted(missing):
                 strikes = sorted({f"{m['threshold']}°C" for m in all_gamma[date_str][city]})
                 report_lines.append(f"     {city}: {', '.join(strikes)}")
 
         if extra:
-            report_lines.append(f"  ⚠️  FAZLA ({len(extra)} şehir — DB'de var, Polymarket'te yok):")
+            report_lines.append(f"  ⚠️  FAZLA ({len(extra)} sehir — DB'de var, Polymarket'te yok):")
             for city in sorted(extra):
                 strikes = sorted({f"{m['threshold']}°C" for m in db_by_date[date_str][city]})
                 report_lines.append(f"     {city}: {', '.join(strikes)}")
 
-        # Eşik farkları
+        # Esik farklari
         for city in gamma_cities & db_cities:
             g_t = {m["threshold"] for m in all_gamma[date_str][city]}
             d_t = {m["threshold"] for m in db_by_date[date_str][city]}
             diff = g_t.symmetric_difference(d_t)
             if diff:
-                report_lines.append(f"  🔀 EŞİK FARKI — {city}:")
+                report_lines.append(f"  🔀 ESIK FARKI — {city}:")
                 for t in sorted(diff):
                     side = "sadece Gamma" if any(abs(t - x) < 0.5 for x in g_t) else "sadece DB"
                     report_lines.append(f"     {t}°C — {side}")
@@ -359,12 +359,12 @@ def verify_all_open_dates() -> str:
 
 
 def _fetch_gamma_all(target_date: datetime) -> dict[str, dict[str, list[dict]]]:
-    """Gamma API'den tüm sıcaklık marketlerini çek (city-specific sorgularla).
+    """Gamma API'den tum sicaklik marketlerini cek (city-specific sorgularla).
 
     Returns: {date_str: {city: [market_dict]}}
     """
     date_strs = _date_strings(target_date)
-    # City-specific queries (scraper ile aynı)
+    # City-specific queries (scraper ile ayni)
     cities = [
         "dallas",
         "miami",
@@ -527,16 +527,16 @@ def _fetch_gamma_all(target_date: datetime) -> dict[str, dict[str, list[dict]]]:
 
 
 def verify_db_vs_poly() -> str:
-    """DB bet'leri ile Polymarket UI piyasalarını karşılaştır.
+    """DB bet'leri ile Polymarket UI piyasalarini karsilastir.
 
-    Şehir-level kontrol: DB'deki her bet'in şehrü Polymarket'te mevcut mu?
-    Rapor döndürür: eşleşmeyen bet'ler listelenir.
+    Sehir-level kontrol: DB'deki her bet'in sehru Polymarket'te mevcut mu?
+    Rapor dondurur: eslesmeyen bet'ler listelenir.
     """
     from database.models import Bet
 
     now = datetime.utcnow().replace(tzinfo=None)
 
-    # DB: aktif bet'leri çek (city, metric, target_date)
+    # DB: aktif bet'leri cek (city, metric, target_date)
     db_bets = {}
     with get_session() as session:
         bets = (
@@ -565,19 +565,19 @@ def verify_db_vs_poly() -> str:
     if not db_bets:
         return ""
 
-    # Polymarket:hem events/keyset hem public-search ile çek
-    # events/keyset bazı temperature_min piyasalarını kaçırıyor
+    # Polymarket:hem events/keyset hem public-search ile cek
+    # events/keyset bazi temperature_min piyasalarini kaciriyor
     target_dates = set(k[0] for k in db_bets.keys())
     gamma = _fetch_gamma_keyset(target_dates)
 
-    # Eksik şehirleri public-search ile tamamla
+    # Eksik sehirleri public-search ile tamamla
     missing_cities = set()
     for ds, city, metric in db_bets.keys():
         if ds not in gamma or city not in gamma.get(ds, {}):
             missing_cities.add(city)
 
     if missing_cities:
-        # City-specific queries ile eksik şehirleri çek
+        # City-specific queries ile eksik sehirleri cek
         for city in missing_cities:
             for query in [f"{city} temperature", f"lowest temperature {city}", f"highest temperature {city}"]:
                 try:
@@ -633,7 +633,7 @@ def verify_db_vs_poly() -> str:
             for m in markets:
                 poly_cities.add((gds, _normalize_city(city), m["metric"]))
 
-    # Karşılaştır
+    # Karsilastir
     matched = set(db_bets.keys()) & poly_cities
     missing = set(db_bets.keys()) - poly_cities
 
@@ -669,4 +669,4 @@ if __name__ == "__main__":
             print(report)
             sys.exit(1)
         else:
-            print("✅ Tüm marketler eşleşiyor")
+            print("✅ Tum marketler eslesiyor")

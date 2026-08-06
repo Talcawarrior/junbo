@@ -190,6 +190,9 @@ ALLOWED_DEAD = {
     "SvcDoRun",
     "bot_lifespan",
     "lifespan",
+    # Finance helpers covered by unit tests but no non-test caller today
+    # (api.py computes equity inline; kept as a documented formula helper)
+    "portfolio_current_value",
     # FastAPI route decorators (called by uvicorn, not directly by our code)
     "verify_api_key",
     "broadcast_message",
@@ -352,7 +355,6 @@ ALLOWED_DEAD = {
     "run_refresh_open_prices",
     "run_settle",
     "run_report",
-    "_partial_close_early",
     "run_risk_management",
     "analyze_single",
     # Accounting internal
@@ -470,6 +472,13 @@ ALLOWED_DEAD = {
     "print_top_cities_by_metric",
     "run_rolling_backtest",
     "simulate_strategy",
+    # Walk-forward backtest (standalone script)
+    "calculate_metrics",
+    "get_available_forecast",
+    "resolve_outcome_from_bets",
+    "run_single_fold",
+    "simulate_decision",
+    "walk_forward",
 }
 
 

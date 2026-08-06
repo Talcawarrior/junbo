@@ -47,7 +47,7 @@ def _make_market_data(market_id: str):
     return {
         "market_id": market_id,
         "city_code": "TEST",
-        "yes_price": 0.05,
+        "yes_price": 0.5,  # YES-only price gate [0.10, 0.95) icinde olmali
         "city": "Testville",
     }
 

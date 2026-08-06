@@ -123,7 +123,7 @@ def _migrate_add_index(index: str, table: str, column: str) -> None:
 
 @contextmanager
 def get_session():
-    """Her işlem kendi session'ını alır, hata olursa rollback yapar."""
+    """Her islem kendi session'ini alir, hata olursa rollback yapar."""
     _ensure_db_init()
     session = SessionLocal()
     try:

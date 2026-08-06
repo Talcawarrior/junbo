@@ -46,9 +46,7 @@ def max_bet_cap(portfolio_value: float, max_bet_pct: float) -> float:
 # ---------------------------------------------------------------------------
 
 
-def conservative_portfolio_value(
-    initial_capital: float, realized_before_today: float
-) -> float:
+def conservative_portfolio_value(initial_capital: float, realized_before_today: float) -> float:
     """Portfolio basis that prevents the feedback loop.
 
     Only counts:
@@ -72,9 +70,7 @@ def conservative_portfolio_value(
 # ---------------------------------------------------------------------------
 
 
-def max_exposure_cap(
-    initial_capital: float, realized_before_today: float, total_exposure_pct: float
-) -> float:
+def max_exposure_cap(initial_capital: float, realized_before_today: float, total_exposure_pct: float) -> float:
     """Total open-position ceiling.
 
     Formula: (initial + realized_before_today) × TOTAL_EXPOSURE_PCT
@@ -121,9 +117,7 @@ def settlement_payout(stake: float, entry_price: float) -> float:
     return stake / entry_price if entry_price > 0 else 0.0
 
 
-def settlement_pnl(
-    stake: float, entry_price: float, entry_fee: float, won: bool
-) -> float:
+def settlement_pnl(stake: float, entry_price: float, entry_fee: float, won: bool) -> float:
     """Realised PnL when Polymarket resolves a bet.
 
     According to Polymarket's official fee model:
@@ -180,6 +174,7 @@ def polymarket_fee(shares: float, price: float, fee_rate: float | None = None) -
     # Weather category uses exponent=0.5 (flatter fee curve).
     # Other categories use exponent=1.0 (standard quadratic).
     from config.settings import bot_config as _bc
+
     exponent = getattr(_bc.strategy, "fee_exponent", 1.0)
 
     return shares * fee_rate * price * ((1.0 - price) ** exponent)
@@ -200,6 +195,7 @@ def polymarket_fee_from_stake(stake: float, price: float, fee_rate: float | None
         fee_rate = bot_config.strategy.current_fee_rate
 
     from config.settings import bot_config as _bc
+
     exponent = getattr(_bc.strategy, "fee_exponent", 1.0)
 
     return stake * fee_rate * ((1.0 - price) ** exponent)
@@ -239,14 +235,11 @@ def portfolio_total_value(cash_balance: float, open_exposure: float) -> float:
 # ---------------------------------------------------------------------------
 
 
-def portfolio_current_value(
-    initial_capital: float, realized_pnl: float, unrealized_pnl: float
-) -> float:
+def portfolio_current_value(initial_capital: float, realized_pnl: float, unrealized_pnl: float) -> float:
     """Market value: initial + all PnL (includes unrealised paper gains).
 
-    Used by:
-      - main.py      (:332)  — API /api/status → portfolio.current
-      - frontend     (api.ts:350, :391, :416)
+    Kept as a documented formula helper (covered by unit tests). The live
+    /api/status endpoint computes the same value inline in api.py (equity).
     """
     return initial_capital + realized_pnl + unrealized_pnl
 
@@ -257,14 +250,14 @@ def portfolio_current_value(
 
 
 def pnl_ratio(current_price: float, entry_price: float) -> float:
-    """Fiyat değişimi oranı (0-1 arası ratio, percentage DEĞİL).
+    """Fiyat degisimi orani (0-1 arasi ratio, percentage DEGIL).
 
     pnl_ratio = (current_price - entry_price) / entry_price
 
-    Tüm exit check'ler bu fonksiyonu kullanmalı.
-    1.0 = %100 kâr, -0.3 = %30 zarar.
+    Tum exit check'ler bu fonksiyonu kullanmali.
+    1.0 = %100 kar, -0.3 = %30 zarar.
 
-    Kullanım:
+    Kullanim:
       - check_take_profit: pnl_ratio >= cfg.take_profit_pct
       - check_stop_loss: pnl_ratio <= -cfg.stop_loss_pct
       - check_time_decay: pnl_ratio <= cfg.time_decay_threshold
@@ -275,11 +268,11 @@ def pnl_ratio(current_price: float, entry_price: float) -> float:
 
 
 def drop_ratio(peak_price: float, current_price: float) -> float:
-    """Tepeden düşüş oranı (trailing stop için).
+    """Tepeden dusus orani (trailing stop icin).
 
     drop_ratio = (peak_price - current_price) / peak_price
 
-    Kullanım:
+    Kullanim:
       - check_trailing_stop: drop_ratio >= cfg.trailing_stop_pct
     """
     if peak_price <= 0:
@@ -292,14 +285,14 @@ def roi_pct(pnl: float, stake: float) -> float:
 
     ROI = (pnl / stake) × 100
 
-    Kullanım: API display, historical stats
+    Kullanim: API display, historical stats
     """
     if stake <= 0:
         return 0.0
     return (pnl / stake) * 100
 
 
-# profit_pct KALDIRILDI — pnl_ratio() * 100 kullanın
+# profit_pct KALDIRILDI — pnl_ratio() * 100 kullanin
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +322,3 @@ def win_rate_pct(wins: int, total_closed: int) -> float:
     if total_closed <= 0:
         return 0.0
     return (wins / total_closed) * 100
-
-
-
