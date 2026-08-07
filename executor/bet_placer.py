@@ -654,6 +654,15 @@ class BetPlacer:
             # 1) Tum acik ve gelecek tarihli marketleri cek
             # Son 24 saat kurali: sadece 24 saat icinde settle olacak
             # marketlere bet acilir. Uzun vade (2+ gun) betler acilmaz.
+            #
+            # ERKEN AÇILIM SINIRI (2026-08-07 veri analizi):
+            # 7 Agustos SL'larinda, vadeye 20-22 saat kala acilan betler
+            # ortalama %45 SL yerken, 16-18 saat kala acilanlar %26 SL yedi.
+            # Erken acilis fiyat henuz oynakken (model guncellemeleri once)
+            # girilmesine yol actigi icin stop-loss oranini artiriyordu.
+            # Pencere ust siniri 24h -> 18h'e indirildi: marketler yalnizca
+            # vadeye 8-18 saat kala bet acabiliyor. Bu, tum sehirlerde
+            # gecerlidir (sehir bazli fark istatistiksel olarak anlamsiz).
             open_markets = (
                 session.query(WeatherMarket)
                 .filter(
@@ -662,7 +671,7 @@ class BetPlacer:
                     WeatherMarket.yes_price.isnot(None),
                     WeatherMarket.yes_price > 0,
                     WeatherMarket.target_date > now + timedelta(hours=8),
-                    WeatherMarket.target_date <= now + timedelta(hours=24),
+                    WeatherMarket.target_date <= now + timedelta(hours=18),
                     WeatherMarket.city != "Unknown",
                 )
                 .all()

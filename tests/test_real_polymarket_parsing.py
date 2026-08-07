@@ -20,12 +20,14 @@ from scrapers.polymarket import PolymarketScraper
 
 _8h = _td(hours=8)
 _24h = _td(hours=24)
+_18h = _td(hours=18)
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "polymarket_market_samples.json")
 
 
 def timedelta_ok(delta):
-    return _8h < delta <= _24h
+    # Erken acilis siniri (2026-08-07): pencere ustu 24h -> 18h'e indirildi.
+    return _8h < delta <= _18h
 
 
 @pytest.fixture(scope="module")
@@ -127,22 +129,34 @@ class TestDaysAheadRegression:
         assert (target.date() - now.date()).days == 0
 
 
-# ── 3) place_all_pending 24h filtresi gercek endDate ile ───────────────────
+# ── 3) place_all_pending bet penceresi gercek endDate ile ───────────────────
 class TestBetPlacementWindow:
     def test_market_with_enddate_12h_in_window(self):
-        """8 Agustos 12:00 UTC marketi, 7 Agustos 14:00 UTC'de 24h kuralina GIRMELI.
+        """8 Agustos 12:00 UTC marketi, 7 Agustos 20:00 UTC'de pencereye GIRMELI.
 
-        Bug fix oncesi: DB'de target_date=23:59:59 tutuluyordu -> kalan 33.5h
-        hesaplaniyordu -> '24 saat icinde' filtresinden kaciyordu.
+        Erken acilis siniri (2026-08-07): marketler yalnizca vadeye 8-18 saat
+        kala bet acilir. 8 Agustos 12:00 - 7 Agustos 20:00 = 16h -> pencerede.
         """
-        now = datetime(2026, 8, 7, 14, 0, 0)
+        now = datetime(2026, 8, 7, 20, 0, 0)
         target = datetime(2026, 8, 8, 12, 0, 0)  # gercek endDate
         delta = target - now
-        assert timedelta_ok(delta), f"kalan {delta} -> 24h icinde olmali"
+        assert timedelta_ok(delta), f"kalan {delta} -> 18h icinde olmali"
         assert delta > _8h, "8 saatten az kaldiysa bet acilmaz"
 
+    def test_market_with_enddate_14h_out_of_early_window(self):
+        """7 Agustos 14:00 UTC'de 8 Agustos 12:00 (22h kala) marketi ARTIK acilmaz.
+
+        Erken acilis siniri oncesi: 22h kalan marketler aciliyordu ve SL orani
+        yuksekti (20-22h oncesi ortalama %45 vs 16-18h %26).
+        """
+        now = datetime(2026, 8, 7, 14, 0, 0)
+        target = datetime(2026, 8, 8, 12, 0, 0)  # gercek endDate, kalan 22h
+        delta = target - now
+        assert delta > _18h, f"kalan {delta} 18h sinirini asmali"
+        assert not timedelta_ok(delta), "22h kalan market erken-acilis sinirinda acilmaz"
+
     def test_market_with_bad_23_59_target_is_out_of_window(self):
-        """Bug fix oncesi DB degeri (23:59:59) ile ayni market 24h disinda kaliyordu."""
+        """Bug fix oncesi DB degeri (23:59:59) ile ayni market 18h disinda kaliyordu."""
         now = datetime(2026, 8, 7, 14, 0, 0)
         bad_target = datetime(2026, 8, 8, 23, 59, 59)
         delta = bad_target - now
