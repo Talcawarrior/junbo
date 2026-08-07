@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func
@@ -352,8 +351,10 @@ class BetPlacer:
             # Single-fill execution; no deferred ladder orders.
 
             # Live vs Paper execution logic
-            # HARD GUARD: always paper unless LIVE_TRADING_ENABLED=true
-            _live_allowed = (not Config.DRY_RUN) and os.getenv("LIVE_TRADING_ENABLED", "false").lower() == "true"
+            # KALICI KARAR (2026-08-07): Bot her zaman PAPER mode — gercek trade asla.
+            # Bu kural kullanici tarafindan sabitlendi, LIVE_TRADING_ENABLED/DRY_RUN
+            # degeri ne olursa olsun live trade KOD SEVIYESINDE kapalidir.
+            _live_allowed = False  # noqa: F841 — kalici paper mode
             if self.ready and _live_allowed:
                 try:
                     from py_clob_client.order_builder.constants import (
