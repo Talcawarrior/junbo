@@ -1,13 +1,13 @@
 $S = "C:\Users\fdemir\Documents\New project\junbo\scripts"
-$P = "python"
+$P = "C:\Users\fdemir\AppData\Local\Programs\Python\Python312\python.exe"
 $W = "C:\Users\fdemir\Documents\New project\junbo"
 
 $tasks = @(
-    @{Name="Junbo-OrderbookCollect"; Action="$P $S\collect_orderbook.py"; Trigger="every30m"},
-    @{Name="Junbo-ActualsCollect"; Action="$P $S\collect_actuals.py"; Trigger="every6h"},
-    @{Name="Junbo-BackupDatabases"; Action="$P $S\backup_databases.py"; Trigger="every6h"},
-    @{Name="Junbo-SyncBacktest"; Action="$P $S\sync_backtest_db.py"; Trigger="every6h"},
-    @{Name="JunboBotWatchdog"; Action="$P $S\bot_watchdog.py"; Trigger="every1m"}
+    @{Name="Junbo-OrderbookCollect"; Script="collect_orderbook.py"; Trigger="every30m"},
+    @{Name="Junbo-ActualsCollect"; Script="collect_actuals.py"; Trigger="every6h"},
+    @{Name="Junbo-BackupDatabases"; Script="backup_databases.py"; Trigger="every6h"},
+    @{Name="Junbo-SyncBacktest"; Script="sync_backtest_db.py"; Trigger="every6h"},
+    @{Name="JunboBotWatchdog"; Script="bot_watchdog.py"; Trigger="every1m"}
 )
 
 foreach ($t in $tasks) {
@@ -17,7 +17,7 @@ foreach ($t in $tasks) {
             Unregister-ScheduledTask -TaskName $t.Name -Confirm:$false
         }
 
-        $act = New-ScheduledTaskAction -Execute "python" -Argument ("`"$S\$($t.Action.Split()[-1])`"") -WorkingDirectory $W
+        $act = New-ScheduledTaskAction -Execute $P -Argument ("`"$S\$($t.Script)`"") -WorkingDirectory $W
 
         switch ($t.Trigger) {
             "every1m" {
