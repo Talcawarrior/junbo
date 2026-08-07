@@ -257,6 +257,72 @@ class TestOpenBetOnMarket:
             result = bp.open_bet_on_market(market, s)
             assert result is None
 
+    def test_rejects_reentry_after_recent_stop_loss(self):
+        """Stop-loss ile kapanan ayni markete hemen tekrar bet ACILMAMALI.
+
+        Bug: bet_placer.once_2026_08_07 ayni market_id 3374736'ya 2 kez
+        girdi — bet 144 SL ile kapandi (14:46), 10 sn sonra bet 186 ayni
+        markete yeniden acildi (14:46:29) ve yine SL'ye dustu. Kapali
+        betler OPEN_BET_STATUSES'de olmadigi icin normal dedup bunlari
+        yakalayamaz; re-entry guard'i olmadan kayip dongusu olusur.
+        """
+        from database.db import get_session
+        from executor.bet_placer import BetPlacer
+        from database.models import Bet
+
+        with get_session() as s:
+            _add_portfolio(s, 1000.0)
+            _add_market(s, "m7", 0.50)
+            # Stop-loss 5 dk once kapanmis bir bet var
+            s.add(
+                Bet(
+                    market_id="m7",
+                    city="Testville",
+                    city_code="TEST",
+                    side="YES",
+                    amount=10.0,
+                    price=0.50,
+                    status="closed_early",
+                    close_reason="stop_loss: -54.5%",
+                    closed_at=(datetime.now(timezone.utc) - timedelta(minutes=5)).replace(tzinfo=None),
+                )
+            )
+            s.commit()
+            bp = BetPlacer()
+            WM = __import__("database.models", fromlist=["WeatherMarket"]).WeatherMarket
+            market = s.query(WM).filter_by(id="m7").first()
+            result = bp.open_bet_on_market(market, s)
+            assert result is None, "stop_loss sonrasi ayni markete yeniden bet acilmamali"
+
+    def test_allows_reentry_after_old_non_loss_close(self):
+        """Eski (guard penceresi disinda) kapanmalar re-entry'i engellememeli."""
+        from database.db import get_session
+        from executor.bet_placer import BetPlacer
+        from database.models import Bet, WeatherMarket
+
+        with get_session() as s:
+            _add_portfolio(s, 1000.0)
+            _add_market(s, "m8", 0.50)
+            # 7 gun once 'rotation' ile kapanmis bet (guard 6 saat, disinda)
+            s.add(
+                Bet(
+                    market_id="m8",
+                    city="Testville",
+                    city_code="TEST",
+                    side="YES",
+                    amount=10.0,
+                    price=0.50,
+                    status="closed",
+                    close_reason="rotation",
+                    closed_at=(datetime.now(timezone.utc) - timedelta(days=7)).replace(tzinfo=None),
+                )
+            )
+            s.commit()
+            bp = BetPlacer()
+            market = s.query(WeatherMarket).filter_by(id="m8").first()
+            result = bp.open_bet_on_market(market, s)
+            assert result is not None
+
     def test_caps_amount_to_remaining_room(self):
         from database.db import get_session
         from executor.bet_placer import BetPlacer

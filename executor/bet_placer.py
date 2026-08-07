@@ -775,6 +775,30 @@ class BetPlacer:
         if existing:
             return None
 
+        # Ayni markette son 6 saatte stop_loss ile kapanmis bet var mi?
+        # Stop-loss sonrasi ayni pozisyona HEMEN tekrar girmek, kayip
+        # dongusu yaratir (ac -> SL -> yeniden ac -> SL). Kapali bet'ler
+        # OPEN_BET_STATUSES'de olmadigi icin normal dedup bunlari yakalamaz.
+        _stop_guard_window = timedelta(hours=6)
+        _cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - _stop_guard_window
+        recent_loss = (
+            session.query(Bet)
+            .filter(
+                Bet.market_id == str(market.id),
+                Bet.close_reason.isnot(None),
+                Bet.closed_at >= _cutoff,
+            )
+            .first()
+        )
+        if recent_loss is not None:
+            logger.info(
+                "open_bet_on_market: %s SKIPPED - recent close (%s) at %s (stop-loss/rotation re-entry guard)",
+                market.id,
+                recent_loss.close_reason,
+                recent_loss.closed_at,
+            )
+            return None
+
         # Bet tutari — exposure room'a gore kisitla
         flat_bet = float(getattr(bot_config.strategy, "flat_bet_usd", 10.0) or 10.0)
         amount = flat_bet
