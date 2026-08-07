@@ -1,19 +1,18 @@
-"""Saatlik piyasa fiyat snapshot'i — giris zamani analizi icin.
+"""Yarim saatlik piyasa fiyat snapshot'i — giris zamani analizi icin.
 
-Tum acik WeatherMarket'lerin YES/NO fiyatlarini saatlik olarak
+Tum acik WeatherMarket'lerin YES/NO fiyatlarini 30 dakikada bir
 market_snapshots tablosuna kaydeder. "highest/lowest temperature"
 merdivenindeki her threshold (HIGH or-above, LOW or-below, RANGE exact
 bucket) ayri bir markettir ve YES fiyati >= 0.005 (%0.5, Polymarket'in
 "1%" olarak goruntuledigi ~0.009'luk tail bucket'larini da yakalar) olan
 hepsi kaydedilir. Boylece hangi saat/gunde hangi sicaklik araligina
-girmenin daha karli oldugu analiz edilebilir.
+girmenin daha karli oldugu analiz edilebilir ve ilk-peak anini
+yakalamak icin cokozunurluk 30 dakikaya cikarilmistir.
 """
 
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
-
-from sqlalchemy import func
 
 from database.db import get_session
 from database.models import WeatherMarket, MarketSnapshot
@@ -23,15 +22,26 @@ logger = logging.getLogger("SNAPSHOT_JOB")
 YES_PRICE_MIN = 0.005
 
 
+def _bucket_start(dt: datetime) -> datetime:
+    """dt'nin icinde bulundugu 30dk penceresinin baslangic zamanini verir."""
+    minute = (dt.minute // 30) * 30
+    return dt.replace(minute=minute, second=0, microsecond=0)
+
+
+def _same_bucket(a: datetime, b: datetime) -> bool:
+    """a ve b ayni 30dk penceresinde mi?"""
+    return _bucket_start(a) == _bucket_start(b)
+
+
 def take_market_snapshots() -> int:
-    """Tum acik sicaklik bucket marketleri icin saatlik piyasa snapshot'i al.
+    """Tum acik sicaklik bucket marketleri icin 30 dakika bir piyasa snapshot'i al.
 
     Highest/lowest temperature merdivenindeki her threshold kaydedilir
     (HIGH, LOW ve RANGE exact bucket'lari dahil). yes_price >= 0.005
     olanlar kaydedilir; %1'in altinda kalan tail bucket'lari atlanir.
 
-    Ayni market'e ait snapshot'lar saatlik guncellenir
-    (ayni saat icin tekrar kayit yapilmaz).
+    Ayni market'e ait snapshot'lar 30dk bucket icinde guncellenir
+    (ayni 30dk icin tekrar kayit yapilmaz; yeni 30dk penceresi yeni satirdir).
 
     Returns: Kaydedilen yeni snapshot sayisi.
     """
@@ -67,23 +77,24 @@ def take_market_snapshots() -> int:
             if target_date:
                 hours_to_settlement = (target_date - now).total_seconds() / 3600.0
 
-            # Ayni market + saat icin zaten varsa guncelle
+            # Ayni market icin en guncel snapshot ayni 30dk bucket'indaysa onu
+            # guncelle; degilse (yeni 30dk penceresi) yeni satir olustur.
             existing = (
                 session.query(MarketSnapshot)
-                .filter(
-                    MarketSnapshot.market_id == market.id,
-                    func.date(MarketSnapshot.snapshot_time) == now.date(),
-                    func.strftime("%H", MarketSnapshot.snapshot_time) == f"{now.hour:02d}",
-                )
+                .filter(MarketSnapshot.market_id == market.id)
+                .order_by(MarketSnapshot.snapshot_time.desc())
                 .first()
             )
-
-            if existing:
-                existing.yes_price = float(market.yes_price or 0)
-                existing.no_price = float(market.no_price or 0)
-                existing.volume = float(market.volume or 0)
-                existing.hours_to_settlement = round(hours_to_settlement, 2)
-                existing.snapshot_time = now
+            if existing and existing.snapshot_time:
+                in_cur_bucket = _same_bucket(existing.snapshot_time, now)
+                if in_cur_bucket:
+                    existing.yes_price = float(market.yes_price or 0)
+                    existing.no_price = float(market.no_price or 0)
+                    existing.volume = float(market.volume or 0)
+                    existing.hours_to_settlement = round(hours_to_settlement, 2)
+                    existing.snapshot_time = now
+                else:
+                    existing = None
             else:
                 snapshot = MarketSnapshot(
                     market_id=market.id,
@@ -107,8 +118,13 @@ def take_market_snapshots() -> int:
     return saved
 
 
-def cleanup_old_snapshots(days: int = 30) -> int:
-    """Eski snapshot'lari temizle (varsayilan 30 gun)."""
+def cleanup_old_snapshots(days: int = 365) -> int:
+    """Eski snapshot'lari temizle (varsayilan 365 gun - backtest verisi korunur).
+
+    Dikkat: Snapshot verisi backtest icin kritik girdidir; 30 gun gibi kisa
+    bir retention veri kaybina yol acar. Varsayilan 365 gun ile 1 yillik
+    backtest penceresi garanti altina alinir.
+    """
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
     with get_session() as session:

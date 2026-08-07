@@ -26,7 +26,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "bot.db"
+DB_PATH = Path(__file__).resolve().parent.parent / "data" / "backtest.db"
 OUT_DIR = Path(__file__).resolve().parent.parent / "data" / "backtest_results"
 
 FEE_RATE = 0.05  # 5% taker fee

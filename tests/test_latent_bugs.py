@@ -479,6 +479,16 @@ ALLOWED_DEAD = {
     "run_single_fold",
     "simulate_decision",
     "walk_forward",
+    # First-peak / city-time analysis scripts (standalone, run via __main__)
+    "classify",
+    "find_first_peak",
+    "get_city",
+    "load_outcomes",
+    "load_series",
+    "load_settled",
+    "load_snapshots",
+    "hours_between",
+    "mins",
 }
 
 

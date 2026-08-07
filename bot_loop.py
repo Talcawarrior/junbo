@@ -460,11 +460,11 @@ async def settlement_loop(state):
     logger.info("Settlement loop exited (is_running=%s)", state.is_running)
 
 
-_SNAPSHOT_INTERVAL = 3600  # 1 saat
+_SNAPSHOT_INTERVAL = 1800  # 30 dakika — first-peak analizi icin daha yuksek cokozunurluk
 
 
 async def snapshot_loop(state):
-    """Saatlik bet snapshot dongusu — giris zamani analizi icin."""
+    """30 dakikada bir bet snapshot dongusu — giris zamani analizi icin."""
     from jobs.snapshot_job import take_market_snapshots, cleanup_old_snapshots
 
     last_cleanup_date = None
@@ -477,7 +477,7 @@ async def snapshot_loop(state):
 
             today = datetime.now(timezone.utc).date()
             if last_cleanup_date != today:
-                await asyncio.to_thread(cleanup_old_snapshots, days=30)
+                await asyncio.to_thread(cleanup_old_snapshots, days=365)
                 last_cleanup_date = today
 
         except asyncio.CancelledError:

@@ -79,6 +79,7 @@ ALLOWED_ROOT_MODULES = {
     "_simulate.py",
     "db_backup.py",
     "watchdog.py",
+    "snapshot_only.py",  # Task Scheduler (JunboSnapshot) entry point
 }
 
 

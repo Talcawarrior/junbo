@@ -11,6 +11,7 @@ blocked by production min_entry_price filters.
 import os
 import sys
 import tempfile
+from datetime import datetime
 
 import pytest
 
@@ -19,17 +20,35 @@ import pytest
 
 
 def _pre_test_backup():
+    """Production bot.db'yi gunluk en fazla 1 kez yedekle (Marker Throttling).
+
+    Testler zaten temp DB kullandigi icin bu yedek yalnizca "test oncesi
+    durum" referansi olarak tutulur; her test kosusunda 157 MB'lik bot.db
+    kopyalanmasi disk'i hizla doldurur (eski davranis: gunde yuzlerce dosya).
+    Gunluk bir kopya yeterlidir.
+    """
     try:
         db_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
         db_path = os.path.join(db_dir, "bot.db")
         backup_dir = os.path.join(db_dir, "backups")
-        if os.path.exists(db_path) and os.path.getsize(db_path) > 0:
-            os.makedirs(backup_dir, exist_ok=True)
-            from datetime import datetime
-            import shutil
+        marker = os.path.join(db_dir, ".last_pre_test_backup")
+        if not os.path.exists(db_path) or os.path.getsize(db_path) == 0:
+            return
 
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            shutil.copy2(db_path, os.path.join(backup_dir, f"bot_pre_test_{ts}.db"))
+        # Ayni gun daha once alindiysa atla (marker icerigi: YYYYMMDD).
+        today = datetime.now().strftime("%Y%m%d")
+        if os.path.exists(marker):
+            with open(marker, encoding="utf-8") as f:
+                if f.read().strip() == today:
+                    return
+
+        os.makedirs(backup_dir, exist_ok=True)
+        import shutil
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        shutil.copy2(db_path, os.path.join(backup_dir, f"bot_pre_test_{ts}.db"))
+        with open(marker, "w", encoding="utf-8") as f:
+            f.write(today)
     except Exception:
         pass
 
