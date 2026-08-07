@@ -294,6 +294,47 @@ class TestOpenBetOnMarket:
             result = bp.open_bet_on_market(market, s)
             assert result is None, "stop_loss sonrasi ayni markete yeniden bet acilmamali"
 
+    def test_reopens_new_leader_after_stop_loss(self):
+        """Stop-loss ile kaybedilen gruba, ayni grupta daha yuksek fiyatli
+        FARKLI market (yeni lider) pencere disinda bile acilmali.
+
+        Bug kaynagi (2026-08-07): SL sonrasi ayni markete tekrar girmek
+        yerine grubun yeni liderine gecilmeliydi. Bu test `_reopen_after_stop_loss`
+        akisinin, stop_loss kapanisina ragmen ayni gruptaki yeni (yuksek
+        fiyatli) farkli marketi actigini dogrular.
+        """
+        from database.db import get_session
+        from executor.bet_placer import BetPlacer
+        from database.models import Bet
+
+        with get_session() as s:
+            _add_portfolio(s, 1000.0)
+            # Ayni gruba iki market: m9 dusuk fiyatli (kaybedecek), m10 yuksek
+            _add_market(s, "m9", 0.60)
+            _add_market(s, "m10", 0.80)
+            # m9'da son 1 saatte stop_loss ile kapanmis bet
+            s.add(
+                Bet(
+                    market_id="m9",
+                    city="Testville",
+                    city_code="TEST",
+                    side="YES",
+                    amount=10.0,
+                    price=0.60,
+                    status="closed_early",
+                    close_reason="stop_loss: -54.5%",
+                    closed_at=(datetime.now(timezone.utc) - timedelta(minutes=1)).replace(tzinfo=None),
+                )
+            )
+            s.commit()
+            bp = BetPlacer()
+            reopened = bp._reopen_after_stop_loss(s)
+            assert reopened == 1, f"yeni lider acilmali, acilan={reopened}"
+            existing = (
+                s.query(Bet).filter(Bet.market_id == "m10", Bet.status.in_(("active", "placed", "pending"))).first()
+            )
+            assert existing is not None, "yeni lider m10'a bet acilmali"
+
     def test_allows_reentry_after_old_non_loss_close(self):
         """Eski (guard penceresi disinda) kapanmalar re-entry'i engellememeli."""
         from database.db import get_session

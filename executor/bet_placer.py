@@ -21,6 +21,11 @@ from utils.slippage import check_orderbook_depth, estimate_slippage
 
 logger = logging.getLogger("EXECUTOR_BET_PLACER")
 
+# Stop-loss sonrasi ayni grupta yeni liderin acilabilmesi icin geriye
+# bakilan pencere (saat): bu sure icinde stop_loss kapanisi olmus bir grup,
+# pencere disinda bile yeni lideriyle yeniden acilabilir.
+_STOP_LOSS_REOPEN_WINDOW = 6
+
 
 class BetPlacer:
     """SADECE bet acar. Karar vermez - engine karar verir."""
@@ -508,6 +513,99 @@ class BetPlacer:
 
         return True
 
+    def _reopen_after_stop_loss(self, session) -> int:
+        """Stop-loss kaybettiran grubun YENI liderini pencere disinda acar.
+
+        Bir (city, target_date, metric) grubunda bet stop_loss ile
+        kaybedilirse, o grubun yerine ayni tarihte su an en yuksek fiyatli
+        ACIK (farkli) market hemen acilir. Bu acilim bahis penceresi ve
+        8h/24h kuralina TAKILMAZ — stop-loss kaybi boekta tuketildigi icin
+        yeni liderin gecikmeden devreye girmesi istenir.
+
+        Not: Ayni kaybirlik market, mevcut ``open_bet_on_market`` re-entry
+        guardi (6 saat) ile zaten engellenir; bu adim sadece gruptaki FARKLI
+        lideri (yeni pazar) kirar.
+        """
+        reopened = 0
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        cutoff = now - timedelta(hours=_STOP_LOSS_REOPEN_WINDOW)
+
+        # Son pencere icindeki stop_loss kapanislarini bul
+        lost_bets = (
+            session.query(Bet)
+            .filter(
+                Bet.close_reason.like("stop_loss%"),
+                Bet.closed_at >= cutoff,
+            )
+            .all()
+        )
+        if not lost_bets:
+            return 0
+
+        # Grup anahtari -> kayibin market id
+        lost_groups: dict[tuple, str] = {}
+        for bet in lost_bets:
+            wm = session.query(WeatherMarket).filter_by(id=bet.market_id).first()
+            if not wm or not wm.target_date:
+                continue
+            td = wm.target_date.replace(tzinfo=None) if getattr(wm.target_date, "tzinfo", None) else wm.target_date
+            key = (wm.city, td, wm.metric or "unknown")
+            lost_groups.setdefault(key, bet.market_id)
+
+        for key, lost_market_id in lost_groups.items():
+            city, td, metric = key
+            # Grupta acik, fiyatli tum marketleri topla ve en yuksek fiyatliyi sec
+            candidates = (
+                session.query(WeatherMarket)
+                .filter(
+                    WeatherMarket.status == "open",
+                    WeatherMarket.city == city,
+                    WeatherMarket.target_date == td,
+                    WeatherMarket.metric == metric,
+                    WeatherMarket.yes_price.isnot(None),
+                    WeatherMarket.yes_price > 0,
+                )
+                .all()
+            )
+            if not candidates:
+                continue
+            best = max(candidates, key=lambda m: float(m.yes_price or 0))
+
+            # Ayni market (kaybi) ise atla -> re-entry guardi zaten engeller
+            if str(best.id) == str(lost_market_id):
+                logger.info(
+                    "reopen_after_stop_loss: %s same market, skip (re-entry guard)",
+                    best.id,
+                )
+                continue
+
+            existing = (
+                session.query(Bet)
+                .filter(
+                    Bet.market_id == str(best.id),
+                    Bet.status.in_(OPEN_BET_STATUSES),
+                )
+                .first()
+            )
+            if existing:
+                continue
+
+            bet = self.open_bet_on_market(best, session)
+            if bet:
+                reopened += 1
+                logger.info(
+                    "reopen_after_stop_loss: opened %s %s %s (yes=%.4f) after lost %s",
+                    city,
+                    str(td.date()),
+                    metric,
+                    float(best.yes_price or 0),
+                    lost_market_id,
+                )
+
+        if reopened:
+            logger.info("reopen_after_stop_loss: %d new leader bet(s) opened", reopened)
+        return reopened
+
     def place_all_pending(self) -> int:
         """Tum acik Polymarket weather marketleri icin bet ac.
         Analiz sonucuna bakilmaz — Polymarket'te hangi derece en yuksek
@@ -527,16 +625,20 @@ class BetPlacer:
         with get_session() as session:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
 
+            # ── Stop-loss sonrasi yeni lider yeniden acilisi ──────────
+            # Bahis penceresi ve 8h/24h kuralindan BAGIMSIZ calisir.
+            placed += self._reopen_after_stop_loss(session)
+
             # ── Bahis penceresi kontrolu ──────────────────────────────
             if not self._is_in_betting_window():
                 hour = now.hour
                 windows = getattr(bot_config.strategy, "betting_windows", [])
                 logger.info(
-                    "Betting window KAPALI (hour=%d, windows=%s) — bahis acma atlandi",
+                    "Betting window KAPALI (hour=%d, windows=%s) — bahis penceresi kurallari disinda acma yok",
                     hour,
                     windows,
                 )
-                return 0
+                return placed
 
             # ── Gunluk rotasyon sayisi kontrolu ───────────────────────
             max_daily_rot = int(getattr(bot_config.strategy, "max_daily_rotations", 3) or 3)
