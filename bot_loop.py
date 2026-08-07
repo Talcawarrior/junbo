@@ -8,6 +8,7 @@ Watchdog: settlement_loop monitors scan_loop health via state.last_scan.
 
 import asyncio
 import logging
+import os
 from datetime import date, datetime, timezone, timedelta
 
 from database.db import get_session
@@ -424,8 +425,13 @@ async def settlement_loop(state):
                     # 1 saatten fazlaysa bot'u durdur
                     if elapsed > _WATCHDOG_RESTART:
                         logger.critical("SCAN LOOP DEAD for >%.0f min — stopping bot for restart", elapsed / 60)
-                        state.is_running = False
-                        break
+                        # Process'i GERCEKTEN sonlandir: sadece state.is_running=False yapmak
+                        # loop'lari kapatir ama process ayakta kalir (port tutulur, servis
+                        # "Running" gorunur) ve restart HIC gerceklesmez. Windows servisi
+                        # FAILURE_ACTIONS RESTART (5s/10s/30s) ile cikan process'i otomatik
+                        # yeniden baslatir — bu yuzden hard exit sart.
+                        logging.shutdown()
+                        os._exit(1)
                 elif elapsed > _WATCHDOG_WARNING:
                     logger.warning("SCAN LOOP WATCHDOG: Last scan %.1f min ago (warning)", elapsed / 60)
                 else:

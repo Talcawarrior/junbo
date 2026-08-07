@@ -468,7 +468,7 @@ class BotConfig:
         # ── Betting windows initialization ──────────────────────────
         if self.strategy.betting_windows is None:
             self.strategy.betting_windows = [
-                (3, 6),  # Pencere 1: 03:00-06:00 UTC (GFS+ECMWF taze veri)
+                (0, 6),  # Pencere 1: 00:00-06:00 UTC (24h kuralina giren marketler aninda acilir)
                 (12, 15),  # Pencere 2: 12:00-15:00 UTC (2-gun pazarlari oturdu)
                 (19, 22),  # Pencere 3: 19:00-22:00 UTC (aksam runu + likidite)
             ]

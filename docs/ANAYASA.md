@@ -219,9 +219,11 @@ karsilasildiginda once buraya bak, sonra gerekirse kod kanitlarini dogrula.
 - **Aksiyon:** Purge calismazsa `scripts/backup_databases.py` elle calistir.
 
 ### S5. Bet penceresi disinda bet acildi / acilmadi
-- **Beklenen:** Bet pencereleri `[(3,6),(12,15),(19,22)]` (bot.log: `Betting window
-  KAPALI (hour=..., windows=...)`). SNAPSHOT bu kuraldan ETKILENMEZ — snapshot
-  24/7 alinir (kasitli: giris zamani analizi icin).
+- **Beklenen:** Bet pencereleri `[(0,6),(12,15),(19,22)]` (bot.log: `Betting window
+  KAPALI (hour=..., windows=...)`). 00:00-06:00 UTC penceresi 24h kuralina
+  (`8h < kalan <= 24h`) giren marketlerin aninda acilmasi icin 3'ten 0'a cekildi.
+  SNAPSHOT bu kuraldan ETKILENMEZ — snapshot 24/7 alinir (kasitli: giris zamani
+  analizi icin).
 - **Dogrula:** bot.log `Betting window` satirlari; bet saatleri pencerelerle uyumlu.
 
 ### S6. Purge "Could not parse" hatasi
