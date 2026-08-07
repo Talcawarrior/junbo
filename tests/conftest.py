@@ -132,9 +132,50 @@ def _protect_production_db_function():
     yield
 
 
+# ── Shared market factory ─────────────────────────────────────────────────
+
+_FAKE_MARKET_SEQ = [0]
+
+
+@pytest.fixture
+def market_factory():
+    """Create a fresh WeatherMarket row in the temp DB and return its id."""
+    from database.db import get_session
+    from database.models import WeatherMarket
+
+    def _create(**overrides):
+        _FAKE_MARKET_SEQ[0] += 1
+        n = _FAKE_MARKET_SEQ[0]
+        defaults = dict(
+            id=f"test-mkt-{n}",
+            question=f"Will London exceed 30C on 2026-08-08? #{n}",
+            city="London",
+            city_code="EGLL",
+            metric="temperature_max",
+            threshold=30.0,
+            threshold_unit="celsius",
+            target_date=datetime(2026, 8, 8, 12, 0, 0),
+            latitude=51.5,
+            longitude=-0.1,
+            market_type="HIGH",
+            yes_price=0.6,
+            no_price=0.4,
+            status="open",
+            raw_data="{}",
+        )
+        defaults.update(overrides)
+        with get_session() as session:
+            m = WeatherMarket(**defaults)
+            session.add(m)
+            session.commit()
+            mid = m.id
+            session.expunge(m)
+            return mid
+
+    return _create
+
+
 # ── Strategy Params Reset ────────────────────────────────────────────────
-
-
 @pytest.fixture(autouse=True)
 def _reset_strategy_params():
     """Reset strategy levers to safe permissive defaults."""

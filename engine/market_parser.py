@@ -280,6 +280,35 @@ class MarketParser:
                         continue
         return None
 
+    def _extract_end_date(self, market: "WeatherMarket") -> datetime | None:
+        """Gercek Polymarket endDate'i raw_data'dan okur (ornek: 12:00 UTC).
+
+        Weather marketleri gece yarisi degil, gun icinde kapanir. target_date
+        olarak endDate kullanilmasi 24h kuralini dogru uygulatir (DB'de
+        23:59:59 saklanirsa 12 saat kayma olur ve acik marketler bet
+        filtresinden kacabilir).
+        """
+        import json
+
+        raw_data = getattr(market, "raw_data", None)
+        if not raw_data:
+            return None
+        try:
+            raw = json.loads(raw_data)
+        except (TypeError, ValueError):
+            return None
+        end = raw.get("end_date_iso") or raw.get("endDate")
+        if not end:
+            return None
+        try:
+            s = str(end).strip().replace("Z", "+00:00")
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo:
+                dt = dt.replace(tzinfo=None)
+            return dt
+        except (ValueError, TypeError):
+            return None
+
     def _extract_metric(self, question: str) -> str:
         """Ne olculuyor?"""
         q = question.lower()
@@ -319,7 +348,7 @@ class MarketParser:
 
             city = self._extract_city(question)
             threshold_result = self._extract_threshold(question)
-            target_date = self._extract_date(question)
+            target_date = self._extract_end_date(market) or self._extract_date(question)
             metric = self._extract_metric(question)
 
             if city:

@@ -1,0 +1,25 @@
+[run]
+branch = False
+source = .
+omit =
+    tests/*
+    scripts/*
+    data/*
+    logs/*
+    backtest/*
+    specs/*
+    *.db
+    data_pipeline/backfill.py
+    jobs/*_job.py
+    utils/debug_helpers.py
+
+[report]
+# Coverage threshold korumasi: bu esigin altina duserse `pytest --cov` fail eder.
+# (pytest.ini icindeki --cov-fail-under ile baglantilidir)
+show_missing = True
+skip_covered = False
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    if __name__ == .__main__.:
+    raise NotImplementedError

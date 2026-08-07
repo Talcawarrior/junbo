@@ -586,7 +586,7 @@ def get_markets():
             m_forecasts = forecast_map.get(m.id, [])
             if m_forecasts:
                 latest_vals = [f.predicted_value for f in m_forecasts]
-                days_ahead = max((m.target_date - now).days, 1)
+                days_ahead = max((m.target_date.date() - now.date()).days, 1)
                 model_prob = calc.estimate_probability(latest_vals, float(m.threshold), days_ahead)
 
             market_list.append(

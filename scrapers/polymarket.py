@@ -379,7 +379,10 @@ class PolymarketScraper:
             )
 
         # Parse structured market metadata
-        target_date = self._extract_date(title)
+        # Oncelik gercek Polymarket endDate'de: weather marketleri gun icinde
+        # (12:00 UTC) kapanir, 23:59:59 degil. Title'dan turetilen tarih
+        # fallback olarak kullanilir.
+        target_date = self._extract_end_date(raw) or self._extract_date(title)
         parser = MarketParser()
         threshold_result = parser._extract_threshold(question)
         threshold, threshold_unit, threshold_low, threshold_high = (
@@ -613,6 +616,25 @@ class PolymarketScraper:
                 except ValueError:
                     continue
         return None
+
+    def _extract_end_date(self, raw: dict) -> datetime | None:
+        """Gercek Polymarket endDate (ornek: 2026-08-08T12:00:00Z).
+
+        Weather marketleri gece yarisi degil, gun icinde (12:00 UTC)
+        kapanir. target_date olarak endDate kullanilmasi 24h kuralini
+        dogru uygulatir (DB'de 23:59:59 saklanirsa 12 saat kayma olur).
+        """
+        end = raw.get("end_date_iso") or raw.get("endDate")
+        if not end:
+            return None
+        try:
+            s = str(end).strip().replace("Z", "+00:00")
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo:
+                dt = dt.replace(tzinfo=None)
+            return dt
+        except (ValueError, TypeError):
+            return None
 
     def _extract_city(self, text: str) -> str:
         if not text:

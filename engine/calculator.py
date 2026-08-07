@@ -145,7 +145,11 @@ class Calculator:
 
             # days_ahead: use calendar days (>=0) and treat "today" as 1 day
             # so that (target_date=23:59:59, now=04:21) -> 0 still means "today".
-            days_ahead = (market.target_date - datetime.now(timezone.utc).replace(tzinfo=None)).days
+            # NOTE: date-bazli fark kullan (datetime farki degil) — Polymarket
+            # endDate'i gun icinde (12:00 UTC) oldugu icin target_date saat
+            # bilgisi tasir; saat farki .days degerini kaydirip "0 gun" gibi
+            # gosterebilir. Date bazli hesap saatten bagimsiz dogru gunu verir.
+            days_ahead = (market.target_date.date() - datetime.now(timezone.utc).date()).days
 
             # ── Lead-time based dynamic weighting ───────────────────────
             # Research shows ECMWF HRES outperforms GFS at all lead times,
