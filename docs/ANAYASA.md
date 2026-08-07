@@ -101,7 +101,7 @@ calismasi (bot process'inden ayri) kesintiye karsi guvence verir:
 | Veri | Nerede | Kim yazar | Siklik | Boyut (2026-08-07) |
 |------|--------|-----------|--------|---------------------|
 | Market snapshot (YES/NO fiyat) | `bot.db` -> `market_snapshots` | `bot_loop.py` snapshot_loop (24/7) + `JunboSnapshot` task (30dk) | 30 dk | 11.197 satir |
-| Orderbook derinlik | `orderbook.db` -> `orderbook_snapshots` | `Junbo-OrderbookCollect` (scripts/collect_orderbook.py) | 1 saat | 3.692 satir |
+| Orderbook derinlik | `orderbook.db` -> `orderbook_snapshots` | `Junbo-OrderbookCollect` (scripts/collect_orderbook.py) | 30 dk | 3.692 satir |
 | Gerceklesen hava durumu | `actuals.db` -> `actual_temperatures` | `Junbo-ActualsCollect` (scripts/collect_actuals.py) | 6 saat | 4.599 satir |
 | Bet kayitlari | `bot.db` -> `bets` | bot_loop (bet placer/settler) | her islem | 117 bet |
 | Backtest DB (cografi) | `backtest.db` (4 tablo) | `Junbo-SyncBacktest` (scripts/sync_backtest_db.py) | 6 saat | 35.551 snapshot + 32.616 forecast + 166 bet + 4.019 market |

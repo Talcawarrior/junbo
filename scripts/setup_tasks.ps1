@@ -3,7 +3,7 @@ $P = "python"
 $W = "C:\Users\fdemir\Documents\New project\junbo"
 
 $tasks = @(
-    @{Name="Junbo-OrderbookCollect"; Action="$P $S\collect_orderbook.py"; Trigger="hourly"},
+    @{Name="Junbo-OrderbookCollect"; Action="$P $S\collect_orderbook.py"; Trigger="every30m"},
     @{Name="Junbo-ActualsCollect"; Action="$P $S\collect_actuals.py"; Trigger="every6h"},
     @{Name="Junbo-BackupDatabases"; Action="$P $S\backup_databases.py"; Trigger="every6h"},
     @{Name="Junbo-SyncBacktest"; Action="$P $S\sync_backtest_db.py"; Trigger="every6h"}
@@ -19,6 +19,9 @@ foreach ($t in $tasks) {
         $act = New-ScheduledTaskAction -Execute "python" -Argument ("`"$S\$($t.Action.Split()[-1])`"") -WorkingDirectory $W
 
         switch ($t.Trigger) {
+            "every30m" {
+                $trig = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 30)
+            }
             "hourly" {
                 $trig = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1)
             }
