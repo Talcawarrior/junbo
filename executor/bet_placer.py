@@ -601,13 +601,23 @@ class BetPlacer:
             )
             if not candidates:
                 continue
-            best = max(candidates, key=lambda m: float(m.yes_price or 0))
 
-            # Ayni market (kaybi) ise atla -> re-entry guardi zaten engeller
-            if str(best.id) == str(lost_market_id):
+            # Kayip market disinda en yuksek fiyatliyi sec. 2026-08-08 bugfix:
+            # best == lost_market_id oldugunda skip ediyordu -> SL yiyen market
+            # hala en yuksek fiyatliysa grup ASLA yeniden acilmiyordu (Toronto
+            # 30C, Miami 33.6C, Buenos Aires 13C ornekleri). Simdi kayip market
+            # disindaki en yuksek fiyatliya gecilir; hicbir farkli market yoksa
+            # re-entry guardi zaten ayni markete girmeyi engeller.
+            best = max(
+                (m for m in candidates if str(m.id) != str(lost_market_id)),
+                key=lambda m: float(m.yes_price or 0),
+                default=None,
+            )
+            if best is None:
                 logger.info(
-                    "reopen_after_stop_loss: %s same market, skip (re-entry guard)",
-                    best.id,
+                    "reopen_after_stop_loss: %s group only lost market (id=%s) remains, skip",
+                    city,
+                    lost_market_id,
                 )
                 continue
 

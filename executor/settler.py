@@ -150,6 +150,17 @@ class SettlementEngine:
         )
 
         if not open_bets:
+            # 2026-08-08 bugfix: SL ile kapanmis betin marketi hala CANLI
+            # olabilir (kapanis 24:00 UTC = target_date + 12h). Onceki mantik
+            # acik bet yoksa hemen "expired" yapiyordu -> _reopen_after_stop_loss
+            # status='open' aradigi icin yeni lider ASLA acilamiyordu (Toronto
+            # 30C, Miami 33.6C, Buenos Aires 13C). Kapanis gecmeden expired
+            # isaretlenmez; Gamma cozumlemesi yine ayni dongude denenir.
+            now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+            if market.target_date:
+                _close = market.target_date + timedelta(hours=12)  # 24:00 UTC kapanis
+                if _close > now_naive:
+                    return None  # market hala canli, dokunma (pending gibi)
             market.status = "expired"
             return None
 
@@ -287,6 +298,7 @@ class SettlementEngine:
         try:
             url = f"{GAMMA_API_BASE}/markets/{market.id}"
             from config.settings import bot_config
+
             resp = requests.get(url, timeout=15, proxies=bot_config.polymarket.get_proxies())
             resp.raise_for_status()
             return resp.json()
