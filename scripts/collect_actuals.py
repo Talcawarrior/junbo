@@ -250,15 +250,30 @@ def collect_once() -> int:
         lon = city_info["longitude"]
 
         # Determine start date
+        today = datetime.now(timezone.utc).date().isoformat()
         last_date = get_last_fetched_date(city)
         if last_date:
-            # Incremental: fetch from next day after last successful date
-            start_date = (datetime.fromisoformat(last_date) + timedelta(days=1)).date().isoformat()
+            if last_date >= today:
+                # Bugunku veri zaten var -> ayni gunu tekrar cek (gun ici
+                # guncelleme; archive API kismi saatler dondurur). Onceki
+                # mantik (last+1) start'i bugunu asiyordu -> Open-Meteo
+                # 400 Bad Request, veri 00:13'teki kismi haliyle kaliyordu.
+                start_date = today
+            else:
+                # Incremental: fetch from next day after last successful date
+                start_date = (datetime.fromisoformat(last_date) + timedelta(days=1)).date().isoformat()
         else:
             # First run: backfill 90 days
             start_date = (datetime.now(timezone.utc).date() - timedelta(days=BACKFILL_DAYS)).isoformat()
 
         logger.info("  %s: fetching %s to %s", city, start_date, end_date)
+
+        # 2026-08-08 bugfix: incremental start (last_date+1) bugunu asabilir
+        # ("fetching 2026-08-09 to 2026-08-08" -> Open-Meteo 400 Bad Request,
+        #  "All 5 attempts failed"). Zaten guncel sehirde fetch YOK.
+        if start_date > end_date:
+            logger.info("  %s: already up to date (start=%s > end=%s), skip", city, start_date, end_date)
+            continue
 
         raw = fetch_archive_actuals(lat, lon, start_date, end_date)
         if raw is None:
