@@ -294,26 +294,25 @@ class TestOpenBetOnMarket:
             result = bp.open_bet_on_market(market, s)
             assert result is None, "stop_loss sonrasi ayni markete yeniden bet acilmamali"
 
-    def test_reopens_new_leader_after_stop_loss(self):
-        """Stop-loss ile kaybedilen gruba, ayni grupta daha yuksek fiyatli
-        FARKLI market (yeni lider) pencere disinda bile acilmali.
+    def test_reopens_new_leader_after_stop_loss_in_window(self):
+        """Pencere ICINDEYKEN SL sonrasi yeni lider acilir; DISINDAYSA acilmaz.
 
-        Bug kaynagi (2026-08-07): SL sonrasi ayni markete tekrar girmek
-        yerine grubun yeni liderine gecilmeliydi. Bu test `_reopen_after_stop_loss`
-        akisinin, stop_loss kapanisina ragmen ayni gruptaki yeni (yuksek
-        fiyatli) farkli marketi actigini dogrular.
+        Bug-kaynagi (2026-08-07/08): `_reopen_after_stop_loss` pencere
+        disinda bile otomatik yeni-lider aciliyordu -> ayni sehire/gune birden
+        fazla esige ard arda bet (Wellington 12C/13C cift kayip).
+
+        Yeni kural (2026-08-08): SL sonrasi yeniden acilim `_is_in_betting_window`
+        (04:00-23:30 UTC) kuralina tabidir. Pencere kapaliyken acilim YOK.
         """
+        from unittest.mock import patch
         from database.db import get_session
         from executor.bet_placer import BetPlacer
         from database.models import Bet
 
-        with get_session() as s:
-            _add_portfolio(s, 1000.0)
-            # Ayni gruba iki market: m9 dusuk fiyatli (kaybedecek), m10 yuksek
-            _add_market(s, "m9", 0.60)
-            _add_market(s, "m10", 0.80)
-            # m9'da son 1 saatte stop_loss ile kapanmis bet
-            s.add(
+        def _mk(sess):
+            _add_market(sess, "m9", 0.60)
+            _add_market(sess, "m10", 0.80)
+            sess.add(
                 Bet(
                     market_id="m9",
                     city="Testville",
@@ -326,14 +325,38 @@ class TestOpenBetOnMarket:
                     closed_at=(datetime.now(timezone.utc) - timedelta(minutes=1)).replace(tzinfo=None),
                 )
             )
-            s.commit()
-            bp = BetPlacer()
-            reopened = bp._reopen_after_stop_loss(s)
-            assert reopened == 1, f"yeni lider acilmali, acilan={reopened}"
+            sess.commit()
+
+        # 1) Pencere ACIK -> yeni lider m10'a bet acilir
+        with get_session() as s:
+            _add_portfolio(s, 1000.0)
+            _mk(s)
+            bp1 = BetPlacer()
+            with patch.object(bp1, "_is_in_betting_window", return_value=True):
+                reopened = bp1._reopen_after_stop_loss(s)
+            assert reopened == 1, f"pencere acikka yeni lider acilmali, acilan={reopened}"
             existing = (
                 s.query(Bet).filter(Bet.market_id == "m10", Bet.status.in_(("active", "placed", "pending"))).first()
             )
-            assert existing is not None, "yeni lider m10'a bet acilmali"
+            assert existing is not None, "pencere aciken m10'a bet acilmali"
+
+        # 2) Pencere KAPALI -> acilma YOK (Wellington gece 00:10 ornegi)
+        with get_session() as s2:
+            # Ayni test icinde DB paylasildigi icin once onu temizle
+            from database.models import WeatherMarket
+
+            s2.query(Bet).delete()
+            s2.query(WeatherMarket).delete()
+            s2.commit()
+            _mk(s2)
+            bp2 = BetPlacer()
+            with patch.object(bp2, "_is_in_betting_window", return_value=False):
+                reopened2 = bp2._reopen_after_stop_loss(s2)
+            assert reopened2 == 0, f"pencere kapaliyken yeniden acilma olmamali, acilan={reopened2}"
+            existing2 = (
+                s2.query(Bet).filter(Bet.market_id == "m10", Bet.status.in_(("active", "placed", "pending"))).first()
+            )
+            assert existing2 is None, "pencere kapaliyken m10'a bet acilmamali"
 
     def test_allows_reentry_after_old_non_loss_close(self):
         """Eski (guard penceresi disinda) kapanmalar re-entry'i engellememeli."""

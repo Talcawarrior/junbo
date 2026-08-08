@@ -479,9 +479,10 @@ class BetPlacer:
             return True  # pencere tanimli degilse her zaman ac
 
         now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-        hour = now_utc.hour
+        # Kesirli saat: 23.5 = 23:30 (yarim saat granulerligi destekle)
+        hour_frac = now_utc.hour + now_utc.minute / 60.0
         for start_h, end_h in windows:
-            if start_h <= hour < end_h:
+            if start_h <= hour_frac < end_h:
                 return True
         return False
 
@@ -514,28 +515,36 @@ class BetPlacer:
         return True
 
     def _reopen_after_stop_loss(self, session) -> int:
-        """Stop-loss kaybettiran grubun YENI liderini pencere disinda acar.
+        """SL sonrasi ayni gruptaki yeni lideri SADECE bahis penceresi icinde acar.
 
-        Bir (city, target_date, metric) grubunda bet stop_loss ile
-        kaybedilirse, o grubun yerine ayni tarihte su an en yuksek fiyatli
-        ACIK (farkli) market hemen acilir. Bu acilim bahis penceresi ve
-        8h/24h kuralina TAKILMAZ — stop-loss kaybi boekta tuketildigi icin
-        yeni liderin gecikmeden devreye girmesi istenir.
+        Bir (city, target_date, metric) grubunda bet stop_loss ile kaybedildi
+        ise, o grubun yerine ayni tarihte su an en yuksek fiyatli ACIK
+        (farkli esik) market acilabilir. Kurallar:
 
-        Not: Ayni kaybirlik market, mevcut ``open_bet_on_market`` re-entry
-        guardi (6 saat) ile zaten engellenir; bu adim sadece gruptaki FARKLI
-        lideri (yeni pazar) kirar.
+        - Acilim `_is_in_betting_window` (04:00-23:30 UTC) kuralina TABI:
+          pencere kapaliyken (gece 00:00-04:00 gibi) asla bet acilmaz. Bu,
+          Wellington 12C/13C'deki gibi gece yarisi otomatik cift-esik
+          acilimini engeller.
+        - Yeni lider, grupta hali hazirda ACIK bet varsa acilmez (tek pozisyon
+          kurali — ayni gruba ikinci esik ayni anda girilmez).
+        - Ayni kayip market, mevcut ``open_bet_on_market`` re-entry guardi
+          (6 saat) ile zaten engellenir.
         """
+        # Pencere kapali ise SL sonrasi yeniden acilmaz (cift esik/aceles gece acilim yok)
+        if not self._is_in_betting_window():
+            return 0
+
         reopened = 0
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         cutoff = now - timedelta(hours=_STOP_LOSS_REOPEN_WINDOW)
 
-        # Son pencere icindeki stop_loss kapanislarini bul
+        # Son _STOP_LOSS_REOPEN_WINDOW saat icindeki stop_loss kapanislarini bul
         lost_bets = (
             session.query(Bet)
             .filter(
                 Bet.close_reason.like("stop_loss%"),
                 Bet.closed_at >= cutoff,
+                Bet.closed_at <= now,
             )
             .all()
         )
@@ -554,6 +563,29 @@ class BetPlacer:
 
         for key, lost_market_id in lost_groups.items():
             city, td, metric = key
+
+            # Grupta zaten ACIK bet varsa -> tek pozisyon kurali, acilma
+            group_open = (
+                session.query(Bet)
+                .filter(Bet.status.in_(OPEN_BET_STATUSES))
+                .join(WeatherMarket, WeatherMarket.id == Bet.market_id)
+                .filter(
+                    WeatherMarket.city == city,
+                    WeatherMarket.target_date == td,
+                    WeatherMarket.metric == metric,
+                )
+                .first()
+            )
+            if group_open:
+                logger.info(
+                    "reopen_after_stop_loss: %s %s %s already open bet %s — single position, skip",
+                    city,
+                    str(td.date()),
+                    metric,
+                    group_open.market_id,
+                )
+                continue
+
             # Grupta acik, fiyatli tum marketleri topla ve en yuksek fiyatliyi sec
             candidates = (
                 session.query(WeatherMarket)
@@ -655,14 +687,11 @@ class BetPlacer:
             # Son 24 saat kurali: sadece 24 saat icinde settle olacak
             # marketlere bet acilir. Uzun vade (2+ gun) betler acilmaz.
             #
-            # ERKEN AÇILIM SINIRI (2026-08-07 veri analizi):
-            # 7 Agustos SL'larinda, vadeye 20-22 saat kala acilan betler
-            # ortalama %45 SL yerken, 16-18 saat kala acilanlar %26 SL yedi.
-            # Erken acilis fiyat henuz oynakken (model guncellemeleri once)
-            # girilmesine yol actigi icin stop-loss oranini artiriyordu.
-            # Pencere ust siniri 24h -> 18h'e indirildi: marketler yalnizca
-            # vadeye 8-18 saat kala bet acabiliyor. Bu, tum sehirlerde
-            # gecerlidir (sehir bazli fark istatistiksel olarak anlamsiz).
+            # AÇILIS PENCERESI (2026-08-08 karar): marketler 24:00 UTC kapanir.
+            # Bet penceresi target 04:00-23:30 UTC'dir:
+            #   - 04:00 oncesi (vadeye 20h+ kala) acilma — fiyat henuz oturmadi
+            #   - 23:30 sonrasi (vadeye 30dk kala) acilma — kapanis anina yakin
+            # Bu, vadeye 20h ile 0.5h kala arasi anlamina gelir.
             open_markets = (
                 session.query(WeatherMarket)
                 .filter(
@@ -670,8 +699,8 @@ class BetPlacer:
                     WeatherMarket.target_date.isnot(None),
                     WeatherMarket.yes_price.isnot(None),
                     WeatherMarket.yes_price > 0,
-                    WeatherMarket.target_date > now + timedelta(hours=8),
-                    WeatherMarket.target_date <= now + timedelta(hours=18),
+                    WeatherMarket.target_date > now + timedelta(minutes=30),
+                    WeatherMarket.target_date <= now + timedelta(hours=20),
                     WeatherMarket.city != "Unknown",
                 )
                 .all()

@@ -85,17 +85,17 @@ def take_market_snapshots() -> int:
                 .order_by(MarketSnapshot.snapshot_time.desc())
                 .first()
             )
-            if existing and existing.snapshot_time:
-                in_cur_bucket = _same_bucket(existing.snapshot_time, now)
-                if in_cur_bucket:
-                    existing.yes_price = float(market.yes_price or 0)
-                    existing.no_price = float(market.no_price or 0)
-                    existing.volume = float(market.volume or 0)
-                    existing.hours_to_settlement = round(hours_to_settlement, 2)
-                    existing.snapshot_time = now
-                else:
-                    existing = None
+            if existing and existing.snapshot_time and _same_bucket(existing.snapshot_time, now):
+                # Ayni 30dk bucket'i -> mevcut satiri guncelle (yeni kayit yok)
+                existing.yes_price = float(market.yes_price or 0)
+                existing.no_price = float(market.no_price or 0)
+                existing.volume = float(market.volume or 0)
+                existing.hours_to_settlement = round(hours_to_settlement, 2)
+                existing.snapshot_time = now
             else:
+                # Eski/parklı bucket ya da hic kayit yok -> HER ZAMAN yeni satir ekle.
+                # (Bugfix 2026-08-08: onceden "existing = None" set ediliyor ama yeni
+                #  satir olusturulmuyordu; boylece 30dk gecislerinde snapshot duruyordu.)
                 snapshot = MarketSnapshot(
                     market_id=market.id,
                     city=market.city,

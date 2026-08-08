@@ -466,11 +466,13 @@ class BotConfig:
         self.risk = self.risk or RiskConfig()
 
         # ── Betting windows initialization ──────────────────────────
+        # Karar (2026-08-08): tek pencere 04:00-23:30 UTC. Pazar geceleri
+        # (00:00-04:00) ve kapanis anina yakin son 30 dk (23:30-24:00)
+        # bet acilmaz. Peak analizi 23:00 kumesini de kapsadigi icin
+        # ust sinir 22:00'den 23:30'a cekildi.
         if self.strategy.betting_windows is None:
             self.strategy.betting_windows = [
-                (0, 6),  # Pencere 1: 00:00-06:00 UTC (24h kuralina giren marketler aninda acilir)
-                (12, 15),  # Pencere 2: 12:00-15:00 UTC (2-gun pazarlari oturdu)
-                (19, 22),  # Pencere 3: 19:00-22:00 UTC (aksam runu + likidite)
+                (4, 23.5),  # Pencere 1: 04:00-23:30 UTC — tum tepe kumeleri icinde
             ]
 
         # ── Override from .env (single source: .env > dataclass defaults) ──

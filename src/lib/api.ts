@@ -357,12 +357,22 @@ export interface Signal {
 
 
 
+  threshold: number | null;
+
+
+
+
+  metric: string | null;
+
+
+
+
+  strike_temp: number | null;
+
+
+
+
 }
-
-
-
-
-
 
 
 
@@ -378,6 +388,11 @@ export interface HistoryEntry {
 
 
   city: string;
+
+
+
+
+  strike_temp: number | null;
 
 
 
@@ -1030,6 +1045,11 @@ export interface OpenPosition {
 
 
 
+  strikeTemp: number | null;
+
+
+
+
   side: "YES" | "NO";
 
 
@@ -1165,6 +1185,11 @@ export interface TradeHistoryEntry {
 
 
 
+  strikeTemp: number | null;
+
+
+
+
   timestamp: string;
 
 
@@ -1195,11 +1220,7 @@ export interface TradeHistoryEntry {
 
 
 
-  result: "WIN" | "LOSS" | "PARTIAL_TP";
-
-
-
-
+  result: "WIN" | "LOSS" | "PARTIAL_TP" | "ROTATION";
   edge: number;
 
 
@@ -1640,7 +1661,14 @@ return {
       initial: 10000,
 
       portfolioValue: 10000,
+      availableCash: 10000,
       dailyPnl: 0,
+
+
+
+
+      totalEntryFee: 0,
+      gercekKayip: 0,
 
 
 
@@ -2560,12 +2588,17 @@ function mapOpenPositions(signals: Signal[]): OpenPosition[] {
 
 
 
-      threshold: (s as Record<string, unknown>).threshold as number ?? null,
+      threshold: s.threshold ?? null,
 
 
 
 
-      metric: (s as Record<string, unknown>).metric as string ?? null,
+      metric: s.metric ?? null,
+
+
+
+
+      strikeTemp: s.strike_temp ?? null,
 
 
 
@@ -2590,7 +2623,7 @@ function mapOpenPositions(signals: Signal[]): OpenPosition[] {
 
 
 
-function mapActivityFeed(signals: Signal[], history: HistoryEntry[], status?: Record<string, unknown> | null, health?: Record<string, unknown> | null, weights?: Record<string, { weight: number; brier_score?: number | null; accuracy?: number | null; num_predictions?: number; last_updated?: string | null }> | null): ActivityItem[] {
+function mapActivityFeed(signals: Signal[], history: HistoryEntry[], status?: StatusResponse | null, health?: HealthResponse | null, weights?: Record<string, number | { weight: number; brier_score?: number | null; accuracy?: number | null; num_predictions?: number; last_updated?: string | null }> | null): ActivityItem[] {
 
 
 
@@ -2645,7 +2678,7 @@ function mapActivityFeed(signals: Signal[], history: HistoryEntry[], status?: Re
 
 
 
-  const statsObj = status && typeof status === "object" ? (status as Record<string, unknown>).stats : null;
+  const statsObj = status?.stats ?? null;
 
 
 
@@ -2735,7 +2768,7 @@ function mapActivityFeed(signals: Signal[], history: HistoryEntry[], status?: Re
 
 
 
-  const actObj = health && typeof health === "object" ? (health as Record<string, unknown>).activity_24h : null;
+  const actObj = health?.activity_24h ?? null;
 
 
 
@@ -3140,12 +3173,12 @@ function mapActivityFeed(signals: Signal[], history: HistoryEntry[], status?: Re
 
 
 
-      ? `${h.city}: ${h.outcome} ${h.result === "WIN" ? "kazandı" : "kaybetti"} ${pnlStr} — ${exitLabel}`
+      ? `${h.city}${h.strike_temp != null ? ` ${h.strike_temp}°C` : ""}: ${h.outcome} ${h.result === "WIN" ? "kazandı" : "kaybetti"} ${pnlStr} — ${exitLabel}`
 
 
 
 
-      : `${h.city} marketi çözüldü: ${h.outcome} ${h.result === "WIN" ? "kazandı" : "kaybetti"}, ${pnlStr}`;
+      : `${h.city}${h.strike_temp != null ? ` ${h.strike_temp}°C` : ""} marketi çözüldü: ${h.outcome} ${h.result === "WIN" ? "kazandı" : "kaybetti"}, ${pnlStr}`;
 
 
 
@@ -3586,6 +3619,11 @@ function mapTradeHistory(history: HistoryEntry[]): TradeHistoryEntry[] {
 
 
       city: h.city,
+
+
+
+
+      strikeTemp: h.strike_temp ?? null,
 
 
 

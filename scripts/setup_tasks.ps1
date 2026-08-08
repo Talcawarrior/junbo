@@ -7,7 +7,8 @@ $tasks = @(
     @{Name="Junbo-ActualsCollect"; Script="collect_actuals.py"; Trigger="every6h"},
     @{Name="Junbo-BackupDatabases"; Script="backup_databases.py"; Trigger="every6h"},
     @{Name="Junbo-SyncBacktest"; Script="sync_backtest_db.py"; Trigger="every6h"},
-    @{Name="JunboBotWatchdog"; Script="bot_watchdog.py"; Trigger="every1m"}
+    @{Name="JunboBotWatchdog"; Script="bot_watchdog.py"; Trigger="every1m"},
+    @{Name="JunboSnapshot"; Script="..\snapshot_task.bat"; Trigger="every30m"; IsBat=$true}
 )
 
 foreach ($t in $tasks) {
@@ -17,7 +18,11 @@ foreach ($t in $tasks) {
             Unregister-ScheduledTask -TaskName $t.Name -Confirm:$false
         }
 
-        $act = New-ScheduledTaskAction -Execute $P -Argument ("`"$S\$($t.Script)`"") -WorkingDirectory $W
+        $act = if ($t.IsBat) {
+            New-ScheduledTaskAction -Execute "cmd.exe" -Argument ("/c `"$W\$($t.Script)`"") -WorkingDirectory $W
+        } else {
+            New-ScheduledTaskAction -Execute $P -Argument ("`"$S\$($t.Script)`"") -WorkingDirectory $W
+        }
 
         switch ($t.Trigger) {
             "every1m" {

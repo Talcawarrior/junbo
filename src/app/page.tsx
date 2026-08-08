@@ -45,6 +45,7 @@ import {
   type HealthResponse,
   type Signal,
   type HistoryEntry,
+  type HistoryStats,
 } from "@/lib/api";
 import {
   TrendingUp,
@@ -587,7 +588,7 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
 function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: TradeHistoryEntry[]; historyStats: HistoryStats | null; totalPnl: number }) {
   const [filterResult, setFilterResult] = useState<"ALL" | "WIN" | "LOSS" | "PARTIAL_TP" | "ROTATION">("ALL");
   const [filterSide, setFilterSide] = useState<"ALL" | "YES" | "NO">("ALL");
-  const [filterExit, setFilterExit] = useState<"ALL" | "ST" | "TP" | "SL" | "TS" | "TD" | "RT" | "TL" | "CL">("ALL");
+  const [filterExit, setFilterExit] = useState<"ALL" | "ST" | "TP" | "SL" | "TS" | "TD" | "RT" | "TL" | "CL" | "PT">("ALL");
   const [filterDate, setFilterDate] = useState<string>("");
   const dateInputRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState("");
@@ -805,6 +806,7 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => toggleSort("date")}>Tarih <SortIcon col="date" /></TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: TEXT_MUTED }}>Şehir</TableHead>
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: TEXT_MUTED }}>Sıcaklık</TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: TEXT_MUTED }}>Taraf</TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right" style={{ color: TEXT_MUTED }}>Giriş</TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-right" style={{ color: TEXT_MUTED }}>Çıkış</TableHead>
@@ -819,6 +821,7 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
                     <TableRow key={t.id}>
                       <TableCell className="text-xs tabular-nums" style={{ color: TEXT_MUTED }}>{t.timestamp}</TableCell>
                       <TableCell className="font-medium text-sm" style={{ color: TEXT_PRIMARY }}>{t.city}</TableCell>
+                      <TableCell className="text-xs tabular-nums" style={{ color: TEXT_MUTED }}>{t.strikeTemp != null ? t.strikeTemp + "°C" : "—"}</TableCell>
                       <TableCell>
                         <Badge className="text-[10px] font-bold px-2 py-0.5 h-5" style={{ backgroundColor: t.side === "YES" ? TEAL_LIGHT : RED_LIGHT, color: t.side === "YES" ? TEAL : RED, border: `1px solid ${t.side === "YES" ? TEAL : RED}33` }}>{t.side}</Badge>
                       </TableCell>
@@ -899,8 +902,8 @@ function ModelsTab({ modelScores }: { modelScores: ModelScore[] }) {
                     </div>
                     <div>
                       <p className="text-[10px]" style={{ color: TEXT_MUTED }}>Brier Score</p>
-                      <p className="text-sm font-bold font-mono tabular-nums" style={{ color: m.brierScore <= 0.16 ? TEAL : m.brierScore <= 0.19 ? TEXT_PRIMARY : RED }}>
-                        {m.brierScore.toFixed(3)}
+                      <p className="text-sm font-bold font-mono tabular-nums" style={{ color: m.brierScore != null && m.brierScore <= 0.16 ? TEAL : m.brierScore != null && m.brierScore <= 0.19 ? TEXT_PRIMARY : RED }}>
+                        {m.brierScore != null ? m.brierScore.toFixed(3) : "—"}
                       </p>
                     </div>
                   </div>
@@ -965,8 +968,8 @@ function ModelsTab({ modelScores }: { modelScores: ModelScore[] }) {
                           {m.name}
                         </div>
                       </TableCell>
-                      <TableCell className="text-right font-mono text-sm font-semibold tabular-nums" style={{ color: m.brierScore <= 0.16 ? TEAL : m.brierScore <= 0.19 ? TEXT_PRIMARY : RED }}>
-                        {m.brierScore.toFixed(3)}
+                      <TableCell className="text-right font-mono text-sm font-semibold tabular-nums" style={{ color: m.brierScore != null && m.brierScore <= 0.16 ? TEAL : m.brierScore != null && m.brierScore <= 0.19 ? TEXT_PRIMARY : RED }}>
+                        {m.brierScore != null ? m.brierScore.toFixed(3) : "—"}
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm tabular-nums" style={{ color: TEXT_PRIMARY }}>%{m.weight}</TableCell>
                       <TableCell>
@@ -1002,7 +1005,7 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
     verdict_color: "#9CA3AF",
     activity_24h: { bets_opened: 0, pass_reasons: [], total_analyses: 0 },
     edge_distribution: { avg_net_edge_pct: 0, min_net_edge_pct: 0, max_net_edge_pct: 0, count: 0 },
-    summary_all: { total_settled: 0, wins: 0, losses: 0, win_rate_pct: 0, total_pnl: 0, total_stake: 0, roi_pct: 0, avg_net_edge_pct: 0 },
+    summary_all: { total_settled: 0, wins: 0, losses: 0, win_rate_pct: 0, total_pnl: 0, total_stake: 0, roi_pct: 0, avg_net_edge_pct: 0, wins_by_exit: {}, losses_by_exit: {} },
     red_flags: [],
     daily_pnl_timeline: [],
   };

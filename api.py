@@ -1001,6 +1001,7 @@ def get_history():
                 {
                     "id": bet.id,
                     "city": bet.city,
+                    "strike_temp": float(bet.strike_temp) if bet.strike_temp else None,
                     "outcome": bet.side or "YES",
                     "entry_price": bet.price,
                     "stake_amount": stake,
@@ -1027,6 +1028,7 @@ def get_history():
                 {
                     "id": bet.id,
                     "city": bet.city,
+                    "strike_temp": float(bet.strike_temp) if bet.strike_temp else None,
                     "outcome": bet.side or "YES",
                     "entry_price": bet.entry_price,
                     "stake_amount": stake,

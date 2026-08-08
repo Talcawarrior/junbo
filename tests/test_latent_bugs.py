@@ -234,6 +234,10 @@ ALLOWED_DEAD = {
     "restore_backup",
     "prune_all",
     "mirror_offsite",
+    # Data watchdog helpers (scripts/data_watchdog.py — Task Scheduler entry)
+    "db_max_age",
+    "ensure_task_enabled",
+    "run_script",
     # Strategy methods used via dispatch / polymorphism
     "analyze_signal",
     "execute_signal",
