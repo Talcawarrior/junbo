@@ -371,14 +371,6 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
                 sub: `${kpiData.entryFeeTradeCount} islem`,
                 tooltip: "Tum betlerden kesilen giris ucreti (fee PnL icindedir)"
               },
-              {
-                label: "Max acilabilir",
-                value: fmtUsd(kpiData.maxOpenableUsd),
-                icon: <Activity className="h-3 w-3" />,
-                color: TEAL,
-                sub: "",
-                tooltip: "Acilabilecek maksimum tutar"
-              },
             ].map((kpi) => (
               <Card key={kpi.label} className="py-2 gap-1 shadow-sm" style={{ borderColor: BORDER }}>
                 <CardContent className="px-2 pb-0 pt-0">
