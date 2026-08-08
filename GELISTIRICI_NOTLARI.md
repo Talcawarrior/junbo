@@ -169,4 +169,158 @@ python -c "import urllib.request, json; d=json.loads(urllib.request.urlopen('htt
 
 ---
 
-*Bir radden analiz dokumanlari icin `docs/ANAYASA.md` (calisma kurallari/self-healing) ve `specs/` altindaki spec'lere gidin — bunlar ayri dosyalar olarak korunur.*
+## 12. ANAYASA — Dogrulanmis Davranis Kurallari (docs/ANAYASA.md'den birlesirildi, 2026-08-08)
+
+Amac: bot'un kalici davranis kurallarini kod + sistem kaniti ile saklamak. Her maddeye
+kanit (dosya:satir) yazilmistir. Ariza aninda once bolum 13 (Ariza Senaryolari)'a bak.
+
+### 12.1 ANA AMAC: BACKTEST ICIN KESINTISIZ VERI KAYDI
+
+Bot'un en temel gorevi, dogru backtest yapabilmek icin **snapshot, bet ve fiyat
+kayitlarinin duzenli ve surekli tutulmasidir**. Veri olmadan backtest yapilamaz.
+Bu anayasa, veri kaydinin HICBIR kosulda kesintiye ugramamasi icin alinan tum
+onlemleri ve bir sey bozuldugunda NE OLMASI GEREKTIGINI tanimlar.
+
+### 12.2 Snapshot Cadence: 30 DAKIKA (24/7)
+
+**Kural:** Bot calistigi surece her 30 dakikada bir market snapshot alinir. Bahis
+penceresi kontrolu YOKTUR - bos veri alinsa bile snapshot alinir.
+
+- Kanit (kod): `bot_loop.py` -> `_SNAPSHOT_INTERVAL = 1800` (saniye = 30 dk).
+- Kanit (dedup, 30 dk bucket): `jobs/snapshot_job.py` -> `_bucket_start(ts)` =
+  `ts.minute // 30 * 30`; `_same_bucket(a, b)`. Yeni 30 dk penceresi -> yeni kayit.
+- Kanit (test): `tests/test_snapshot_30min.py` (bucket sinirlari 10:00 -> 10:30 -> 23:30).
+
+### 12.3 Veri Kayit Mimarisi (Backtest Girdileri) + Retention
+
+Dort veri kaynagi toplanir; hepsi task'lar ile **bot process'inden bagimsiz**
+calisir (kesintiye karsi guvence):
+
+| Veri | Nerede | Kim yazar | Siklik |
+|------|--------|-----------|--------|
+| Market snapshot (YES/NO fiyat) | `bot.db` -> `market_snapshots` | `bot_loop.py` snapshot_loop (24/7) + `JunboSnapshot` task | 30 dk |
+| Orderbook derinlik | `orderbook.db` -> `orderbook_snapshots` | `Junbo-OrderbookCollect` (scripts/collect_orderbook.py) | 30 dk |
+| Gerceklesen hava durumu | `actuals.db` -> `actual_temperatures` | `Junbo-ActualsCollect` (scripts/collect_actuals.py) | 6 saat (guncel sehirlerde ayni gun tekrar cekilir) |
+| Bet kayitlari | `bot.db` -> `bets` | bot_loop (bet placer/settler) | her islem |
+| Backtest DB (cografi) | `backtest.db` (4 tablo) | `Junbo-SyncBacktest` (scripts/sync_backtest_db.py) | 6 saat |
+
+**Retention (KALICI KURAL):**
+- `market_snapshots`: **365 gun** tutulur (`cleanup_old_snapshots(days=365)` —
+  `jobs/snapshot_job.py`, `bot_loop.py`, `snapshot_only.py` ayni degeri kullanir).
+- DB yedekleri (`data/backups/`): **30 gun** tutulur (`scripts/backup_databases.py`
+  `RETENTION_DAYS = 30`), `Junbo-BackupDatabases` task'i 6 saatte bir alir.
+- `conftest.py` test-oncesi backup: **gunluk en fazla 1 kez** (marker throttling,
+  `data/.last_pre_test_backup`).
+
+### 12.4 Surekli Calisma / Restart
+
+- Windows servisi `JunboBot`: **Status=Running, StartType=Automatic**, `sc qfailure`
+  RESTART 5s/10s/30s (crash sonrasi otomatik restart).
+- `snapshot_loop` kendisi `state.is_running` bayragina bagli; donma ya da crashte
+  yeniden baslatma watchdog sorumlulugunda.
+
+### 12.5 Watchdog (Crash/Freeze Restart)
+
+- `scripts/bot_watchdog.py` -> Task Scheduler `JunboBotWatchdog` (SYSTEM, 1 dk);
+  heartbeat zaman asimi `HEARTBEAT_TIMEOUT = 15 * 60` saniye (15 dk). Log eskise
+  donmus kabul edilir, restart yapilir.
+- `scripts/data_watchdog.py` -> `JunboDataWatchdog` (6 dk): veri kaynaklarinin
+  tazeligini kontrol eder, bayat ise toplayiciyi kendisi baslatir, task disabled
+  ise yeniden enable eder. Log: `data/logs/data_watchdog.log`.
+
+### 12.6 Retry / Internet Dayanikli
+
+- Ortak: `utils/retry.py` -> `max_attempts=3`, 2^attempt backoff.
+- `data_pipeline/polymarket_ingest.py` -> `max_retries=3`.
+- `data_pipeline/resolvedmarkets_ingest.py` -> `max_retries=5` + 429 `Retry-After`
+  saygi (resolvedmarkets icin SPECIFIC, global DEGILDIR).
+
+**Onemli ayrimlama:** Snapshot loop **interneti kullanmaz** - yalniz local `WeatherMarket`
+tablosundan fiyat degerlerini DB'ye yazar. "Internet gidince snapshot 5 kere tekrar dener"
+iddiasi SNAPSHOT icin GECERSIZDIR. Internet retry, ingest/collector'larda gecerlidir.
+
+### 12.7 Bet Penceresi (2026-08-08 itibari)
+
+- **Pencere: 04:00 - 23:30 UTC** (`config/settings.py` -> `betting_windows = [(4, 23.5)]`).
+- `_is_in_betting_window()` kesirli saat destekler (23.5 = 23:30).
+- Kapanis 24:00 UTC = `target_date` (12:00 etiketi) + 12h.
+- Acilis kisiti: `target_date > now - 11h30dk` VE `target_date <= now + 8h`
+  (SQLite-safe esdeger: kapanis `> now+30dk` VE `<= now+20h`).
+- SNAPSHOT bu kuraldan ETKILENMEZ — snapshot 24/7 alinir (giris zamani analizi icin).
+
+### 12.8 Referans: Analiz Scriptleri (arsiv — SILINMEZ)
+
+- `scripts/analyze_first_peak_climbs.py` (49 real climb; %20 takint elendi).
+- `scripts/analyze_peak_to_settle.py` (39 market; peak->settle suresi; 17:00=15, 23:00=7).
+- `scripts/analyze_city_time_temp.py`, `analyze_settlement.py` vb. — strateji
+  gelistirme/kanit analizleri. Backtest script'leri (`backtest_rolling.py`,
+  `backtest_advanced.py`, `walk_forward_backtest.py`, `backtest/simulator.py`) ile
+  birlikte bilincli arsiv olarak korunur.
+
+---
+
+## 13. ARIZA SENARYOLARI: BIR SEY BOZULURSA NE OLUR / NE YAPILIR
+
+Bir ariza ile karsilasildiginda once buraya bak, sonra gerekirse kod kanitlarini dogrula.
+
+### S1. Bot process'i cokerse (crash / stop)
+- **Beklenen:** Windows servisi `JunboBot` (Automatic + `sc qfailure` RESTART 5s/10s/30s)
+  otomatik yeniden baslatir. Yanit gelmezse `JunboBotWatchdog` (1 dk) servis
+  RUNNING degilse enable+start eder; bot.log 15 dk eskiyse donmus kabul edip restart.
+- **Dogrula:** `sc query JunboBot` (State=RUNNING); `data/logs/watchdog.log` son satir
+  `OK running`; `http://127.0.0.1:8093/api/status` -> `is_running=true`.
+- **Aksiyon gerekmez** — otomatik toparlanir.
+
+### S2. Bilgisayar uykuya girer / kapali kalir
+- **Beklenen:** Uyku ayarlari 2026-08-08'den beri `Sleep after = Never` (AC+DC) —
+  bilgisayar uyumaz. Yedek katman: `JunboSnapshot` task `WakeToRun=true` + `StartWhenAvailable`
+  ile kacirilmis calismalari tamamlar.
+- **Dogrula:** `powercfg /query SCHEME_CURRENT SUB_SLEEP` -> STANDBYIDLE=0;
+  `data/snapshot_task.log` son satirlar hata icermemeli.
+- **Not:** Kacirilan surelerde veri EKSIK olur (gecmise donuk doldurma YOKTUR) —
+  bu kayip kabul edilir.
+
+### S3. Snapshot DB'de kayit yok / sayi artmiyor
+- **Beklenen:** Bot 30 dk'da bir `market_snapshots`'a yazar. Artis yoksa: (a) bot
+  calisiyor mu (`/api/status`), (b) snapshot_task.log son calisma (30 dk gecmemis),
+  (c) DB boyutu. Dedup nedeniyle `0 snapshots saved` NORMALDIR (bucket 30 dk).
+- **Aksiyon:** Bot durmussa S1'e bak; task kaciriyorsa S2'ye bak.
+
+### S4. Disk dolar
+- **Beklenen:** `backup_databases.py` (6 saatte bir) 30 gunden eski yedekleri siler;
+  `cleanup_old_snapshots` snapshot'lari 365 gunde sifirlar; conftest gunluk max 1
+  test-backup uretir.
+- **Dogrula:** `data/backups/` boyutu ~2-3 GB civarinda tutmali (gunde ~4 backup x
+  ~200 MB); anlik buyuk yiginlar anormaldir.
+- **Aksiyon:** Purge calismazsa `scripts/backup_databases.py` elle calistir.
+
+### S5. Bet penceresi disinda bet acildi / acilmadi
+- **Beklenen:** Bet penceresi `[(4, 23.5)]` (04:00-23:30 UTC). Disinda bet acilmaz;
+  kapanis 24:00 UTC = target_date + 12h (2026-08-08 fix: 12:00 etiketi kapanis
+  sanilmaz).
+- **Dogrula:** bot.log `Betting window` satirlari; bet saatleri pencereyle uyumlu.
+- **Aksiyon:** Pencere disinda bet acildiysa `_reopen_after_stop_loss` + `_is_in_betting_window`
+  kontrol et (SL sonrasi yeniden acilim pencereye tabi).
+
+### S6. Task Scheduler gorevi Disabled / eksik
+- **Beklenen (2026-08-08 itibariyle):**
+  | Gorev | Durum | Gorev |
+  |-------|-------|-------|
+  | JunboSnapshot | Ready, 30dk, WakeToRun | snapshot (24/7 garantisi) |
+  | JunboBotWatchdog | Ready, 1dk | heartbeat + crash restart |
+  | JunboDataWatchdog | Ready, 6dk | veri tazeligi self-healing |
+  | Junbo-BackupDatabases | Ready, 6sa | DB yedekleme + purge |
+  | Junbo-ActualsCollect | Ready, 6sa | gerceklesen hava |
+  | Junbo-OrderbookCollect | Ready, 30dk | orderbook derinligi |
+  | Junbo-SyncBacktest | Ready, 6sa | backtest.db senkron |
+  | JunboBot / JunboBotBackup / JunboWARP | Disabled (bilincli) | eski yontemler |
+- **Aksiyon:** Ready olmasi gereken bir gorev Disabled ise `schtasks /change /tn
+  "\Gorev" /enable` ile ac, sonra log/Last Result dogrula.
+
+### S7. Actuals toplanmiyor / "All 5 attempts failed"
+- **Beklenen:** `collect_actuals.py` gun icinde ayni gunu tekrar ceker (archive API
+  kismi saatler dondurur). `start > end` ise "already up to date, skip" — 400 hata
+  OLMAZ (2026-08-08 fix).
+- **Dogrula:** `data/logs/collect_actuals.log` son satirlar; `data_watchdog.log`
+  `ACTUALS ok (age=...)`.
+- **Aksiyon:** 400 hatasi gorulurse tarih araligi mantigini kontrol et (start <= end).

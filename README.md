@@ -246,7 +246,7 @@ python -m pytest tests/test_latent_bugs.py -v --tb=long
 python quick_check.py --fast
 ```
 
-Detaylar icin `GELISTIRICI_NOTLARI.md`'ya bakin.
+Detaylar icin `GELISTIRICI_NOTLARI.md`'ya bakin (bolum 12: dogrulanmis davranis kurallari — eski docs/ANAYASA.md; bolum 13: ariza senaryolari).
 
 ---
 

@@ -62,10 +62,11 @@ Eğer bir değişiklik yapacaksan, ÖNCE kullanıcıya sor:
 
 Kurallar:
 1. **`README.md`** — kullanicilara yonelik: mimari degisiklik, yeni ayar, Task Scheduler degisikligi, kurulum adimi, sorun giderme tablosu, Kararlar Log bolumu mutlaka guncellenir.
-2. **`GELISTIRICI_NOTLARI.md`** — gelistiriciye yonelik: "Bilinen Kritik Hatalar & Cozumler" tablosuna her bugfix eklenir (hata + cozum), test komutlarindaki beklenen sayilar (ornegin "653 passed") gercek ciktilarla senkron tutulur.
+2. **`GELISTIRICI_NOTLARI.md`** — gelistiriciye yonelik: "Bilinen Kritik Hatalar & Cozumler" tablosuna her bugfix eklenir (hata + cozum), test komutlarindaki beklenen sayilar (ornegin "653 passed") gercek ciktilarla senkron tutulur. **Bu dosya ayni zamanda eski `docs/ANAYASA.md` icerigini de tasir** (bolum 12: dogrulanmis davranis kurallari; bolum 13: ariza senaryolari) — ANAYASA ayri dosya olarak YOKTUR, icerigi burada yasatilir.
 3. Eski "bugfix" kayitlari SILINMEZ — tarih damgasiyla ek guncelleme yapilir (or: `(2026-08-08)`).
 4. Commit mesajinda dokumantasyon degisikligi de yer alir (ayri commit zorunlu DEGIL).
 5. Kontrol: commit oncesi `git diff --stat` — eger .py/.ts dosyasi degistiyse ve README/NOTLAR ayni commit icinde yoksa, dokumantasyon unutuldu demektir; ger eve donup ekle.
+6. **Ariza senaryolari GELISTIRICI_NOTLARI bolum 13'e islenir** — yeni bir ariza tipi kesfedildiginde (S1-S7 gibi) madde eklenir; davranis kurali degistiginde bolum 12 guncellenir.
 
 **On madde:** README ve NOTLAR senkronsuz commit kabul edilmez.
 
