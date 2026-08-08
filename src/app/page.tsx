@@ -368,16 +368,8 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
                 value: fmtUsd(kpiData.totalEntryFee),
                 icon: <Wallet className="h-3 w-3" />,
                 color: RED,
-                sub: "",
-                tooltip: "Tum betlerden kesilen giris ucreti"
-              },
-              {
-                label: "Gercek Kayip",
-                value: fmtUsd(-kpiData.gercekKayip),
-                icon: <TrendingUp className="h-3 w-3" />,
-                color: kpiData.gercekKayip <= 0 ? RED : TEAL,
-                sub: "",
-                tooltip: "Fee dahil toplam kayip"
+                sub: `${kpiData.entryFeeTradeCount} islem`,
+                tooltip: "Tum betlerden kesilen giris ucreti (fee PnL icindedir)"
               },
               {
                 label: "Max acilabilir",

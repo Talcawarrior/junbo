@@ -35,10 +35,11 @@ def _clean_db():
 
 
 def _td(offset=2):
-    # 24h bet kurali: sadece 24 saat icinde settle olacak marketlere bet acilir.
-    # Test marketlerini 12 saat sonrasina kur (8h alt sinir ile 24h ust sinir arasi).
+    # Kapanis 24:00 UTC = target_date (12:00 etiketi) + 12h.
+    # 20h ust sinir kurali: kapanis <= now + 20h  =>  target_date <= now + 8h.
+    # Test marketleri kapanisa 14-20h kala kurulur (target_date now + 2..8h).
     # offset farkli zamanlar uretmek icin saat farki olarak kullanilir.
-    return datetime.now(timezone.utc) + timedelta(hours=12 + offset)
+    return datetime.now(timezone.utc) + timedelta(hours=2 + offset)
 
 
 def _add_market(session, mid, yes_price=0.40, no_price=0.60, city="Testville", icao="TEST", td=None):

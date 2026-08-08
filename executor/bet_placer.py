@@ -699,8 +699,14 @@ class BetPlacer:
                     WeatherMarket.target_date.isnot(None),
                     WeatherMarket.yes_price.isnot(None),
                     WeatherMarket.yes_price > 0,
-                    WeatherMarket.target_date > now + timedelta(minutes=30),
-                    WeatherMarket.target_date <= now + timedelta(hours=20),
+                    # Kapanis 24:00 UTC = target_date (12:00 etiketi) + 12h.
+                    # 2026-08-08 bugfix: once target_date <= now gibi davraniyordu
+                    # (12:00 = kapanis saniyordu) -> 12:30 UTC'den sonra hicbir
+                    # markete bet acilamiyordu (reopen dahil).
+                    # SQLite-safe esdeger: target_date+12h > now+30dk  <=>  target_date > now-11h30dk
+                    #                      target_date+12h <= now+20h  <=>  target_date <= now+8h
+                    WeatherMarket.target_date > now - timedelta(hours=11, minutes=30),
+                    WeatherMarket.target_date <= now + timedelta(hours=8),
                     WeatherMarket.city != "Unknown",
                 )
                 .all()
@@ -994,13 +1000,18 @@ class BetPlacer:
         # Fill price + slippage
         raw_fill = float(market.yes_price or 0.5)
 
-        # Vadesi gecmis piyasalara bet acma
+        # Vadesi gecmis piyasalara bet acma.
+        # Kapanis 24:00 UTC = target_date (12:00 etiketi) + 12h.
+        # 2026-08-08 bugfix: target_date <= now kontrolu 12:00'yi kapanis
+        # saniyordu -> ogleden sonra butun marketler "GECTI" sayiliyordu.
         if market.target_date:
             _now = datetime.now(timezone.utc).replace(tzinfo=None)
-            if market.target_date <= _now:
+            _close = market.target_date + timedelta(hours=12)
+            if _close <= _now:
                 logger.info(
-                    "open_bet_on_market: %s target=%s GECTI - skipped",
+                    "open_bet_on_market: %s close=%s (target=%s) GECTI - skipped",
                     market.id,
+                    _close,
                     market.target_date,
                 )
                 return None

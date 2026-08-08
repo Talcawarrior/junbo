@@ -619,7 +619,16 @@ class TestApiStatus:
         assert "unrealized_pnl" in p
         assert "total_pnl" in p
         assert "total_entry_fee" in p
-        assert "gercek_kayip" in p
+        assert "entry_fee_trade_count" in p
+        assert "gercek_kayip" not in p
+        # 2026-08-08 invariant: max acilabilir NAKIT'ten buyuk olamaz.
+        # Bug kaynagi: max_openable = max_exposure - exposure (nakit sinirsiz)
+        # -> "acilabilir $884" derken cuzdanda $849 vardi.
+        assert "max_openable_now" in p, "max_openable_now alani API'de olmali"
+        assert p["max_openable_now"] >= 0, "max_openable_now negatif olamaz"
+        assert p["max_openable_now"] <= p["free_cash"] + 0.01, (
+            f"max_openable_now ({p['max_openable_now']}) nakitten ({p['free_cash']}) buyuk olamaz"
+        )
 
     def test_status_includes_stats(self):
         from fastapi.testclient import TestClient

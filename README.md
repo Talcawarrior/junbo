@@ -270,6 +270,7 @@ Detaylar icin `GELISTIRICI_NOTLARI.md`'ya bakin.
 - **2026-07:** Erken acilis SL sorunu → 8-18h kurali; daha sonra 04-23:30 temel pencere.
 - **Peak analiz:** Ilk-peak saatleri UTC band 10:00 / 19:00 / 23:00 — pencere 04-23:30 bu bandi icerir.
 - **2026-08-08:** Snapshot+orderbook kesin 30dk; WakeToRun; DataWatchdog; pencere [04:00-23:30]; SL sonrasi yeniden acilim pencereye baglandi (`_reopen_after_stop_loss` — Wellington 12C/13C gece cift kayip duzeltildi); Dashboard'da `strike_temp` (Sıcaklık) kolonu; TS tip hatalari sifirlandi (24 hata); snapshot task path + uyku/wake timer duzeltildi.
+- **2026-08-08 (ikinci tur):** `target_date` 12:00 etiketi artik kapanis (24:00) sanilmiyor — 12:30 UTC sonrasi bet acilamama bug'i duzeltildi (SL sonrasi reopen dahil; Miami 33.6C yeni peak acildi). `max_openable_now` nakitle sinirlandi (`min(nakit, limit)`); "Gercek Kayip" KPI kaldirildi (fee zaten PnL icinde), yerine fee islem sayisi eklendi.
 
 ---
 

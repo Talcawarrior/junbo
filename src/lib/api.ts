@@ -100,7 +100,7 @@ export interface StatusResponse {
 
     total_roi: number;
     total_entry_fee?: number;
-    gercek_kayip?: number;
+    entry_fee_trade_count?: number;
 
 
 
@@ -111,6 +111,7 @@ export interface StatusResponse {
 
 
     max_exposure: number;
+    max_openable_now?: number;
     free_cash?: number;
     capital_basis?: number;
     previous_day_realized_pnl?: number;
@@ -953,8 +954,8 @@ export interface KpiData {
 
 
   totalRoi: number;            // Total ROI (%)
-  totalEntryFee: number;       // Toplam giriş ücreti
-  gercekKayip: number;         // Gerçek toplam kayıp (fee dahil)
+  totalEntryFee: number;       // Toplam giris ucreti
+  entryFeeTradeCount: number;  // Fee odenen islem sayisi
 
 
 
@@ -1668,7 +1669,7 @@ return {
 
 
       totalEntryFee: 0,
-      gercekKayip: 0,
+      entryFeeTradeCount: 0,
 
 
 
@@ -1846,7 +1847,7 @@ return {
 
   const totalRoi = hs?.overall_roi ?? 0;
   const totalEntryFee = p.total_entry_fee ?? 0;
-  const gercekKayip = p.gercek_kayip ?? 0;
+  const entryFeeTradeCount = p.entry_fee_trade_count ?? 0;
 
 
 
@@ -2065,7 +2066,7 @@ return {
 
 
 
-    maxOpenableUsd: Math.round(Math.max(0, (p.max_exposure ?? 0) - (p.exposure ?? 0)) * 100) / 100,
+    maxOpenableUsd: Math.round((p.max_openable_now ?? Math.max(0, (p.max_exposure ?? 0) - (p.exposure ?? 0))) * 100) / 100,
 
 
 
@@ -2097,7 +2098,7 @@ return {
 
     totalRoi,
     totalEntryFee,
-    gercekKayip,
+    entryFeeTradeCount,
 
 
 

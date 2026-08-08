@@ -309,8 +309,9 @@ def get_status():
         equity_cash = (float(pf.cash_balance or 0.0) if pf else 0.0) + float(exposure_db) + float(unrealized_pnl_db)
         total_pnl = round(realized_pnl_db + float(unrealized_pnl_db), 2)
 
-        # 3) Toplam entry fee (tum betlerden)
+        # 3) Toplam entry fee (tum betlerden) + fee odenen islem sayisi
         total_entry_fees = (db.query(func.coalesce(func.sum(Bet.entry_fee), 0.0)).scalar()) or 0.0
+        fee_charged_count = (db.query(func.count(Bet.id)).filter(Bet.entry_fee > 0).scalar()) or 0
 
         # 4. Available Cash (from Portfolio table)
         pf = db.query(Portfolio).filter(Portfolio.id == 1).first()
@@ -417,6 +418,18 @@ def get_status():
         )
         capital_basis = max(0.0, float(initial_capital + realized_before_today))
 
+        # 2026-08-08 bugfix: max_openable NOW nakitle sinirli.
+        # Eski formul (max_exposure - exposure) nakit ust sinirini gormezden
+        # geliyordu -> "max acilabilir $884" derken cuzdanda $849 vardi.
+        # Gercek acilabilir = min(nakit, exposure limitinden kalan).
+        max_openable_now = round(
+            min(
+                available_cash,
+                max(0.0, max_exposure_allowed - exposure),
+            ),
+            2,
+        )
+
         return {
             "is_running": state.is_running,
             "locked": state.locked,
@@ -434,6 +447,7 @@ def get_status():
                 "portfoy_degeri": equity,  # Portfoy Degeri = Sermaye + Realized PnL + Unrealized PnL
                 "acik_pozisyonlar": exposure,  # Acik Pozisyonlar Toplami (Bet Tutari)
                 "maks_pozisyon": max_exposure_allowed,  # Izin Verilen Maksimum Pozisyon
+                "max_acilabilir": max_openable_now,  # Nakitle sinirli acilabilir tutar
                 "kullanilan_pozisyon_pct": round(
                     (exposure / max_exposure_allowed * 100) if max_exposure_allowed > 0 else 0, 1
                 ),
@@ -451,7 +465,7 @@ def get_status():
                 "toplam_pnl": total_pnl,  # Toplam Kar/Zarar = Gerceklesmis + Gerceklesmemis
                 "toplam_roi_pct": total_roi,
                 "toplam_entry_fee": round(float(total_entry_fees), 2),  # Toplam giris ucreti
-                "gercek_kayip": round(float(initial_capital - equity_cash), 2),  # Gercek toplam kayip (fee dahil)
+                "entry_fee_islem_sayisi": int(fee_charged_count),  # Fee odenen islem sayisi
                 # Eski Ingilizce alanlar (Geriye uyumluluk - Frontend icin)
                 "initial": initial_capital,
                 "current": equity,
@@ -463,8 +477,10 @@ def get_status():
                 "total_pnl": total_pnl,
                 "total_roi": total_roi,
                 "total_entry_fee": round(float(total_entry_fees), 2),
+                "entry_fee_trade_count": int(fee_charged_count),
                 "exposure": exposure,
                 "max_exposure": max_exposure_allowed,
+                "max_openable_now": max_openable_now,
                 "capital_basis": round(capital_basis, 2),
                 "previous_day_realized_pnl": round(float(realized_before_today), 2),
                 # Formuller (Seffaflik icin)
