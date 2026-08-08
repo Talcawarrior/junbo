@@ -79,6 +79,22 @@ Aktif branchlar: `restore/05-clean-state` (production), `ponytail-audit`, `featu
 | 5 | Unit/regresyon | formuller, kelly, risk | test_units.py + digerleri |
 | 6 | E2E | uctan u can | test_e2e_system.py test_integration_e2e.py |
 | 7 | Full | hepsi | `pytest tests/ ...` |
+| 8 | **Davranis (2026-08-08)** | gercek DB + gercek modul, mock YOK | test_sl_reopen_chain.py, test_settlement_chain.py, test_bet_behavior.py, test_risk_behavior.py |
+| 9 | **Replay (2026-08-08)** | production DB kopyasi | `python scripts/replay_test.py` |
+
+### Davranis Testleri Haritasi (2026-08-08)
+
+Hangi dosya hangi kurali korur:
+
+| Dosya | Kapsam |
+|---|---|
+| `tests/test_sl_reopen_chain.py` | SL -> settler -> reopen tam zincir; kayip market haric en yuksek fiyatli secim; kapanis gecmeden expired yok |
+| `tests/test_settlement_chain.py` | Settler: kapanis (target+12h) gecmeden expired YASAK; gectiyse expired; acik betli market asla expired |
+| `tests/test_bet_behavior.py` | Acilis: oglen sonrasi bugunku market acilabilir (kapanis 24:00); kapanis gectiyse kapali; 20h+ kala kapali; fiyat gate [0.10,0.95); duplicate yok; nakit siniri; grup basina tek bet; rotation threshold |
+| `tests/test_risk_behavior.py` | SL/TP/trailing/time-decay KARARLARI gercek bet ile; exit_position paper sell (bet kapatma scheduler'da) |
+| `scripts/replay_test.py` | Production DB kopyasi: settle_all + reopen gercek veriyle, invariant: kapanisi gecmemis market expired OLMAMALI |
+
+**Kural:** Yeni bug bulundugunda once davranis testi yaz (sentetik + gercek DB), sonra duzelt.
 
 **ALLOWED_DEAD** guncellemesi: yeni public fonksiyon eklediginde ya caller ekle ya da `tests/test_latent_bugs.py::ALLOWED_DEAD` kumesine aciklama ile ekle (entry point ise otomatik gecer).
 
@@ -105,6 +121,7 @@ Aktif branchlar: `restore/05-clean-state` (production), `ponytail-audit`, `featu
 | **SL sonrasi yeniden acilim calismiyordu (2026-08-08)** | Iki bug birlesiyordu: (1) `settler.py` acik beti olmayan marketi hemen `expired` yapiyordu (SL ile kapanan betin marketi hala canli: Toronto 30C 0.97, Miami 32.5C 0.925) -> `_reopen_after_stop_loss` status='open' aradigi icin bulamiyordu; (2) `_reopen_after_stop_loss` best == lost_market_id ise skip ediyordu, ikinci en yuksek farkli marketi denemiyordu. Duzeltme: settler kapanis (target+12h=24:00 UTC) gecmeden expired yapmaz; reopen kayip market haric en yuksek fiyatliyi secer. Test: `test_tie_betting.py` + elle dogrulama (Toronto 31C acildi) |
 | **DURUM: Davranis testleri eklendi (2026-08-08)** | Kacan bug'lar hep modul ETKILESIMINDE cikiyordu (settler x reopen, target_date x kapanis). Izole unit testler (test_active_risk_management.py 42 test ama 0 gercek DB — hepsi MagicMock) bunlari yakalayamadi. Eklendi: `test_sl_reopen_chain.py` (SL->settler->reopen zinciri), `test_settlement_chain.py` (kapanis gecmeden expired yok), `test_bet_behavior.py` (acilis filtresi, vade, gate, rotation), `test_risk_behavior.py` (SL/TP/TS/time-decay gercek DB ile). Suite: 653 -> 680 |
 | **DURUM: TP/TS/time-decay config kapali (2026-08-08)** | `config/settings.py` risk: `take_profit_pct=999.0`, `trailing_stop_pct=999.0`, `time_decay_hours=0` — TP/TS/time-decay fiilen devre disi! SL calisiyor (0.2). Bu bilincli mi yoksa bug mu karar gerekli. Testler config'i gecici set ederek davranisi dogruluyor |
+| **REPLAY testi: production DB kopyasi (2026-08-08)** | Sentetik testler gercek DB'deki durumlari yakalayamaz. `scripts/replay_test.py` production bot.db'yi kopyalar, kopya uzerinde settle_all + reopen calistirir: kapanisi (target+12h) gecmemis market expired YAPILMAMALI + reopen crash'siz. Neden pytest DEGIL script: conftest DB_PATH'i temp DB'ye cevirir, bot_config singleton ilk importta donar — replay pytest icinde calisamaz. Kullanim: `python scripts/replay_test.py` (cikis 0=OK). 2026-08-08 dogrulama: 3064 market, 0 yanlis expired, 7 acik-bet'siz SL grubu islendi (gate reddi) |
 
 ---
 

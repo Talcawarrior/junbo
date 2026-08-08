@@ -237,7 +237,14 @@ python main.py reset     # SIFIRLA (backup alir)
 ```powershell
 # FULL suite (0 failed hedefi)
 python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q
-# -> "653 passed, 6 skipped, 0 failed" (2026-08-08 durumda; tsc --noEmit 0 hata)
+# -> "680 passed, 6 skipped, 0 failed" (2026-08-08 durumda; tsc --noEmit 0 hata)
+
+# Davranis testleri (gercek DB, mock'suz — modul etkilesim bug'lari icin)
+python -m pytest tests/test_sl_reopen_chain.py tests/test_settlement_chain.py tests/test_bet_behavior.py tests/test_risk_behavior.py -q
+
+# Replay testi (production DB kopyasi uzerinde — conftest temp DB'ye mudahale ettigi icin script olarak calisir)
+python scripts/replay_test.py
+# -> SONUC: OK (0 yanlis expired + reopen crash'siz)
 
 # Latent bug (once)
 python -m pytest tests/test_latent_bugs.py -v --tb=long
