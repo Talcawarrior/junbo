@@ -25,7 +25,7 @@ python -m pytest tests/test_accounting.py tests/test_settler_polymarket.py tests
 
 # 6) FULL suite (push oncesi)
 python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q
-# HEDEF: "653 passed, 6 skipped, 0 failed" (tsc --noEmit = 0 hata)
+# HEDEF: "680 passed, 6 skipped, 0 failed" (tsc --noEmit = 0 hata)
 
 # 7) Dokumantasyon senkronu (ZORUNLU, agents.md kurali)
 # README.md + GELISTIRICI_NOTLARI.md — bugfix/karar/feature commit'lenmeden once ekle/duzelt
@@ -103,6 +103,8 @@ Aktif branchlar: `restore/05-clean-state` (production), `ponytail-audit`, `featu
 | **max_openable nakit sinirsizdi (2026-08-08)** | Eski formul `max_openable = max_exposure - exposure` nakit ust sinirini yok sayiyordu → "Max acilabilir $884" derken cuzdanda $849. Yeni: `min(nakit, max_exposure - exposure)`, API `max_openable_now`, frontend `maxOpenableUsd` backend'den okur. Invariant test: `max_openable_now <= free_cash` (test_all_functions.py) |
 | **"Gercek Kayip" KPI kaldirildi (2026-08-08)** | `gercek_kayip = initial - equity_cash` exposure'i (bagli sermaye) kayip saniyordu + fee zaten PnL icinde (settlement_pnl = payout - stake - entry_fee). Kaldirildi; yerine `entry_fee_trade_count` (fee odenen islem sayisi) eklendi, Toplam Fee kartinda gosterilir |
 | **SL sonrasi yeniden acilim calismiyordu (2026-08-08)** | Iki bug birlesiyordu: (1) `settler.py` acik beti olmayan marketi hemen `expired` yapiyordu (SL ile kapanan betin marketi hala canli: Toronto 30C 0.97, Miami 32.5C 0.925) -> `_reopen_after_stop_loss` status='open' aradigi icin bulamiyordu; (2) `_reopen_after_stop_loss` best == lost_market_id ise skip ediyordu, ikinci en yuksek farkli marketi denemiyordu. Duzeltme: settler kapanis (target+12h=24:00 UTC) gecmeden expired yapmaz; reopen kayip market haric en yuksek fiyatliyi secer. Test: `test_tie_betting.py` + elle dogrulama (Toronto 31C acildi) |
+| **DURUM: Davranis testleri eklendi (2026-08-08)** | Kacan bug'lar hep modul ETKILESIMINDE cikiyordu (settler x reopen, target_date x kapanis). Izole unit testler (test_active_risk_management.py 42 test ama 0 gercek DB — hepsi MagicMock) bunlari yakalayamadi. Eklendi: `test_sl_reopen_chain.py` (SL->settler->reopen zinciri), `test_settlement_chain.py` (kapanis gecmeden expired yok), `test_bet_behavior.py` (acilis filtresi, vade, gate, rotation), `test_risk_behavior.py` (SL/TP/TS/time-decay gercek DB ile). Suite: 653 -> 680 |
+| **DURUM: TP/TS/time-decay config kapali (2026-08-08)** | `config/settings.py` risk: `take_profit_pct=999.0`, `trailing_stop_pct=999.0`, `time_decay_hours=0` — TP/TS/time-decay fiilen devre disi! SL calisiyor (0.2). Bu bilincli mi yoksa bug mu karar gerekli. Testler config'i gecici set ederek davranisi dogruluyor |
 
 ---
 
