@@ -772,6 +772,7 @@ def get_signals():
                     "status": bet.status,
                     "market_type": market.market_type if market else None,
                     "threshold": float(market.threshold) if market and market.threshold else None,
+                    "strike_temp": float(market.threshold) if market and market.threshold else None,
                     "question": market.question if market else None,
                     "metric": market.metric if market else None,
                 }

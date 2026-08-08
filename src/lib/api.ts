@@ -3049,7 +3049,7 @@ function mapActivityFeed(signals: Signal[], history: HistoryEntry[], status?: St
 
 
 
-        message: `${s.city} için ${s.outcome} bet: $${s.stake_amount?.toFixed(2) ?? "?"} @ ${s.entry_price.toFixed(2)} (net edge: ${edgePct}%)`,
+        message: `${s.city}${s.strike_temp != null ? ` ${s.strike_temp}°C` : ""} için ${s.outcome} bet: $${s.stake_amount?.toFixed(2) ?? "?"} @ ${s.entry_price.toFixed(2)} (net edge: ${edgePct}%)`,
 
 
 
