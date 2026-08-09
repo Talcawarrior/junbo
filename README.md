@@ -74,7 +74,9 @@ Backtest icin kesintisiz veri toplama esastir. Asagidaki sistem 2026-08-08'de ku
 
 **JunboDataWatchdog** (kritik): her 6 dakikada bir tum veri kaynaklarinin tazeligini kontrol eder.
 Bayat veri bulursa ilgili toplayiciyi kendisi baslatir; task disabled olduysa yeniden enable eder.
-Log: `data/logs/data_watchdog.log`.
+Ayrica gunde 1 kez (02:00-04:00 UTC, `data/.last_db_maintenance` marker) `scripts/db_maintenance.py` ile
+DB bakimi (ANALYZE + VACUUM + WAL checkpoint) yapar — dosya boyutunu ve sorgu istatistiklerini taze tutar.
+Log: `data/logs/data_watchdog.log` / `data/logs/db_maintenance.log`.
 
 ### Bilinen Bugfix (2026-08-08)
 
@@ -278,6 +280,7 @@ Detaylar icin `GELISTIRICI_NOTLARI.md`'ya bakin (bolum 12: dogrulanmis davranis 
 - **Peak analiz:** Ilk-peak saatleri UTC band 10:00 / 19:00 / 23:00 — pencere 04-23:30 bu bandi icerir.
 - **2026-08-08:** Snapshot+orderbook kesin 30dk; WakeToRun; DataWatchdog; pencere [04:00-23:30]; SL sonrasi yeniden acilim pencereye baglandi (`_reopen_after_stop_loss` — Wellington 12C/13C gece cift kayip duzeltildi); Dashboard'da `strike_temp` (Sıcaklık) kolonu; TS tip hatalari sifirlandi (24 hata); snapshot task path + uyku/wake timer duzeltildi.
 - **2026-08-08 (ikinci tur):** `target_date` 12:00 etiketi artik kapanis (24:00) sanilmiyor — 12:30 UTC sonrasi bet acilamama bug'i duzeltildi (SL sonrasi reopen dahil; Miami 33.6C yeni peak acildi). `max_openable_now` nakitle sinirlandi (`min(nakit, limit)`); "Gercek Kayip" KPI kaldirildi (fee zaten PnL icinde), yerine fee islem sayisi eklendi.
+- **2026-08-09:** `scrapers/meteo.py` `fetch_for_markets` icindeki tanimsiz `_fetch_open_meteo_model` kirik loop silindi (dead/kirik kod + cift istek riski). DB bakimi eklendi: `scripts/db_maintenance.py` + `data_watchdog` gunde 1 kez utc ANALYZE+VACUUM (02-04 UTC). Ilk run: bot.db 157.9 → 146.6MB.
 
 ---
 

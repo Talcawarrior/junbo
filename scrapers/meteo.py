@@ -275,18 +275,6 @@ class MeteoFetcher:
         ]
 
         total_saved = 0
-        # Open-Meteo'dan 8 farkli model cek (ensemble) — min_sources=2 icin
-        openmeteo_models = [
-            "gfs_seamless",
-            "ecmwf_ifs025",
-            "gem_global",
-            "icon_global",
-            "jma_seamless",
-            "cma_grapes_global",
-            "ukmo_seamless",
-            "meteofrance_seamless",
-        ]
-
         for source_name, fetch_func in sources:
             try:
                 result = fetch_func(lat, lon, date_str)
@@ -315,40 +303,6 @@ class MeteoFetcher:
             except Exception as e:
                 logger.error(f"[{source_name}] group fetch error: {e}")
                 continue
-
-        # Open-Meteo ensemble — her modeli ayri kaynak olarak cek
-        try:
-            for model in openmeteo_models:
-                try:
-                    result = self._fetch_open_meteo_model(lat, lon, date_str, model)
-                    if result and metric in result:
-                        predicted_value = result[metric]
-                        with get_session() as session:
-                            for mid in market_ids:
-                                forecast = WeatherForecast(
-                                    market_id=mid,
-                                    city=city,
-                                    lat=lat,
-                                    lon=lon,
-                                    target_date=target_date,
-                                    metric=metric,
-                                    source=f"openmeteo_{model}",
-                                    predicted_value=predicted_value,
-                                    fetched_at=datetime.now(UTC).replace(tzinfo=None),
-                                    raw_data=str(result),
-                                )
-                                session.add(forecast)
-                            session.commit()
-                        total_saved += len(market_ids)
-                        logger.info(
-                            f"[openmeteo_{model}] Persisted for {len(market_ids)} markets: "
-                            f"{city} {date_str} {metric}={predicted_value}"
-                        )
-                except Exception as e:
-                    logger.error(f"[openmeteo_{model}] error: {e}")
-                    continue
-        except Exception as e:
-            logger.error(f"Ensemble fetch error: {e}")
 
         return total_saved
 

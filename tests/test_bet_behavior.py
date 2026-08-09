@@ -275,7 +275,7 @@ class TestRotationBehavior:
             )
             s.commit()
 
-            placed = placer.place_all_pending()
+            placer.place_all_pending()
             old_bet = s.query(Bet).filter(Bet.market_id == "m1").first()
             new_bet = s.query(Bet).filter(Bet.market_id == "m2", Bet.status.in_(("placed", "pending"))).first()
             assert new_bet is not None, "yeni yuksek fiyatliya bet acilmali"

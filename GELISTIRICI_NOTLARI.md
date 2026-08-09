@@ -25,7 +25,7 @@ python -m pytest tests/test_accounting.py tests/test_settler_polymarket.py tests
 
 # 6) FULL suite (push oncesi)
 python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q
-# HEDEF: "680 passed, 6 skipped, 0 failed" (tsc --noEmit = 0 hata)
+# HEDEF: "657 passed, 7 skipped, 0 failed" (tsc --noEmit = 0 hata)
 
 # 7) Dokumantasyon senkronu (ZORUNLU, agents.md kurali)
 # README.md + GELISTIRICI_NOTLARI.md — bugfix/karar/feature commit'lenmeden once ekle/duzelt
@@ -122,6 +122,8 @@ Hangi dosya hangi kurali korur:
 | **DURUM: Davranis testleri eklendi (2026-08-08)** | Kacan bug'lar hep modul ETKILESIMINDE cikiyordu (settler x reopen, target_date x kapanis). Izole unit testler (test_active_risk_management.py 42 test ama 0 gercek DB — hepsi MagicMock) bunlari yakalayamadi. Eklendi: `test_sl_reopen_chain.py` (SL->settler->reopen zinciri), `test_settlement_chain.py` (kapanis gecmeden expired yok), `test_bet_behavior.py` (acilis filtresi, vade, gate, rotation), `test_risk_behavior.py` (SL/TP/TS/time-decay gercek DB ile). Suite: 653 -> 680 |
 | **DURUM: TP/TS/time-decay config kapali (2026-08-08)** | `config/settings.py` risk: `take_profit_pct=999.0`, `trailing_stop_pct=999.0`, `time_decay_hours=0` — TP/TS/time-decay fiilen devre disi! SL calisiyor (0.2). Bu bilincli mi yoksa bug mu karar gerekli. Testler config'i gecici set ederek davranisi dogruluyor |
 | **REPLAY testi: production DB kopyasi (2026-08-08)** | Sentetik testler gercek DB'deki durumlari yakalayamaz. `scripts/replay_test.py` production bot.db'yi kopyalar, kopya uzerinde settle_all + reopen calistirir: kapanisi (target+12h) gecmemis market expired YAPILMAMALI + reopen crash'siz. Neden pytest DEGIL script: conftest DB_PATH'i temp DB'ye cevirir, bot_config singleton ilk importta donar — replay pytest icinde calisamaz. Kullanim: `python scripts/replay_test.py` (cikis 0=OK). 2026-08-08 dogrulama: 3064 market, 0 yanlis expired, 7 acik-bet'siz SL grubu islendi (gate reddi) |
+| **`_fetch_open_meteo_model` tanimsiz idi (2026-08-09)** | `scrapers/meteo.py` `fetch_for_markets` icinde tanimsiz `self._fetch_open_meteo_model(...)` cagilisi ilk model'da `AttributeError` -> `except Exception`'a dusup SESSIZCE 0 satir uretiyordu (8-modelli per-model loop etkisiz) + ayni (lat,lon,date) icin cift istek riski. Cozum: kirlik loop ve kullanilmaz `openmeteo_models` listesi **silindi**; canli yol `fetch_all_markets` → `get_multi_model_forecast` ve aggregate `_fetch_open_meteo`/`_fetch_weatherapi` KORUNDU. Test: `test_meteo.py` |
+| **DB bakimi ANALYZE+VACUUM eksikti (2026-08-09)** | Dosya buyudukce istatistikler eskimeyor, boyut artiyordu; `ANALYZE`/`VACUUM` hic calismiyordu. Cozum: `scripts/db_maintenance.py` (wal_checkpoint(TRUNCATE) → ANALYZE → VACUUM) + `data_watchdog` icinde **gunde 1 kez 02:00-04:00 UTC** penceresinde (`data/.last_db_maintenance` marker). VACUUM canli bot ile lock riski → sessiz pencere secildi. Ilk run: bot.db 157.88MB → 146.58MB (~11.3MB save) |
 
 ---
 
@@ -247,6 +249,10 @@ calisir (kesintiye karsi guvence):
 - `scripts/data_watchdog.py` -> `JunboDataWatchdog` (6 dk): veri kaynaklarinin
   tazeligini kontrol eder, bayat ise toplayiciyi kendisi baslatir, task disabled
   ise yeniden enable eder. Log: `data/logs/data_watchdog.log`.
+- **DB bakimi (2026-08-09):** `data_watchdog` gunde 1 kez (02:00-04:00 UTC penceresi,
+  `data/.last_db_maintenance` marker) `scripts/db_maintenance.py`'yi calistirir:
+  `wal_checkpoint(TRUNCATE)` + `ANALYZE` + `VACUUM`. Log: `data/logs/db_maintenance.log`.
+  Ilk run bot.db ~158MB → ~146MB.
 
 ### 12.6 Retry / Internet Dayanikli
 

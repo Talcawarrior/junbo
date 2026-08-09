@@ -1,4 +1,4 @@
-"""Junbo data watchdog — backtest veri setini kendi kendine tam tutar.
+"""Junbo data watchdog -- backtest veri setini kendi kendine tam tutar.
 
 Task Scheduler'dan her 5 dakikada bir calisir (JunboDataWatchdog).
 Her veri kaynaginin tazeligini kontrol eder; bayat ise ilgili toplayiciyi
@@ -159,7 +159,7 @@ def main() -> None:
     else:
         log(f"SYNC ok (age={age:.0f}s)")
 
-    # 5) backups — klasordeki en genc dosya yasi
+    # 5) backups -- klasordeki en genc dosya yasi
     backup_dir = REPO / "data" / "backups"
     if backup_dir.exists():
         files = list(backup_dir.iterdir())
@@ -172,8 +172,33 @@ def main() -> None:
             else:
                 log(f"BACKUP ok (age={age:.0f}s)")
 
-    # 6) Task durum denetimi — her 2 gorselde 1
+    # 6) Task durum denetimi -- her 2 gorselde 1
     ensure_task_enabled()
+
+    # 7) DB bakimi (ANALYZE + VACUUM) -- gunde 1 kez, 02:00-04:00 UTC penceresinde.
+    # VACUUM canli bot ile 'database is locked' riski tasidigi icin bet/settle
+    # sessiz penceresi secildi; marker (guncel tarih) ile gunde tek calisma garanti.
+    _db_maintenance_marker = REPO / "data" / ".last_db_maintenance"
+    _today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    _maintained_today = False
+    try:
+        if _db_maintenance_marker.exists():
+            _maintained_today = _db_maintenance_marker.read_text(encoding="utf-8").strip() == _today
+    except Exception:  # noqa: BLE001
+        _maintained_today = False
+    _now_hour = datetime.now(timezone.utc).hour
+    if not _maintained_today and 2 <= _now_hour < 4:
+        ok = run_script(r"scripts\db_maintenance.py")
+        if ok:
+            try:
+                _db_maintenance_marker.write_text(_today, encoding="utf-8")
+            except Exception:  # noqa: BLE001
+                log("DBMAINT marker write failed")
+        else:
+            log("DBMAINT run failed -- retry next tick (marker not set)")
+    else:
+        reason = "ran today" if _maintained_today else f"outside 02-04 UTC window (hour={_now_hour})"
+        log(f"DBMAINT ok (skipped -- {reason})")
 
 
 if __name__ == "__main__":
