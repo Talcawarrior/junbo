@@ -25,7 +25,7 @@ python -m pytest tests/test_accounting.py tests/test_settler_polymarket.py tests
 
 # 6) FULL suite (push oncesi)
 python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q
-# HEDEF: "657 passed, 7 skipped, 0 failed" (tsc --noEmit = 0 hata)
+# HEDEF: "671 passed, 6 skipped, 0 failed" (2026-08-10 itibari; tsc --noEmit = 0 hata)
 
 # 7) Dokumantasyon senkronu (ZORUNLU, agents.md kurali)
 # README.md + GELISTIRICI_NOTLARI.md — bugfix/karar/feature commit'lenmeden once ekle/duzelt
@@ -124,6 +124,7 @@ Hangi dosya hangi kurali korur:
 | **REPLAY testi: production DB kopyasi (2026-08-08)** | Sentetik testler gercek DB'deki durumlari yakalayamaz. `scripts/replay_test.py` production bot.db'yi kopyalar, kopya uzerinde settle_all + reopen calistirir: kapanisi (target+12h) gecmemis market expired YAPILMAMALI + reopen crash'siz. Neden pytest DEGIL script: conftest DB_PATH'i temp DB'ye cevirir, bot_config singleton ilk importta donar — replay pytest icinde calisamaz. Kullanim: `python scripts/replay_test.py` (cikis 0=OK). 2026-08-08 dogrulama: 3064 market, 0 yanlis expired, 7 acik-bet'siz SL grubu islendi (gate reddi) |
 | **`_fetch_open_meteo_model` tanimsiz idi (2026-08-09)** | `scrapers/meteo.py` `fetch_for_markets` icinde tanimsiz `self._fetch_open_meteo_model(...)` cagilisi ilk model'da `AttributeError` -> `except Exception`'a dusup SESSIZCE 0 satir uretiyordu (8-modelli per-model loop etkisiz) + ayni (lat,lon,date) icin cift istek riski. Cozum: kirlik loop ve kullanilmaz `openmeteo_models` listesi **silindi**; canli yol `fetch_all_markets` → `get_multi_model_forecast` ve aggregate `_fetch_open_meteo`/`_fetch_weatherapi` KORUNDU. Test: `test_meteo.py` |
 | **DB bakimi ANALYZE+VACUUM eksikti (2026-08-09)** | Dosya buyudukce istatistikler eskimeyor, boyut artiyordu; `ANALYZE`/`VACUUM` hic calismiyordu. Cozum: `scripts/db_maintenance.py` (wal_checkpoint(TRUNCATE) → ANALYZE → VACUUM) + `data_watchdog` icinde **gunde 1 kez 02:00-04:00 UTC** penceresinde (`data/.last_db_maintenance` marker). VACUUM canli bot ile lock riski → sessiz pencere secildi. Ilk run: bot.db 157.88MB → 146.58MB (~11.3MB save) |
+| **BAYAT FİYATLA BET ACILDI (2026-08-10)** | Beijing 32°C (10 Ağu) marketine 08:59 UTC'de **0.18'e** bet acildi; gerçek CLOB book fiyati o an **~0.98** idi (Gamma `outcomePrices` ~1 saat bayat kaldi; snapshot'larda 01:42→08:54 arasi 7 saatlik bosluk vardi). Bot, bet acarken sadece DB'deki `market.yes_price`'ı (Gamma'dan) kullaniyor, gerçek işlem fiyatini CLOB'dan dogrulamiyordu → paper fill gercekte hic var olmamis fiyattan. Cozum: `utils/clob_live.py` eklendi — `raw_data`'dan `clobTokenIds[0]` (YES) cikarir, CLOB `/book`'tan canli ask/bid ceker; `bet_placer.open_bet_on_market` + `place_bet` artık bet acmadan once canli fiyatla DB fiyatini karsilastirir, sapma > %15 ise **bet reddedilir** (stale guard; CLOB erisilemezse eski davranis korunur). Test: `tests/test_clob_live.py` (12 test) |
 
 ---
 

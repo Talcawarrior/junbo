@@ -115,6 +115,29 @@ class BetPlacer:
             _min_entry = float(getattr(bot_config.strategy, "min_entry_price", 0.10))
             _max_entry = float(getattr(bot_config.strategy, "max_entry_price", 0.95))
             _yp = float(market.yes_price or 0.5)
+
+            # Live-price staleness guard: Gamma's stored yes_price can lag the
+            # executable CLOB book (2026-08-10 Beijing 32C: 0.18 in DB vs ~0.98
+            # on the book). Refuse bets whose DB price no longer matches the
+            # live quote so we never fabricate fills at non-existent prices.
+            try:
+                from utils.clob_live import live_quote_for_market, price_is_stale
+
+                _tok, live_ask, live_bid = live_quote_for_market(market.raw_data)
+                if _tok is not None and live_ask is not None and price_is_stale(_yp, live_ask, live_bid):
+                    logger.warning(
+                        "STALE PRICE GUARD: %s DB yes=%.4f vs CLOB ask=%.4f (bid=%.4f) - bet refused",
+                        market.id,
+                        _yp,
+                        live_ask,
+                        live_bid,
+                    )
+                    d.check("price_stale", False, db_price=_yp, live_ask=live_ask)
+                    d.log(logging.INFO)
+                    return None
+            except Exception as exc:  # never block betting on CLOB failure
+                logger.debug("Live price guard skipped for %s: %s", market.id, exc)
+
             if not (_min_entry <= _yp < _max_entry):
                 logger.info(
                     "Price gate: %s yes_price=%.3f outside [%.2f, %.2f) - bet refused",
@@ -1009,6 +1032,27 @@ class BetPlacer:
 
         # Fill price + slippage
         raw_fill = float(market.yes_price or 0.5)
+
+        # Live-price staleness guard: Gamma's stored yes_price can lag the
+        # executable CLOB book by a lot (2026-08-10: Beijing 32C 0.18 in DB
+        # vs ~0.98 on the book). Opening on a stale price fabricates fills
+        # that never existed on the real market — refuse if the live CLOB
+        # quote diverges beyond the tolerance.
+        try:
+            from utils.clob_live import live_quote_for_market, price_is_stale
+
+            _tok, live_ask, live_bid = live_quote_for_market(market.raw_data)
+            if _tok is not None and live_ask is not None and price_is_stale(raw_fill, live_ask, live_bid):
+                logger.warning(
+                    "STALE PRICE GUARD: %s DB yes=%.4f vs CLOB ask=%.4f (bid=%.4f) - bet refused (stale Gamma data)",
+                    market.id,
+                    raw_fill,
+                    live_ask,
+                    live_bid,
+                )
+                return None
+        except Exception as exc:  # guard must never block betting on CLOB failure
+            logger.debug("Live price guard skipped for %s: %s", market.id, exc)
 
         # Vadesi gecmis piyasalara bet acma.
         # Kapanis 24:00 UTC = target_date (12:00 etiketi) + 12h.
