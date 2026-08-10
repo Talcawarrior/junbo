@@ -115,7 +115,23 @@ class Calculator:
             source_weights = {}
             for f in forecasts:
                 if f.source not in latest_by_source:
-                    latest_by_source[f.source] = f.predicted_value
+                    # Calibration: correct systematic per-city/model bias
+                    # (MBE from historical_calibrations). Falls back to raw
+                    # when no calibration data exists.
+                    try:
+                        from utils.calibration import calibrate_forecast
+
+                        raw_val = f.predicted_value
+                        cal_val = calibrate_forecast(
+                            market.city_code or "",
+                            market.metric or "",
+                            f.source,
+                            raw_val,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - never break forecasting
+                        logger.debug("Calibration skipped for %s: %s", f.source, exc)
+                        cal_val = f.predicted_value
+                    latest_by_source[f.source] = cal_val
                     source_weights[f.source] = f.model_weight or 0.0
 
             # ── Model blacklist filter ────────────────────────────────────

@@ -115,30 +115,53 @@ def run_evolution_cycle(now: datetime | None = None) -> dict:
 
 
 def _run_calibration_backfill(now: datetime | None = None) -> dict:
-    """Fetch recent per-model forecasts + Archive actuals, compute bias map.
+    """Backfill historical_calibrations from local forecast + actual data.
 
-    Runs a backfill (120 days, up to 50 cities). The per-model historical
-    forecast rows (gfs_seamless, ecmwf_ifs04, …) land in
-    historical_calibrations for bias analysis.
+    Uses the same local join as ``scripts/backfill_calibration.py``: per-model
+    ``weather_forecasts`` rows matched against ``actuals.db`` Archive
+    temperatures, keyed by (city_code, date, metric, model) via INSERT OR
+    REPLACE. No external API calls. Then refreshes the in-process calibration
+    engine's bias map so forecasts are corrected from the next scan onward.
     """
     now = now or datetime.now(UTC)
     today = now.strftime("%Y-%m-%d")
     cal_result: dict = {"day": today}
     try:
-        # ── Step 1: Backfill historical_per-model forecasts vs actuals ──
-        # Even though backfill_from_live_db already fetches Archive actuals
-        # for the unified datastore, the per-model historical_forecast API
-        # rows (gfs_seamless, ecmwf_ifs04, …) only land here.
-        logger.info("Daily calibration: per-model historical backfill")
-        cal_result["backfill_rows"] = 0
+        import subprocess
+        import sys
 
-        # ── Step 2: Regenerate bias map from historical_calibrations ───
-        logger.info("Daily calibration: bias map generation")
-        cal_result["calibrated_cities"] = 0
-        logger.info(
-            "Daily calibration complete",
+        script = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "scripts",
+            "backfill_calibration.py",
         )
+        logger.info("Daily calibration: backfilling historical_calibrations")
+        proc = subprocess.run(
+            [sys.executable, script, "--apply"],
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        cal_result["backfill_rows"] = proc.returncode
+        if proc.returncode != 0:
+            logger.warning(
+                "Daily calibration: backfill exit=%d stderr=%s",
+                proc.returncode,
+                proc.stderr[-500:],
+            )
 
+        # Refresh the in-process calibration engine so the next analysis uses
+        # the updated bias map (fresh singleton).
+        from utils.calibration import CalibrationEngine
+
+        try:
+            ce = CalibrationEngine()
+            cal_result["calibrated_cities"] = len(ce.bias_map)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Daily calibration: bias map refresh failed: %s", exc)
+            cal_result["calibrated_cities"] = 0
+
+        logger.info("Daily calibration complete: %s", cal_result)
     except Exception as exc:  # noqa: BLE001 - loop must never die
         logger.error("Daily calibration failed: %s", exc, exc_info=True)
         cal_result["error"] = str(exc)

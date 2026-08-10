@@ -143,21 +143,25 @@ def test_cleanup_stale_bets_cancels_only_stale(market_factory):
             )
             session.commit()
 
+    from datetime import timedelta, timezone
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
     # 3 gun once acilmis, marketi yok → iptal edilmeli
     with get_session() as session:
-        _make_open_bet(session, "ghost-market", datetime(2026, 8, 1, 12, 0))
+        _make_open_bet(session, "ghost-market", now - timedelta(days=3))
         session.commit()
 
     # marketi var ama hedef tarihi cok eski → iptal edilmeli
-    old_mkt = market_factory(target_date=datetime(2026, 7, 1, 12, 0))
+    old_mkt = market_factory(target_date=now - timedelta(days=7))
     with get_session() as session:
-        _make_open_bet(session, old_mkt, datetime(2026, 8, 1, 12, 0))
+        _make_open_bet(session, old_mkt, now - timedelta(days=3))
         session.commit()
 
-    # yeni bet (bugun) → dokunulmamali
-    fresh_mkt = market_factory(target_date=datetime(2026, 8, 8, 12, 0))
+    # yeni bet (bugun) → dokunulmamali (target 48h icinde, placed bugun)
+    fresh_mkt = market_factory(target_date=now + timedelta(hours=6))
     with get_session() as session:
-        _make_open_bet(session, fresh_mkt, datetime(2026, 8, 7, 12, 0))
+        _make_open_bet(session, fresh_mkt, now)
         session.commit()
 
     _cleanup_stale_bets()
