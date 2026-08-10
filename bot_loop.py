@@ -200,6 +200,7 @@ async def scan_and_bet_loop(state):
         run_fetch_weather,
         run_parse_markets,
     )
+    from config.settings import bot_config
 
     stale_check_counter = 0
     last_day = None
@@ -257,7 +258,13 @@ async def scan_and_bet_loop(state):
             # hemen cache'den acilir. Boylece bahisler Polymarket verisinin
             # tazelendigi 5 dk temposunda acilir; meteo saatte 1 kez yenilenir
             # ve bahis acilimini bloklamaz.
-            await asyncio.wait_for(asyncio.to_thread(run_cycle), timeout=_CYCLE_TIMEOUT)
+            #
+            # Ana mod (spread): edge tabanli run_cycle cagirilmaz — bet acma
+            # isi spread_placer'da (2-gun-sonrasi tarih acildiginda) yapilir.
+            # Edge modu (eski davranis) BETTING_STRATEGY=edge ile korunur.
+            strategy = getattr(bot_config.strategy, "betting_strategy", "edge")
+            if strategy != "spread":
+                await asyncio.wait_for(asyncio.to_thread(run_cycle), timeout=_CYCLE_TIMEOUT)
 
             # STEP 4: Meteo tazeleme — SADECE saatte 1 kez ve bahis acilimindan
             # SONRA (bet opening'i bloklamaz). Onceki saatlik veri zaten cache'te,
@@ -327,15 +334,36 @@ async def scan_and_bet_loop(state):
                 new_date, trigger = _next_two_day_target(last_two_day_date, open_dates)
                 if trigger:
                     new_count = _get_open_market_count_for_date(new_date)
-                    state.fast_price_until = (
-                        datetime.now(timezone.utc) + timedelta(seconds=_FAST_PRICE_WINDOW)
-                    ).replace(tzinfo=None)
-                    logger.info(
-                        "2-day-ahead date %s opened (%d markets) — price poller FAST (1min) for %d min",
-                        new_date.isoformat(),
-                        new_count,
-                        _FAST_PRICE_WINDOW // 60,
-                    )
+                    # ── Ana mod: spread stratejisi (BETTING_STRATEGY=spread) ──
+                    # Yeni 2-gun-sonrasi tarih acildi -> en son meteo tahmini
+                    # etrafinda +/- radius dereceye YES bet ac (ilk snapshot fiyati).
+                    # Edge modunda (eski davranis) sadece FAST price poller aktif.
+                    strategy = getattr(bot_config.strategy, "betting_strategy", "edge")
+                    if strategy == "spread":
+                        try:
+                            from executor.spread_placer import place_spread_bets
+
+                            res = await asyncio.wait_for(
+                                asyncio.to_thread(place_spread_bets, new_date),
+                                timeout=_CYCLE_TIMEOUT,
+                            )
+                            logger.info(
+                                "SPREAD strategy: %s date opened -> %s",
+                                new_date.isoformat(),
+                                res,
+                            )
+                        except Exception as e:
+                            logger.error("Spread placement failed for %s: %s", new_date.isoformat(), e)
+                    else:
+                        state.fast_price_until = (
+                            datetime.now(timezone.utc) + timedelta(seconds=_FAST_PRICE_WINDOW)
+                        ).replace(tzinfo=None)
+                        logger.info(
+                            "2-day-ahead date %s opened (%d markets) — price poller FAST (1min) for %d min",
+                            new_date.isoformat(),
+                            new_count,
+                            _FAST_PRICE_WINDOW // 60,
+                        )
                     last_two_day_date = new_date
                     # UI dogrulama: yeni tarih icin Polymarket marketlerini kontrol et
                     if _verify_ui:

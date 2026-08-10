@@ -147,6 +147,34 @@ python main.py bot
 
 ---
 
+## 4b. Spread Stratejisi (Ana Mod, 2026-08-10)
+
+**Varsayilan moddur** (`BETTING_STRATEGY=spread`). Eski edge-tabanli mod `BETTING_STRATEGY=edge` ile geri donulebilir.
+
+- Yeni **2-gun-sonrasi tarih** acildiginda (bot_loop 2-day-ahead tespiti):
+  - En son meteo tahmini etrafinda **+/- 3 dereceye** (spread) YES bet acilir.
+  - Giris fiyati = marketin **ilk snapshot fiyati** (acilis anindaki en dusuk fiyat).
+  - Entry < 0.30 olan esiklere, esik basina $2.
+  - Tahmini **en yuksek ilk 15 sehir** secilir (en sicak — longshot potansiyeli).
+  - Gunluk **max 30 bet**.
+- **Kayan pencere:** tahmin guncellendiginde (25C -> 27C) yeni merkezin +/-(radius)
+  disinda kalan acik esikler **kapatilir**, yeni penceredeki esikler acilir.
+- Backtest (7 gun, gercek veri): spread=3, max_entry<0.30, RAW -> **+$36,814**,
+  %50.6 kazanma, 5/5 gun pozitif. `scripts/backtest_early_spread.py`.
+- **Kalibrasyon spread'te kapatilir** (CALIB +$28k < RAW +$37k) — edge-tabanli
+  stratejide degerli oldugu icin calculator'da aktif kalir.
+
+| Ayar (.env) | Varsayilan | Aciklama |
+|---|---|---|
+| `BETTING_STRATEGY` | `spread` | `edge` = eski mod |
+| `SPREAD_RADIUS` | `3` | tahmin +/- derece |
+| `SPREAD_MAX_CITIES` | `15` | en sicak ilk N sehir |
+| `SPREAD_MAX_ENTRY` | `0.30` | ust fiyat siniri |
+| `SPREAD_STAKE_USD` | `2.0` | esik basina stake |
+| `SPREAD_MAX_BETS_PER_DAY` | `30` | gunluk bet limiti |
+
+---
+
 ## 5. Bot Loops (bot_loop.py)
 
 | Loop | Interval | Gorevi |
@@ -239,7 +267,7 @@ python main.py reset     # SIFIRLA (backup alir)
 ```powershell
 # FULL suite (0 failed hedefi)
 python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q
-# -> "686 passed, 7 skipped, 0 failed" (2026-08-10 durumda; tsc --noEmit 0 hata)
+# -> "691 passed, 7 skipped, 0 failed" (2026-08-10 durumda; tsc --noEmit 0 hata)
 
 # Davranis testleri (gercek DB, mock'suz — modul etkilesim bug'lari icin)
 python -m pytest tests/test_sl_reopen_chain.py tests/test_settlement_chain.py tests/test_bet_behavior.py tests/test_risk_behavior.py -q
@@ -285,6 +313,7 @@ Detaylar icin `GELISTIRICI_NOTLARI.md`'ya bakin (bolum 12: dogrulanmis davranis 
 - **2026-08-10 (ikinci tur):** Ayni bayatlik 41 acik betten 17'sini etkilemisti — `scripts/fix_stale_entry_prices.py` ile elle duzeltildi (entry_price/shares/fee/pnl gercek CLOB fiyatina gore). Test: `tests/test_fix_stale_entry_prices.py`. DB backup: `data/backups/bot_pre_pricefix_*.db`.
 - **2026-08-10 (ucuncu tur):** **Model kalibrasyonu aktif** — `historical_calibrations` 0 satirdi, `_run_calibration_backfill` bos govdeydi. `scripts/backfill_calibration.py` kendi verisiyle (weather_forecasts × actuals) **58,064 satir** doldurdu; `utils/calibration.py` (CalibrationEngine, ASIAbot'tan tasindi) calculator'a baglandi — her model tahmini sehir/model MBE ile duzeltilir (bias_map yoksa eski davranis). Gunde 1 kez otomatik backfill. Test: `tests/test_calibration_engine.py`.
 - **2026-08-10 (dorduncu tur):** **Erken giris + spread backtest** — `scripts/backtest_early_spread.py`: market acilir acilmaz (ilk snapshot fiyati), meteo tahmini etrafinda ±3 dereceye (spread) YES bet, max_entry<0.30, kalibrasyonsuz → **813 bet, %50.6, +$36,814** (5/5 gun pozitif). Kalibrasyon spread'te zararli (CALIB +$28k < RAW +$37k) ama edge-tabanli stratejide degerli — calculator'da aktif.
+- **2026-08-10 (besinci tur):** **Spread stratejisi ANA MOD** — `executor/spread_placer.py`: yeni 2-gun-sonrasi tarih acildiginda en son meteo tahmini +/-3 dereceye, ilk snapshot fiyatindan, en sicak ilk 15 sehre YES bet (gunluk 30 limit). **Kayan pencere:** tahmin guncellenince yeni pencerenin disinda kalan esikler kapatilir. `BETTING_STRATEGY=spread` (varsayilan) / `edge` (eski mod, geri donulebilir). Test: `tests/test_spread_placer.py`.
 
 ---
 

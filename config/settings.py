@@ -161,6 +161,17 @@ class StrategyConfig:
     min_entry_price: float = 0.10
     max_entry_price: float = 0.95
 
+    # ── Spread strategy (BETTING_STRATEGY=spread, ana mod) ────────────────
+    # Market acilir acilmaz, en son meteo tahmini etrafinda +/- spread_radius
+    # dereceye YES bet acar (ilk snapshot fiyati). Eski edge-tabanli mod
+    # BETTING_STRATEGY=edge ile geri donulebilir.
+    betting_strategy: str = "spread"
+    spread_radius: int = 3  # +/- derece (tahmin +/- 3)
+    spread_max_cities: int = 15  # tahmini en yuksek ilk N sehir
+    spread_max_entry: float = 0.30  # bu fiyat uzerine bet acilmaz
+    spread_stake_usd: float = 2.0  # esik basina stake
+    spread_max_bets_per_day: int = 30  # gunluk toplam spread bet limiti
+
     # ── Daily rotation limit: gunde max N rotasyon ───────────────────
     max_daily_rotations: int = 3  # gunde en fazla 3 rotasyon (maliyet kontrolu)
 
@@ -523,6 +534,12 @@ class BotConfig:
         s.flat_bet_usd = float(os.getenv("FLAT_BET_USD", str(s.flat_bet_usd)))
         s.min_entry_price = float(os.getenv("MIN_ENTRY_PRICE", str(s.min_entry_price)))
         s.max_entry_price = float(os.getenv("MAX_ENTRY_PRICE", str(s.max_entry_price)))
+        s.betting_strategy = os.getenv("BETTING_STRATEGY", s.betting_strategy)
+        s.spread_radius = int(os.getenv("SPREAD_RADIUS", str(s.spread_radius)))
+        s.spread_max_cities = int(os.getenv("SPREAD_MAX_CITIES", str(s.spread_max_cities)))
+        s.spread_max_entry = float(os.getenv("SPREAD_MAX_ENTRY", str(s.spread_max_entry)))
+        s.spread_stake_usd = float(os.getenv("SPREAD_STAKE_USD", str(s.spread_stake_usd)))
+        s.spread_max_bets_per_day = int(os.getenv("SPREAD_MAX_BETS_PER_DAY", str(s.spread_max_bets_per_day)))
 
 
 # ── Config backward-compatibility proxy ────────────────────────────────────
