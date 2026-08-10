@@ -239,7 +239,7 @@ python main.py reset     # SIFIRLA (backup alir)
 ```powershell
 # FULL suite (0 failed hedefi)
 python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q
-# -> "671 passed, 6 skipped, 0 failed" (2026-08-10 durumda; tsc --noEmit 0 hata)
+# -> "680 passed, 6 skipped, 0 failed" (2026-08-10 durumda; tsc --noEmit 0 hata)
 
 # Davranis testleri (gercek DB, mock'suz — modul etkilesim bug'lari icin)
 python -m pytest tests/test_sl_reopen_chain.py tests/test_settlement_chain.py tests/test_bet_behavior.py tests/test_risk_behavior.py -q
@@ -282,6 +282,7 @@ Detaylar icin `GELISTIRICI_NOTLARI.md`'ya bakin (bolum 12: dogrulanmis davranis 
 - **2026-08-08 (ikinci tur):** `target_date` 12:00 etiketi artik kapanis (24:00) sanilmiyor — 12:30 UTC sonrasi bet acilamama bug'i duzeltildi (SL sonrasi reopen dahil; Miami 33.6C yeni peak acildi). `max_openable_now` nakitle sinirlandi (`min(nakit, limit)`); "Gercek Kayip" KPI kaldirildi (fee zaten PnL icinde), yerine fee islem sayisi eklendi.
 - **2026-08-09:** `scrapers/meteo.py` `fetch_for_markets` icindeki tanimsiz `_fetch_open_meteo_model` kirik loop silindi (dead/kirik kod + cift istek riski). DB bakimi eklendi: `scripts/db_maintenance.py` + `data_watchdog` gunde 1 kez utc ANALYZE+VACUUM (02-04 UTC). Ilk run: bot.db 157.9 → 146.6MB.
 - **2026-08-10:** **Bayat fiyat guard'ı** — Beijing 32°C beti 0.18'den acildi ama gercek CLOB fiyati 0.98 idi (Gamma ~1 saat bayat). Bet acmadan once artık `utils/clob_live.py` ile canli CLOB ask/bid cekilir; DB fiyati canlidan >%15 saparsa bet reddedilir (CLOB erisilemezse eski davranis korunur). Test: `tests/test_clob_live.py`.
+- **2026-08-10 (ikinci tur):** Ayni bayatlik 41 acik betten 17'sini etkilemisti — `scripts/fix_stale_entry_prices.py` ile elle duzeltildi (entry_price/shares/fee/pnl gercek CLOB fiyatina gore). Test: `tests/test_fix_stale_entry_prices.py`. DB backup: `data/backups/bot_pre_pricefix_*.db`.
 
 ---
 
