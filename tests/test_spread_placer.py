@@ -120,6 +120,19 @@ def test_first_snapshot_price_returns_earliest():
     assert p == pytest.approx(0.30)
 
 
+def test_first_snapshot_price_falls_back_to_market_price():
+    """Snapshot yoksa (0.005 alti market) weather_markets.yes_price kullanilir."""
+    from database.db import get_session
+    from executor.spread_placer import _first_snapshot_price
+
+    day = _day()
+    with get_session() as s:
+        _add_market(s, "Testville", "temperature_max", day, 25, yes_price=0.0005)
+        s.commit()
+        p = _first_snapshot_price(s, "Testville", day, "temperature_max", 25)
+    assert p == pytest.approx(0.0005)
+
+
 def test_place_spread_bets_opens_within_radius():
     from database.db import get_session
     from database.models import Bet

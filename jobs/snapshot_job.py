@@ -3,11 +3,11 @@
 Tum acik WeatherMarket'lerin YES/NO fiyatlarini 30 dakikada bir
 market_snapshots tablosuna kaydeder. "highest/lowest temperature"
 merdivenindeki her threshold (HIGH or-above, LOW or-below, RANGE exact
-bucket) ayri bir markettir ve YES fiyati >= 0.005 (%0.5, Polymarket'in
-"1%" olarak goruntuledigi ~0.009'luk tail bucket'larini da yakalar) olan
-hepsi kaydedilir. Boylece hangi saat/gunde hangi sicaklik araligina
-girmenin daha karli oldugu analiz edilebilir ve ilk-peak anini
-yakalamak icin cokozunurluk 30 dakikaya cikarilmistir.
+bucket) ayri bir markettir ve YES fiyati >= 0.0005 (Polymarket'in gercek
+minimum tick'i) olan hepsi kaydedilir. Boylece en dusuk fiyatli longshot
+bucket'lari da fiyat gecmisine girer — spread stratejisi ve backtest icin
+kritiktir (0.005 ustu filtre, 0.005 alti marketleri atladigi icin en
+yuksek edge'li longshot'larin gecmisi eksik kalıyordu).
 """
 
 import logging
@@ -19,7 +19,10 @@ from database.models import WeatherMarket, MarketSnapshot
 
 logger = logging.getLogger("SNAPSHOT_JOB")
 
-YES_PRICE_MIN = 0.005
+# Polymarket minimum price tick. 0.005 ustu filtre 0.005 alti marketleri
+# (en dusuk fiyatli longshot'lar) atliyordu -> spread/backtest fiyat
+# gecmisi eksik kaliyordu. 0.0005'e dusturuldu (2026-08-10).
+YES_PRICE_MIN = 0.0005
 
 
 def _bucket_start(dt: datetime) -> datetime:
@@ -37,8 +40,8 @@ def take_market_snapshots() -> int:
     """Tum acik sicaklik bucket marketleri icin 30 dakika bir piyasa snapshot'i al.
 
     Highest/lowest temperature merdivenindeki her threshold kaydedilir
-    (HIGH, LOW ve RANGE exact bucket'lari dahil). yes_price >= 0.005
-    olanlar kaydedilir; %1'in altinda kalan tail bucket'lari atlanir.
+    (HIGH, LOW ve RANGE exact bucket'lari dahil). yes_price >= 0.0005
+    (Polymarket min tick) olanlar kaydedilir.
 
     Ayni market'e ait snapshot'lar 30dk bucket icinde guncellenir
     (ayni 30dk icin tekrar kayit yapilmaz; yeni 30dk penceresi yeni satirdir).

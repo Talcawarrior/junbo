@@ -267,7 +267,7 @@ python main.py reset     # SIFIRLA (backup alir)
 ```powershell
 # FULL suite (0 failed hedefi)
 python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q
-# -> "691 passed, 7 skipped, 0 failed" (2026-08-10 durumda; tsc --noEmit 0 hata)
+# -> "692 passed, 7 skipped, 0 failed" (2026-08-10 durumda; tsc --noEmit 0 hata)
 
 # Davranis testleri (gercek DB, mock'suz — modul etkilesim bug'lari icin)
 python -m pytest tests/test_sl_reopen_chain.py tests/test_settlement_chain.py tests/test_bet_behavior.py tests/test_risk_behavior.py -q
@@ -314,6 +314,7 @@ Detaylar icin `GELISTIRICI_NOTLARI.md`'ya bakin (bolum 12: dogrulanmis davranis 
 - **2026-08-10 (ucuncu tur):** **Model kalibrasyonu aktif** — `historical_calibrations` 0 satirdi, `_run_calibration_backfill` bos govdeydi. `scripts/backfill_calibration.py` kendi verisiyle (weather_forecasts × actuals) **58,064 satir** doldurdu; `utils/calibration.py` (CalibrationEngine, ASIAbot'tan tasindi) calculator'a baglandi — her model tahmini sehir/model MBE ile duzeltilir (bias_map yoksa eski davranis). Gunde 1 kez otomatik backfill. Test: `tests/test_calibration_engine.py`.
 - **2026-08-10 (dorduncu tur):** **Erken giris + spread backtest** — `scripts/backtest_early_spread.py`: market acilir acilmaz (ilk snapshot fiyati), meteo tahmini etrafinda ±3 dereceye (spread) YES bet, max_entry<0.30, kalibrasyonsuz → **813 bet, %50.6, +$36,814** (5/5 gun pozitif). Kalibrasyon spread'te zararli (CALIB +$28k < RAW +$37k) ama edge-tabanli stratejide degerli — calculator'da aktif.
 - **2026-08-10 (besinci tur):** **Spread stratejisi ANA MOD** — `executor/spread_placer.py`: yeni 2-gun-sonrasi tarih acildiginda en son meteo tahmini +/-3 dereceye, ilk snapshot fiyatindan, en sicak ilk 15 sehre YES bet (gunluk 30 limit). **Kayan pencere:** tahmin guncellenince yeni pencerenin disinda kalan esikler kapatilir. `BETTING_STRATEGY=spread` (varsayilan) / `edge` (eski mod, geri donulebilir). Test: `tests/test_spread_placer.py`.
+- **2026-08-10 (altinci tur):** **Spread commit bug'i duzeltildi** — `place_spread_bets` `with get_session()` wrapper'a cekildi (bet'ler commit edilmiyordu -> ayni markete dup bet). `snapshot_job` `YES_PRICE_MIN` 0.005 -> **0.0005** (0.005 alti longshot marketler artik fiyat gecmisinde); `_first_snapshot_price` snapshot yoksa market yes_price'a fallback. 11-12 Agustos icin catch-up: ~190 spread bet acildi, dup'lar kayan pencere ile temizlendi.
 
 ---
 
