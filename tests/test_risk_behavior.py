@@ -252,3 +252,74 @@ class TestExitChain:
             )
             assert result.get("paper") is True, "DRY_RUN modunda paper sell olmali"
             assert result.get("orderID"), "paper sell orderID dondurmeli"
+
+
+class TestSpreadModeStopLossDisabled:
+    """SPREAD modunda stop-loss devre disi: fiyat duserken bet kapanmaz.
+
+    (2026-08-10 kullanici karari): spread longshot'lari resolve'a kadar
+    tutulur; kazanc 10-100x, kayip -stake. Backtest stop-loss'suz +$36k.
+    """
+
+    def _setup(self, session, strategy):
+        from datetime import datetime, timedelta, timezone
+
+        from database.models import Bet, WeatherMarket
+
+        _add_portfolio(session)
+        # shares gerekli: run_risk_management exit_shares=bet.shares okur
+        _add_bet(session, "m1", entry_price=0.20, amount=2.0)
+        bet = session.query(Bet).filter_by(market_id="m1").first()
+        bet.shares = 10.0
+        bet.stake = 2.0
+        session.commit()
+        session.add(
+            WeatherMarket(
+                id="m1",
+                question="T?",
+                city="Testville",
+                city_code="TEST",
+                metric="temperature_max",
+                threshold=30.0,
+                target_date=datetime.now(timezone.utc) + timedelta(hours=4),
+                latitude=41.0,
+                longitude=29.0,
+                market_type="HIGH",
+                yes_price=0.10,  # %50 dustu -> stop-loss tetiklenmeli (edge)
+                no_price=0.90,
+                status="open",
+            )
+        )
+        session.commit()
+
+    def test_spread_mode_stop_loss_not_triggered(self, monkeypatch):
+        """spread modunda fiyat %50 dusse bile bet kapanmaz."""
+        from config.settings import bot_config
+        from database.db import get_session
+        from database.models import Bet
+        from jobs.scheduler import run_risk_management
+
+        monkeypatch.setattr(bot_config.strategy, "betting_strategy", "spread")
+        with get_session() as s:
+            self._setup(s, "spread")
+            run_risk_management(session=s)
+            bet = s.query(Bet).filter_by(market_id="m1").first()
+            assert bet.status in (
+                "placed",
+                "partial_fill",
+                "filled",
+            ), f"spread modunda stop-loss kapatmamali: status={bet.status}"
+
+    def test_edge_mode_stop_loss_triggers(self, monkeypatch):
+        """edge modunda fiyat %50 duserse bet kapanir (eski davranis korunur)."""
+        from config.settings import bot_config
+        from database.db import get_session
+        from database.models import Bet
+        from jobs.scheduler import run_risk_management
+
+        monkeypatch.setattr(bot_config.strategy, "betting_strategy", "edge")
+        with get_session() as s:
+            self._setup(s, "edge")
+            run_risk_management(session=s)
+            bet = s.query(Bet).filter_by(market_id="m1").first()
+            assert bet.status == "closed_early", f"edge modunda stop-loss kapatmali: status={bet.status}"

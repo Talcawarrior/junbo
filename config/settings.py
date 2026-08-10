@@ -168,7 +168,7 @@ class StrategyConfig:
     betting_strategy: str = "spread"
     spread_radius: int = 3  # +/- derece (tahmin +/- 3)
     spread_max_cities: int = 15  # tahmini en yuksek ilk N sehir
-    spread_max_entry: float = 0.30  # bu fiyat uzerine bet acilmaz
+    spread_max_entry: float = 0.99  # bu fiyat uzerine bet acilmaz (0.30 kaldirildi 2026-08-11)
     spread_stake_usd: float = 2.0  # esik basina stake
     spread_max_bets_per_day: int = 30  # gunluk toplam spread bet limiti
 

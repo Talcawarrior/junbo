@@ -398,6 +398,15 @@ def run_risk_management(session=None):
             # Stop-loss: minimum hold'dan MUAF — bet acilir acilmaz buyuk
             # dususte pozisyonu keser. Take-profit/trailing/partial-TP
             # kapali (kullanici karari).
+            #
+            # SPREAD modunda (BETTING_STRATEGY=spread) stop-loss DEVREDISI:
+            # spread longshot'lari (entry<0.30) resolve'a kadar tutulur; fiyat
+            # dususu payout sansini sifirlamamali. Kazanc 10-100x, kayip -stake.
+            # (2026-08-10 kullanici karari: backtest stop-loss'suz +$36k verdi.)
+            _strategy = getattr(bot_config.strategy, "betting_strategy", "edge")
+            if _strategy == "spread":
+                continue
+
             should_exit, reason = rm.check_stop_loss(bet, current_price, market)
             if not should_exit:
                 continue

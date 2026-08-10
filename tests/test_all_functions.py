@@ -509,6 +509,18 @@ class TestRunRiskManagement:
 
     def test_stop_loss_closes_position(self):
         """Fiyat %stop_loss_pct'den fazla duserse bet closed_early + close_reason alir."""
+
+        # Stop-loss yalnizca EDGE modunda aktiftir (spread modunda devre disi).
+        from config.settings import bot_config
+
+        _old_strategy = bot_config.strategy.betting_strategy
+        bot_config.strategy.betting_strategy = "edge"
+        try:
+            self._run_stop_loss_test()
+        finally:
+            bot_config.strategy.betting_strategy = _old_strategy
+
+    def _run_stop_loss_test(self):
         from database.db import get_session
         from jobs.scheduler import run_risk_management
         from database.models import Bet

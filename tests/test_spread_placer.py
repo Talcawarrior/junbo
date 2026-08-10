@@ -177,6 +177,31 @@ def test_spread_limit_respected():
         bot_config.strategy.spread_max_bets_per_day = 30
 
 
+def test_place_spread_bets_creates_portfolio_when_missing():
+    """Portfolio satiri yoksa spread placer otomatik olusturur (0-cash bug)."""
+    from database.db import get_session
+    from database.models import Portfolio
+    from executor.spread_placer import place_spread_bets
+
+    day = _day()
+    with get_session() as s:
+        # portfolio YOK (bilerek)
+        s.query(Portfolio).delete()
+        s.commit()
+        _add_forecast(s, "AAA", "temperature_max", day, 25.0, datetime(2026, 8, 1, 10, 0))
+        for thr in range(22, 29):
+            _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.05)
+            _add_snapshot(s, "Testville", "temperature_max", day, thr, 0.05)
+        s.commit()
+        res = place_spread_bets(day, session=s)
+        s.commit()
+        pf = s.query(Portfolio).filter(Portfolio.id == 1).first()
+        pf_cash = pf.cash_balance if pf else 0.0
+    assert pf is not None, "portfolio olusturulmali"
+    assert pf_cash > 0
+    assert res["placed"] >= 1
+
+
 def test_kayan_pencere_closes_out_of_window():
     from database.db import get_session
     from database.models import Bet

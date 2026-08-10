@@ -273,9 +273,24 @@ def _place_spread_bets_inner(session, target_day) -> dict:
                 skipped += 1
                 continue
             pf = session.query(Portfolio).filter(Portfolio.id == 1).first()
+            if pf is None:
+                # Portfolio satiri yoksa olustur (bot lifespan disindan calisirken
+                # -- orn. catch-up scripti -- garanti yok). 0 cash ile sessizce
+                # bet atlamak yerine portfolio'yu INITIAL_PORTFOLIO ile yarat.
+                from database.db import ensure_initial_portfolio
+
+                ensure_initial_portfolio()
+                pf = session.query(Portfolio).filter(Portfolio.id == 1).first()
             cash = float(pf.cash_balance) if pf else 0.0
             use_stake = min(stake, max(0.0, cash))
             if use_stake <= 0:
+                logger.warning(
+                    "spread skip: %s %s %sC - insufficient cash (cash=%.2f)",
+                    city_name,
+                    str(target_day),
+                    thr,
+                    cash,
+                )
                 skipped += 1
                 continue
 
