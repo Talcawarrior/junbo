@@ -1,8 +1,8 @@
-"""Spread betting placer â€” ana mod (BETTING_STRATEGY=spread).
+"""Spread betting placer — ana mod (BETTING_STRATEGY=spread).
 
-Market acilir acilmaz (ilk snapshot fiyati), en son meteo tahmini etrafinda
-+/- ``spread_radius`` dereceye YES bet acar. Tahmin guncellendiginde (kayan
-pencere) yeni merkezin +/-(radius) disinda kalan eski esikler kapatilir.
+Market acilir acilmaz, en son meteo tahmini etrafinda +/- ``spread_radius``
+dereceye YES bet acar. Tahmin guncellendiginde (kayan pencere) yeni merkezin
++/-(radius) disinda kalan eski esikler kapatilir.
 
 Akis:
   1. Hedef gun icin (city, metric) basina EN SON meteo tahminini oku
@@ -10,12 +10,14 @@ Akis:
   2. "Tahmini en yuksek" ilk ``spread_max_cities`` sehri sec.
   3. Her sehir icin center = round(tahmin), hedef esikler [center-radius ..
      center+radius].
-  4. Her esik icin: market acik + ilk snapshot fiyati < spread_max_entry +
+  4. Her esik icin: market acik + CANLI yes_price < spread_max_entry +
      gunluk limit asilmadiysa -> YES bet ac (stake spread_stake_usd).
+     (2026-08-11: snapshot fiyati degil, run_fetch_markets'in 5 dk'da bir
+     guncelledigi canli weather_markets.yes_price kullanilir.)
   5. KAYAN PENCERE: tahmin degisti -> eski pencerede acik olup YENI pencere
      disinda kalan bet'ler kapatilir (eski spreadden cikanlar).
 
-Eski edge-tabanli mod (BETTING_STRATEGY=edge) degistirilmez â€” bet_placer.py
+Eski edge-tabanli mod (BETTING_STRATEGY=edge) degistirilmez — bet_placer.py
 korunur; bu modul yalnizca spread modunda cagrilir.
 """
 
@@ -28,7 +30,6 @@ from database.db import get_session
 from database.models import (
     OPEN_BET_STATUSES,
     Bet,
-    MarketSnapshot,
     Portfolio,
     WeatherForecast,
     WeatherMarket,
@@ -76,46 +77,6 @@ def _last_forecast_per_city_metric(session, target_day):
         if vals:
             result[(code, metric)] = sum(vals) / len(vals)
     return result
-
-
-def _first_snapshot_price(session, city_name, target_day, metric, threshold):
-    """Market'in gorulen ILK snapshot fiyati (acilis anindaki fiyat).
-
-    Snapshot yoksa (or. yes_price <= YES_PRICE_MIN oldugu icin snapshot_job
-    kaydetmemistir) market'in guncel yes_price'ina fallback yapilir â€” boylece
-    en dusuk fiyatli longshot esikleri de degerlendirilebilir.
-    """
-    lo, hi = _day_range(target_day)
-    snap = (
-        session.query(MarketSnapshot)
-        .filter(
-            MarketSnapshot.city == city_name,
-            MarketSnapshot.metric == metric,
-            MarketSnapshot.threshold == threshold,
-            MarketSnapshot.target_date >= lo,
-            MarketSnapshot.target_date <= hi,
-        )
-        .order_by(MarketSnapshot.snapshot_time.asc())
-        .first()
-    )
-    if snap is not None and snap.yes_price is not None:
-        return float(snap.yes_price)
-    # Fallback: weather_markets guncel fiyati (snapshot alinmamis marketler icin)
-    mkt = (
-        session.query(WeatherMarket)
-        .filter(
-            WeatherMarket.city == city_name,
-            WeatherMarket.metric == metric,
-            WeatherMarket.threshold == threshold,
-            WeatherMarket.target_date >= lo,
-            WeatherMarket.target_date <= hi,
-            WeatherMarket.status == "open",
-        )
-        .first()
-    )
-    if mkt is not None and mkt.yes_price is not None:
-        return float(mkt.yes_price)
-    return None
 
 
 def _find_market(session, city_name, metric, target_day, thr):
@@ -268,7 +229,11 @@ def _place_spread_bets_inner(session, target_day) -> dict:
             )
             if dup:
                 continue
-            entry = _first_snapshot_price(session, city_name, target_day, metric, thr)
+            # CANLI fiyat kullan: weather_markets.yes_price, run_fetch_markets
+            # her 5 dk'da bir (price poller + scan loop) Polymarket'ten gunceller.
+            # (2026-08-11 kullanici karari: bayat snapshot fiyati yerine canli
+            # fiyata gore ac — bet 594 entry=0.50 iken canli 0.0085'ti.)
+            entry = float(mkt.yes_price) if mkt.yes_price is not None else None
             if entry is None or not (0 < entry < max_entry):
                 skipped += 1
                 continue

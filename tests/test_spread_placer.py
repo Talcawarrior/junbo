@@ -107,30 +107,60 @@ def test_last_forecast_selection_uses_latest_fetch():
     assert fc[("A1", "temperature_max")] == pytest.approx(27.0)
 
 
-def test_first_snapshot_price_returns_earliest():
+def test_spread_uses_live_market_price_not_snapshot():
+    """2026-08-11: spread bet CANLI weather_markets.yes_price'a gore acilir.
+
+    Eski davranis bayat snapshot fiyatini kullaniyordu (bet 594 entry=0.50
+    iken canli 0.0085). Marketin canli fiyati snapshot'tan FARKLI olsa bile
+    canli fiyata gore acilir; snapshot hic degerlendirilmez.
+    """
     from database.db import get_session
-    from executor.spread_placer import _first_snapshot_price
+    from database.models import Bet
+    from executor.spread_placer import place_spread_bets
 
     day = _day()
     with get_session() as s:
-        _add_snapshot(s, "Testville", "temperature_max", day, 25, 0.30)
-        _add_snapshot(s, "Testville", "temperature_max", day, 25, 0.12)
+        _add_portfolio(s)
+        _add_forecast(s, "AAA", "temperature_max", day, 25.0, datetime(2026, 8, 1, 10, 0))
+        # Snapshot 0.05, ama CANLI fiyat 0.15 -> canliya gore acilmali
+        for thr in range(22, 29):
+            _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.15)
+            _add_snapshot(s, "Testville", "temperature_max", day, thr, 0.05)
         s.commit()
-        p = _first_snapshot_price(s, "Testville", day, "temperature_max", 25)
-    assert p == pytest.approx(0.30)
+        res = place_spread_bets(day, session=s)
+        s.commit()
+        placed = s.query(Bet).filter(Bet.status == "placed").all()
+        entries = [float(b.entry_price or 0) for b in placed]
+    assert res["placed"] >= 1, "canli fiyat < max_entry ise bet acilmali"
+    assert len(entries) >= 1
+    for e in entries:
+        assert e == pytest.approx(0.15), f"entry canli fiyat olmali: {e}"
 
 
-def test_first_snapshot_price_falls_back_to_market_price():
-    """Snapshot yoksa (0.005 alti market) weather_markets.yes_price kullanilir."""
+def test_spread_skips_snapshot_low_but_live_high():
+    """Canli fiyat max_entry'i asiyorsa bet acilmaz (snapshot dusuk olsa bile)."""
     from database.db import get_session
-    from executor.spread_placer import _first_snapshot_price
+    from database.models import Bet
+    from executor.spread_placer import place_spread_bets
 
     day = _day()
-    with get_session() as s:
-        _add_market(s, "Testville", "temperature_max", day, 25, yes_price=0.0005)
-        s.commit()
-        p = _first_snapshot_price(s, "Testville", day, "temperature_max", 25)
-    assert p == pytest.approx(0.0005)
+    bot_config.strategy.spread_max_entry = 0.10
+    try:
+        with get_session() as s:
+            _add_portfolio(s)
+            _add_forecast(s, "AAA", "temperature_max", day, 25.0, datetime(2026, 8, 1, 10, 0))
+            # Snapshot 0.05 (dusuk), CANLI 0.15 (max_entry 0.10 ustunde) -> acilmaz
+            for thr in range(22, 29):
+                _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.15)
+                _add_snapshot(s, "Testville", "temperature_max", day, thr, 0.05)
+            s.commit()
+            res = place_spread_bets(day, session=s)
+            s.commit()
+            placed = s.query(Bet).filter(Bet.status == "placed").count()
+        assert res["placed"] == 0, "canli fiyat max_entry ustunde ise bet acilmamali"
+        assert placed == 0
+    finally:
+        bot_config.strategy.spread_max_entry = 0.99
 
 
 def test_place_spread_bets_opens_within_radius():
