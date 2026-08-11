@@ -149,11 +149,19 @@ python main.py bot
 - Yeni **2-gun-sonrasi tarih** acildiginda (bot_loop 2-day-ahead tespiti):
   - En son meteo tahmini etrafinda **+/- 3 dereceye** (spread) YES bet acilir.
   - Giris fiyati = **CANLI `weather_markets.yes_price`** (5 dk'da guncellenir; bayat snapshot degil, 2026-08-11).
-  - `0 < entry < 0.99` olan esiklere, esik basina $2 (2026-08-11: ust sinir 0.99, fiyat onemsiz).
+  - `0 < entry < 0.50` olan esiklere, esik basina $2. **0.50 ve ustu fiyata o sehre hic girilmez**
+    (0.50->1.00 sadece 2x kazanc, longshot kayiplarini karsilamaz — 2026-08-11 kullanici karari).
   - Tahmini **en az sapan ilk 15 sehir** secilir (tahmini gercege en yakin tutanlar —
-    dusuk |bias|; SICAKLIK DEGIL, 2026-08-11 kullanici karari. 2.5C+ sapan sehirler elenir).
+    dusuk |bias|; SICAKLIK DEGIL, 2026-08-11 kullanici karari. Bias'siz yeni sehir acilmaz).
   - Gunluk **max 350 bet** (3 gun x 15 sehir x 7 esik = 315 + marj; 13 Agustos acilinca
     da 15 sehir daha acilir, limite takilmaz).
+- **ERKEN GIRIS (0-13 UTC hafif probe):** Snapshot analizi ilk market acilislarinin
+  04:00-12:30 UTC'ye yayildigini gosterdi. 00:00-13:00 UTC penceresinde bot her ~1 sn
+  Polymarket Gamma'ya TEK hafif sorgu atar (public-search limit 5); DB'deki max acik
+  tarihten ileri bir tarih gorurse HEMEN tam market cekisi + spread bet acar. Yeni
+  tarih yoksa cekis yapilmaz (rate limit korunur). Pencere disinda normal 5 dk tarama.
+- **CLOB WebSocket:** Acik betlerin marketleri gercek zamanli WebSocket ile dinlenir
+  (5 dk polling yerine milisaniye fiyat akisi).
 - **Kayan pencere:** tahmin guncellendiginde (25C -> 27C) yeni merkezin +/-(radius)
   disinda kalan acik esikler **kapatilir**, yeni penceredeki esikler acilir.
 - **Periyodik retry:** Polymarket marketleri zamana yayilarak acildigi icin bot her
@@ -170,7 +178,7 @@ python main.py bot
 | `BETTING_STRATEGY` | `spread` | `edge` = eski mod |
 | `SPREAD_RADIUS` | `3` | tahmin +/- derece |
 | `SPREAD_MAX_CITIES` | `15` | tahmini en az sapan ilk N sehir (sicaklik degil) |
-| `SPREAD_MAX_ENTRY` | `0.99` | ust fiyat siniri (0.99 ve ustu acilmaz) |
+| `SPREAD_MAX_ENTRY` | `0.50` | ust fiyat siniri (0.50 ve ustu acilmaz) |
 | `SPREAD_STAKE_USD` | `2.0` | esik basina stake |
 | `SPREAD_MAX_BETS_PER_DAY` | `350` | gunluk bet limiti (3 gun x 15 sehir x 7 = 315 + marj) |
 

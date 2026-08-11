@@ -353,8 +353,10 @@ Degisiklik oldugunda bu bolumu de guncelle.
   Repo tasinma olayi BILINIYOR; her prompt'ta "repo tasinmis" diye YENIDEN kesfetme.
 - **Bot modu: PAPER (DRY_RUN).** Gercek Polymarket trade'i ASLA acilmaz. Sorma.
 - **Strateji: SPREAD (ana mod).** `spread_radius=3`, `spread_max_cities=15`,
-  `spread_max_entry=0.95` (2026-08-11 0.99'dan dustu), `spread_stake_usd=2.0`,
-  `spread_max_bets_per_day=100`, `betting_window_enabled=False` (gun boyu bet).
+  `spread_max_entry=0.50` (0.50 ve ustu fiyata O SEHRE HIC GIRILMEZ — 0.50->1.00
+  sadece 2x, zararli; kullanici karari 2026-08-11), `spread_stake_usd=2.0`,
+  `spread_max_bets_per_day=350` (3 gun x 15 sehir x 7 = 315 + marj),
+  `betting_window_enabled=False` (gun boyu bet).
 - **Spread bet canli fiyatla acilir:** `_place_spread_bets_inner` entry fiyatini
   `mkt.yes_price`'dan okur (5 dk'da `run_fetch_markets` ile guncellenir).
   `_first_snapshot_price` KALDIRILDI (bayat snapshot yerine canli fiyat).
@@ -364,6 +366,24 @@ Degisiklik oldugunda bu bolumu de guncelle.
      YAKLASIK AYNI KALIR. Sayi artisiyla tetikleme YANLIS. Dogru sinyal:
      acik TARIH kumesinde yeni bir gun belirmesi (13. gunun marketleri acilmasi).
      Bot bunu `_get_open_target_dates()` kumesiyle algilar, sayiyla DEGIL.
+  1b. **ERKEN GIRIS icin 0-13 UTC penceresinde hafif probe (1 sn).** Kullanici
+     hedefi (2026-08-11): "limit altinda kalmak degil, piyasaya ERKEN girmek —
+     millet milisaniyelerle islem yapiyor". Snapshot analizi: ilk market acilislari
+     04:00-12:30 UTC'ye yayiliyor (sabit gece yarisi acilisi YOK). Cozum:
+     `bot_loop._probe_new_target_date()` — Polymarket Gamma'ya TEK hafif sorgu
+     (public-search, limit_per_type=5, order=endDate desc) ile DB'deki max acik
+     tarihten ileri tarih var mi bakar. 0-13 UTC penceresinde scan loop her ~1 sn
+     (midnight_scan_interval=1) probe yapar; yeni tarih VARSA hemen tam
+     `run_fetch_markets` + `place_spread_bets`, YOKSA cekis yapilmaz (rate limit
+     korunur). Pencere disinda (13:00+) normal 5 dk tarama. `midnight_scan_window`
+     artik SAAT cinsinden (13). Probe `asyncio.to_thread` ile cagrilir (async loop
+     icinde asyncio.run hatasi olmamasi icin).
+  1c. **CLOB WebSocket aktive (2026-08-11).** `bot_loop.clob_stream_loop(state)` —
+     acik betlerin marketlerine Polymarket CLOB WebSocket aboneligi; fiyat
+     degisimlerini ANINDA alir (polling 5 dk yok). `CLOBMarketStream` (scrapers/
+     clob_stream.py) onceden tanimliydi ama HIC kullanilmiyordu; main.py'de
+     state.tasks["clob_stream"] olarak baslatilir. Fiyat olayi gelince ilgili
+     WeatherMarket.yes_price/no_price guncellenir (status degistirilmez).
   2. **Spread sehir secimi: ANA KRITER "tahmini EN AZ SAPAN" sehirdir, sicaklik DEGIL.**
      Kullanici ornegi (2026-08-11): London tahmini 20C az sapiyorsa SECILIR,
      Kahire tahmini 45C cok sapiyorsa ELENIR. Sicaklik degeri ONEMLIDIR.

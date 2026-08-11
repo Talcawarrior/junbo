@@ -55,9 +55,9 @@ def test_next_two_day_target_older_date_updates_without_trigger():
 def _mock_bot_config(monkeypatch):
     from config import settings
 
-    fake = type("C", (), {"midnight_scan_window": 60, "midnight_scan_interval": 60})()
-    monkeypatch.setattr(settings.bot_config, "midnight_scan_window", 60)
-    monkeypatch.setattr(settings.bot_config, "midnight_scan_interval", 60)
+    fake = type("C", (), {"midnight_scan_window": 13, "midnight_scan_interval": 1})()
+    monkeypatch.setattr(settings.bot_config, "midnight_scan_window", 13)
+    monkeypatch.setattr(settings.bot_config, "midnight_scan_interval", 1)
     return fake
 
 
@@ -66,14 +66,19 @@ def test_is_midnight_window_true_early(monkeypatch):
     assert _is_midnight_window(datetime(2026, 8, 7, 0, 15))
 
 
+def test_is_midnight_window_true_until_13(monkeypatch):
+    _mock_bot_config(monkeypatch)
+    assert _is_midnight_window(datetime(2026, 8, 7, 12, 59))
+
+
 def test_is_midnight_window_false_after_window(monkeypatch):
     _mock_bot_config(monkeypatch)
-    assert not _is_midnight_window(datetime(2026, 8, 7, 1, 15))
+    assert not _is_midnight_window(datetime(2026, 8, 7, 13, 1))
 
 
 def test_is_midnight_window_false_non_midnight_hour(monkeypatch):
     _mock_bot_config(monkeypatch)
-    assert not _is_midnight_window(datetime(2026, 8, 7, 13, 0))
+    assert not _is_midnight_window(datetime(2026, 8, 7, 14, 0))
 
 
 # ── _get_scan_interval ───────────────────────────────────────────────────────
@@ -88,12 +93,22 @@ def test_get_scan_interval_fast_mode(monkeypatch):
 
 
 def test_get_scan_interval_normal_mode(monkeypatch):
-    now = _utc(2026, 8, 7, 12, 0)
+    # 13:00 sonrasi pencere disi -> normal 5 dk
+    now = _utc(2026, 8, 7, 14, 0)
     from bot_loop import _NORMAL_SCAN_INTERVAL
 
     _mock_bot_config(monkeypatch)
     monkeypatch.setattr("utils.model_run_detector.get_model_run_fast_interval", lambda now: None)
     assert _get_scan_interval(now, None) == _NORMAL_SCAN_INTERVAL
+
+
+def test_get_scan_interval_midnight_fast(monkeypatch):
+    # 12:00 pencere ici (0-13) -> hizli aralik (1 sn)
+    now = _utc(2026, 8, 7, 12, 0)
+
+    _mock_bot_config(monkeypatch)
+    monkeypatch.setattr("utils.model_run_detector.get_model_run_fast_interval", lambda now: None)
+    assert _get_scan_interval(now, None) == 1
 
 
 def test_get_scan_interval_model_run_override(monkeypatch):
@@ -184,3 +199,69 @@ def test_cleanup_stale_bets_no_bets_no_crash():
         session.query(Bet).delete()
         session.commit()
     _cleanup_stale_bets()  # should not raise
+
+
+# ── _probe_new_target_date ────────────────────────────────────────────────────
+
+
+def test_probe_new_target_date_finds_new_day(monkeypatch):
+    """Probe: Gamma'da DB'deki max tarihten ileri bir tarih gorurse True doner."""
+    import bot_loop
+
+    from datetime import date
+
+    called = {}
+
+    class _FakeClient:
+        def fetch_one_blocking(self, url, params, host):
+            called["url"] = url
+            called["params"] = params
+            return {
+                "events": [
+                    {
+                        "title": "Will the highest temperature in London be 30C on August 13?",
+                        "end_date_iso": "2026-08-13T20:00:00Z",
+                    }
+                ]
+            }
+
+    monkeypatch.setattr("scrapers.async_client.AsyncHttpClient", lambda: _FakeClient())
+    new_date, trigger = bot_loop._probe_new_target_date(date(2026, 8, 12))
+    assert trigger is True
+    assert new_date == date(2026, 8, 13)
+    assert "public-search" in called["url"]
+    assert called["params"]["limit_per_type"] == 5
+
+
+def test_probe_new_target_date_no_new_day(monkeypatch):
+    """Probe: DB'deki max tarihten ileri tarih yoksa False doner."""
+    import bot_loop
+
+    from datetime import date
+
+    class _FakeClient:
+        def fetch_one_blocking(self, url, params, host):
+            return {
+                "events": [{"title": "Will London exceed 30C on August 12?", "end_date_iso": "2026-08-12T20:00:00Z"}]
+            }
+
+    monkeypatch.setattr("scrapers.async_client.AsyncHttpClient", lambda: _FakeClient())
+    new_date, trigger = bot_loop._probe_new_target_date(date(2026, 8, 12))
+    assert trigger is False
+    assert new_date is None
+
+
+def test_probe_new_target_date_api_failure(monkeypatch):
+    """Probe: API hatasi loop'u oldurmez, False doner."""
+    import bot_loop
+
+    from datetime import date
+
+    class _FakeClient:
+        def fetch_one_blocking(self, url, params, host):
+            raise RuntimeError("network down")
+
+    monkeypatch.setattr("scrapers.async_client.AsyncHttpClient", lambda: _FakeClient())
+    new_date, trigger = bot_loop._probe_new_target_date(date(2026, 8, 12))
+    assert trigger is False
+    assert new_date is None

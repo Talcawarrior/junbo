@@ -26,6 +26,7 @@ setup_logging()
 
 # Import app, state, and loop functions from split modules.
 from api import app, price_poller_loop, scan_and_bet_loop, settlement_loop, snapshot_loop, state  # noqa: E402
+from bot_loop import clob_stream_loop  # noqa: E402
 
 logger = __import__("logging").getLogger(__name__)
 
@@ -188,7 +189,8 @@ def run_cli():
             state.tasks["settlement"] = asyncio.create_task(settlement_loop(state))
             state.tasks["price_poller"] = asyncio.create_task(price_poller_loop(state))
             state.tasks["snapshot"] = asyncio.create_task(snapshot_loop(state))
-            logger.info("Bot loops started (scan_and_bet + settlement + price_poller + snapshot)")
+            state.tasks["clob_stream"] = asyncio.create_task(clob_stream_loop(state))
+            logger.info("Bot loops started (scan_and_bet + settlement + price_poller + snapshot + clob_stream)")
             yield
             # Shutdown
             logger.info("LIFESPAN SHUTDOWN - Stopping bot loops")

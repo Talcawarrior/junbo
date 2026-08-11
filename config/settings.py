@@ -168,7 +168,7 @@ class StrategyConfig:
     betting_strategy: str = "spread"
     spread_radius: int = 3  # +/- derece (tahmin +/- 3)
     spread_max_cities: int = 15  # tahmini en yuksek ilk N sehir
-    spread_max_entry: float = 0.99  # ust sinir (fill 0.99'a clamp; kullanici: fiyat onemsiz)
+    spread_max_entry: float = 0.50  # ust sinir: 0.50 ve ustu fiyata O SEHRE hic girilmez (2026-08-11 kullanici karari)
     spread_stake_usd: float = 2.0  # esik basina stake
     spread_max_bets_per_day: int = 350  # gunluk limit: 3 gun x 15 sehir x 7 esik = 315 + marj
 
@@ -435,8 +435,12 @@ class BotConfig:
     # Midnight scan: after 00:00, scan every N seconds for the first
     # MIDNIGHT_SCAN_WINDOW minutes to catch 2-day-ahead markets early
     # (earlier = cheaper prices on Polymarket).
-    midnight_scan_interval: int = 60  # seconds between scans after midnight
-    midnight_scan_window: int = 60  # minutes after midnight to use fast scan
+    # Yeni gun marketi acilis penceresi (00:00 - window saatleri UTC) boyunca
+    # her MIDNIGHT_SCAN_INTERVAL saniyede bir hizli tarama yapilir — erken giris
+    # (fiyat dusukken) icin. Snapshot verisi: acilislar 04:00-12:30 UTC'ye yayiliyor.
+    # (2026-08-11 kullanici karari: 0-13 penceresi, 1 sn aralik)
+    midnight_scan_interval: int = 1  # seconds between scans after midnight (erken giris icin hizli)
+    midnight_scan_window: int = 13  # saat cinsinden: 00:00-13:00 UTC boyunca hizli tarama
 
     # ── API URLs ───────────────────────────────────────────────────
     polymarket_gamma_api: str = "https://gamma-api.polymarket.com"

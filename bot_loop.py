@@ -122,10 +122,67 @@ def _next_two_day_target(last_date: date | None, open_dates: set) -> tuple:
 
 
 def _is_midnight_window(now: datetime) -> bool:
+    """Yeni gun marketleri acilis penceresi: 00:00 - 13:00 UTC.
+
+    Snapshot verisi (2026-08-11 analiz): ilk market acilislari 04:00-12:30
+    UTC arasina yayiliyor (sabit bir gece yarisi acilisi yok). Kullanici
+    karari: 0-13 arasi hizli tarama.
+    """
     from config.settings import bot_config
 
-    window_minutes = bot_config.midnight_scan_window
-    return now.hour == 0 and now.minute < window_minutes
+    window_hours = bot_config.midnight_scan_window
+    return 0 <= now.hour < window_hours
+
+
+def _probe_new_target_date(last_date: date | None) -> tuple[date | None, bool]:
+    """Polymarket Gamma'dan HAFIF tek sorgu ile DB'deki max acik tarihten ileri
+    bir tarih var mi diye bakar (tam cekis DEGIL, ~5 kayitlik probe).
+
+    Yeni tarih bulunursa (new_date, True) doner; bulunamazsa (None, False).
+    Bu, 0-13 UTC acilis penceresinde her ~1 sn'de cagrilir — fiyat henuz
+    dusukken (acilis aninda) yeni gunun marketlerini yakalamak icin.
+    """
+    from config.settings import bot_config
+
+    try:
+        from scrapers.async_client import AsyncHttpClient as _ProbeClient
+
+        client = _ProbeClient()
+        host = bot_config.polymarket.gamma_url.split("//")[-1].split("/")[0]
+        data = client.fetch_one_blocking(
+            f"{bot_config.polymarket.gamma_url}/public-search",
+            params={"q": "highest temperature", "limit_per_type": 5, "order": "endDate desc"},
+            host=host,
+        )
+    except Exception as e:  # noqa: BLE001 - probe asla loop'u oldurmesin
+        logger.warning("Probe new-date failed: %s", e)
+        return None, False
+    if not data:
+        return None, False
+
+    # En yeni event tarihlerini topla (title/endDate), DB'deki max ile karsilastir
+    try:
+        from datetime import datetime as _dt
+
+        events = data.get("events", []) or []
+        for ev in events:
+            raw_end = ev.get("end_date_iso") or ev.get("endDate")
+            title = ev.get("title", "")
+            if not raw_end:
+                continue
+            try:
+                end_dt = _dt.fromisoformat(str(raw_end).replace("Z", "+00:00"))
+            except ValueError:
+                end_dt = None
+            if end_dt is None:
+                continue
+            end_day = end_dt.date()
+            if last_date is not None and end_day > last_date:
+                logger.info("Probe: yeni tarih bulundu %s (title=%s)", end_day, title[:60])
+                return end_day, True
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Probe parse failed: %s", e)
+    return None, False
 
 
 def _get_scan_interval(now: datetime, fast_mode_until: datetime | None) -> int:
@@ -245,21 +302,48 @@ async def scan_and_bet_loop(state):
                     except Exception as e:
                         logger.warning("UI dogrulama hatasi (yeni gun): %s", e)
 
-            # STEP 1: Fetch markets (Polymarket) — her dongu
-            # Ag hatasi (DNS/timeout) cycle'in geri kalanini DURDURMASIN:
-            # analiz/bet eski veriyle devam edebilir, sadece market listesi tazelenmez.
-            try:
-                await asyncio.wait_for(asyncio.to_thread(run_fetch_markets), timeout=_FETCH_TIMEOUT)
-            except asyncio.TimeoutError:
-                logger.error("Fetch markets timed out (%ds) — continuing with stale data", _FETCH_TIMEOUT)
-            except Exception as e:
-                logger.error("Fetch markets failed (%s) — continuing with stale data", e)
+            # STEP 1: Fetch markets (Polymarket).
+            # 0-13 UTC acilis penceresinde HER dongude tam cekis (100+ sorgu)
+            # rate limit'i patlatir. Bu yuzden pencere icinde ONCE hafif probe
+            # (tek sorgu) ile yeni tarih var mi bakilir; yeni tarih VARSA tam
+            # cekis + spread yapilir, YOKSA cekis atlanir (loop 1 sn'de doner).
+            # Pencere disinda (13:00+) normal 5 dk tarama (her dongude cekis).
+            # Ag hatasi cycle'i DURDURMASIN.
+            now_fetch = datetime.now(timezone.utc).replace(tzinfo=None)
+            _probe_target = None
+            if _is_midnight_window(now_fetch):
+                try:
+                    _probe_target, _trigger = await asyncio.wait_for(
+                        asyncio.to_thread(_probe_new_target_date, last_two_day_date), timeout=10
+                    )
+                except asyncio.TimeoutError:
+                    _probe_target = None
+                except Exception as e:
+                    logger.warning("Probe new-date error: %s", e)
+                    _probe_target = None
+            if _probe_target is not None:
+                try:
+                    await asyncio.wait_for(asyncio.to_thread(run_fetch_markets), timeout=_FETCH_TIMEOUT)
+                except asyncio.TimeoutError:
+                    logger.error("Fetch markets timed out (%ds)", _FETCH_TIMEOUT)
+                except Exception as e:
+                    logger.error("Fetch markets failed (%s)", e)
+            elif not _is_midnight_window(now_fetch):
+                try:
+                    await asyncio.wait_for(asyncio.to_thread(run_fetch_markets), timeout=_FETCH_TIMEOUT)
+                except asyncio.TimeoutError:
+                    logger.error("Fetch markets timed out (%ds) — continuing with stale data", _FETCH_TIMEOUT)
+                except Exception as e:
+                    logger.error("Fetch markets failed (%s) — continuing with stale data", e)
 
-            # STEP 2: Parse — her dongu (cache'lenmis meteo verisiyle)
-            try:
-                await asyncio.wait_for(asyncio.to_thread(run_parse_markets), timeout=_FETCH_TIMEOUT)
-            except Exception as e:
-                logger.error("Parse step error: %s", e)
+            # STEP 2: Parse — her dongu (cache'lenmis meteo verisiyle).
+            # 0-13 penceresinde probe yeni tarih bulamadiysa parse'a gerek yok
+            # (veri degismedi); 1 sn'lik hizli donguyu bloklamamak icin atlanir.
+            if not (_is_midnight_window(now_fetch) and _probe_target is None):
+                try:
+                    await asyncio.wait_for(asyncio.to_thread(run_parse_markets), timeout=_FETCH_TIMEOUT)
+                except Exception as e:
+                    logger.error("Parse step error: %s", e)
 
             # STEP 3: Run cycle (analyze -> place bets). Meteo cekimini BEKLEMEDEN
             # hemen cache'den acilir. Boylece bahisler Polymarket verisinin
@@ -617,3 +701,63 @@ async def _run_daily_maintenance() -> None:
         await asyncio.to_thread(run_backup_once)
     except Exception as e:
         logger.error("Scheduled backup failed: %s", e)
+
+
+async def clob_stream_loop(state):
+    """Polymarket CLOB WebSocket — acik betlerin marketlerini gercek zamanli dinler.
+
+    Kullanici karari 2026-08-11: "millet milisaniyelerle islem yapiyor" — polling
+    (5 dk) yerine WebSocket ile fiyat degisimlerini ANINDA almak icin. Acik
+    betlerin YES token'larina abone olur; fiyat olayi gelince ilgili
+    WeatherMarket.yes_price guncellenir (polling'e gerek kalmaz).
+
+    Yeni bet acildikca asset listesi yenilenir; kapali betler cikarilir.
+    """
+    from scrapers.clob_stream import CLOBMarketStream
+
+    def _asset_ids():
+        with get_session() as s:
+            rows = (
+                s.query(WeatherMarket.id)
+                .filter(WeatherMarket.id.isnot(None))
+                .join(Bet, Bet.market_id == WeatherMarket.id)
+                .filter(Bet.status.in_(OPEN_BET_STATUSES))
+                .distinct()
+                .all()
+            )
+            return [str(r[0]) for r in rows]
+
+    async def _on_event(payload: dict) -> None:
+        # CLOB market event: {"event_type": "price_change", "market": "<id>",
+        # "price": 0.42, "side": "BUY", ...} gibi. Sadece fiyat guncellemesi
+        # islenir; status/resolution gibi olaylar run_settle'a birakilir.
+        try:
+            mkt = payload.get("market") or payload.get("asset_id")
+            price = payload.get("price")
+            if not mkt or price is None:
+                return
+            with get_session() as s:
+                wm = s.query(WeatherMarket).filter_by(id=str(mkt)).first()
+                if wm is not None and wm.status == "open":
+                    wm.yes_price = float(price)
+                    wm.no_price = max(0.0, min(1.0, 1.0 - float(price)))
+                    wm.last_updated = datetime.now(timezone.utc).replace(tzinfo=None)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("CLOB event isleme hatasi: %s", e)
+
+    logger.info("CLOB stream loop basladi")
+    while state.is_running:
+        try:
+            assets = _asset_ids()
+            if not assets:
+                logger.info("CLOB stream: acik bet yok, 60 sn bekliyorum")
+                await asyncio.sleep(60)
+                continue
+            stream = CLOBMarketStream(assets, _on_event)
+            await stream.run(stop=asyncio.Event(), max_retries=None)
+        except asyncio.CancelledError:
+            logger.info("CLOB stream loop cancelled")
+            break
+        except Exception as e:  # noqa: BLE001
+            logger.error("CLOB stream loop error: %s — retry 30sn", e)
+            await asyncio.sleep(30)

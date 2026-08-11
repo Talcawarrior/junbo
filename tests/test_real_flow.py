@@ -167,6 +167,7 @@ class TestScanAndBetLoop:
             patch("bot_loop._get_market_count", return_value=0),
             patch("bot_loop._get_open_target_dates", return_value=set()),
             patch("bot_loop._next_two_day_target", return_value=(None, False)),
+            patch("bot_loop._is_midnight_window", return_value=False),
             patch("jobs.scheduler.run_fetch_markets", fetch),
             patch("jobs.scheduler.run_parse_markets", parse),
             patch("jobs.scheduler.run_fetch_weather", weather),
@@ -177,7 +178,7 @@ class TestScanAndBetLoop:
         ):
             await _run_and_cancel(bot_loop.scan_and_bet_loop(s))
 
-        assert fetch.called, "fetch markets cagrilmali"
+        assert fetch.called, "fetch markets cagrilmali (pencere disi normal mod)"
         assert parse.called, "parse markets cagrilmali"
         assert weather.called, "weather fetch cagrilmali (ilk tur)"
         assert not cycle.called, "spread modunda run_cycle CAGIRILMAMALI"
@@ -194,6 +195,7 @@ class TestScanAndBetLoop:
             patch("bot_loop._get_open_target_dates", return_value={_day()}),
             patch("bot_loop._next_two_day_target", return_value=(_day(), True)),
             patch("bot_loop._get_open_market_count_for_date", return_value=6),
+            patch("bot_loop._is_midnight_window", return_value=False),
             patch("jobs.scheduler.run_fetch_markets", AsyncMock(return_value="0")),
             patch("jobs.scheduler.run_parse_markets", AsyncMock(return_value="0")),
             patch("jobs.scheduler.run_fetch_weather", AsyncMock(return_value="0")),
@@ -221,6 +223,7 @@ class TestScanAndBetLoop:
                 patch("bot_loop._get_open_target_dates", return_value={_day()}),
                 patch("bot_loop._next_two_day_target", return_value=(_day(), True)),
                 patch("bot_loop._get_open_market_count_for_date", return_value=6),
+                patch("bot_loop._is_midnight_window", return_value=False),
                 patch("jobs.scheduler.run_fetch_markets", AsyncMock(return_value="0")),
                 patch("jobs.scheduler.run_parse_markets", AsyncMock(return_value="0")),
                 patch("jobs.scheduler.run_fetch_weather", AsyncMock(return_value="0")),
@@ -245,6 +248,7 @@ class TestScanAndBetLoop:
             patch("bot_loop._get_market_count", return_value=0),
             patch("bot_loop._get_open_target_dates", return_value=set()),
             patch("bot_loop._next_two_day_target", return_value=(None, False)),
+            patch("bot_loop._is_midnight_window", return_value=False),
             patch("jobs.scheduler.run_fetch_markets", AsyncMock(return_value="0")),
             patch("jobs.scheduler.run_parse_markets", AsyncMock(return_value="0")),
             patch("jobs.scheduler.run_fetch_weather", AsyncMock(return_value="0")),
