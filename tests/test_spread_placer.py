@@ -397,3 +397,26 @@ def test_out_of_selection_bets_closed():
     assert zzz_statuses, "ZZZ beti var olmali"
     assert all(st not in ("placed", "active") for st in zzz_statuses), "top-15 disindaki sehir betleri kapatilmali"
     assert res["closed"] >= 1
+
+
+def test_past_day_no_bets_opened():
+    """Kullanici istegi 2026-08-11: gecmis gune (bugun oncesi) bet acilmaz.
+    Polymarket dongusunde eski gunun marketleri hala acik gorunebilir ama
+    sonucu belirli; onlara yeni bet acmak gereksiz."""
+    from database.db import get_session
+    from database.models import Bet
+    from executor.spread_placer import place_spread_bets
+
+    past = (datetime.now(timezone.utc) - timedelta(days=1)).date()
+    with get_session() as s:
+        _add_portfolio(s)
+        _add_calibration(s, "AAA", 0.87)
+        _add_forecast(s, "AAA", "temperature_max", past, 25.0, datetime(2026, 8, 1, 10, 0))
+        for thr in range(22, 29):
+            _add_market(s, "Testville", "temperature_max", past, thr, yes_price=0.05)
+        s.commit()
+        res = place_spread_bets(past, session=s)
+        s.commit()
+        placed = s.query(Bet).filter(Bet.status == "placed").count()
+    assert res["placed"] == 0, "gecmis gune bet acilmamali"
+    assert placed == 0

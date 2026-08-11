@@ -153,6 +153,13 @@ def _place_spread_bets_inner(session, target_day) -> dict:
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     today = now.date()
 
+    # GECMIS gunlere bet acma (2026-08-11 kullanici istegi): "ayin 10
+    # kapanisli betleri kapa". Polymarket dongusunde eski gunun marketleri
+    # hala acik gorunebilir ama sonucu belirli; onlara yeni bet acmak gereksiz.
+    if target_day < today:
+        logger.info("spread: %s gecmis gun, bet acilmiyor (bugun=%s)", target_day, today)
+        return {"placed": 0, "closed": 0, "skipped": 0, "cities": []}
+
     code_name: dict[str, str] = {}
     for c, code in (
         session.query(WeatherMarket.city, WeatherMarket.city_code)
