@@ -326,3 +326,61 @@ Ekleme formatı:
 ```python
 "fonksiyon_adi",  # neden dead olduğu açıklaması
 ```
+
+---
+
+## KALICI PROJE BELLEK (2026-08-11 guncel — her prompt'ta yeniden kesfetme)
+
+Bu bolum projenin ANAKAYNAK DURUMUNU kaydeder. Yeni bir prompt geldiginde
+BUNLARI BIR DAHA SORMA, KEŞFETME, audit etme — dogrudan burada yazilani esas al.
+Degisiklik oldugunda bu bolumu de guncelle.
+
+### Oturum baslangic proseduru (her prompt basinda SADECE 1 kez)
+1. `git status -sb` + `git log origin/main..main --oneline` calistir — push bekleyen commit var mi?
+   Eger VARSA iş bitiminde push et, kullaniciya "push edildi mi" diye SORMADAN.
+2. Bot calisiyor mu? `GET 127.0.0.1:8093/api/status` — cagri basarisizsa bot kapali.
+   Bot ayrica bir Windows servisidir (`sc.exe query JunboBot` — STATE 4 RUNNING olmali)
+   ve `JunboBotWatchdog` (1dk), `JunboDataWatchdog` (5dk), `JunboBot` task (boot/logon)
+   ile korunur. Port 8093'u sadece TEK `main.py bot` process'i dinlemeli.
+3. Codegraph guncel mi? Degisiklik yaptiysan `codegraph sync` calistir.
+4. Belirtilen isi yap. Tam suite 0 failed ise bot restart.
+5. Dokumantasyon: README + GELISTIRICI_NOTLARI senkronu.
+6. Commit + PUSH (kullaniciya sormadan, push bekleyen commit varsa).
+
+### Kalici gercekler (dagilip kesfetme, MEVCUT durum budur)
+- **Git remote:** `https://github.com/talcawarrior/junbo.git` — repo buraya TASINDI.
+  REMOTE URL'DE GOMULU PUSH TOKENI VAR (`ghp_...@`). Asla bu token'i logla/goster.
+  Repo tasinma olayi BILINIYOR; her prompt'ta "repo tasinmis" diye YENIDEN kesfetme.
+- **Bot modu: PAPER (DRY_RUN).** Gercek Polymarket trade'i ASLA acilmaz. Sorma.
+- **Strateji: SPREAD (ana mod).** `spread_radius=3`, `spread_max_cities=15`,
+  `spread_max_entry=0.95` (2026-08-11 0.99'dan dustu), `spread_stake_usd=2.0`,
+  `spread_max_bets_per_day=100`, `betting_window_enabled=False` (gun boyu bet).
+- **Spread bet canli fiyatla acilir:** `_place_spread_bets_inner` entry fiyatini
+  `mkt.yes_price`'dan okur (5 dk'da `run_fetch_markets` ile guncellenir).
+  `_first_snapshot_price` KALDIRILDI (bayat snapshot yerine canli fiyat).
+- **DOGRULANMIS BULGULAR (2026-08-11, kullanici tespiti):**
+  1. **Yeni-market fast mode GUN BAZLI olmalidir, sayi bazli DEGIL.** Gun dongusu:
+     bugunun marketleri kapanir, 2-gun-sonrasi acilir -> toplam market sayisi
+     YAKLASIK AYNI KALIR. Sayi artisiyla tetikleme YANLIS. Dogru sinyal:
+     acik TARIH kumesinde yeni bir gun belirmesi (13. gunun marketleri acilmasi).
+     Bot bunu `_get_open_target_dates()` kumesiyle algilar, sayiyla DEGIL.
+  2. **Spread sehir secimi "en sicak 15" DEGIL, "en dogru tahminli" olmalidir.**
+     Backtest sonuclari: en yuksek sicaklikli sehirler DEGIL, tahmini gercege
+     en yakin tutan sehirler (dusuk |bias|) en yuksek olasilikla tutuyor.
+     `historical_calibrations.bias` sehir dogrulugunu verir (2-3 derece sapan
+     sehirler vardir, onlar elenmeli). Secim: dusuk |bias| -> once.
+  3. **`yes_price is None` (entry yok) pratikte olmaz.** Polymarket YES betleri
+     daima fiyatla acilir (0.1 cent min tick). `entry = mkt.yes_price` NULL
+     guard'i sadece bozuk/yarim veri icin guvenliktir; normal kosulda tetiklenmez.
+     Kullanici bunu "sallama" olarak isaretledi — aciklamalarda gercek mekanizma
+     boyle soylenmemeli.
+- **Son suite durumu:** 712 passed, 6 skipped, 0 failed.
+  (Ignore: test_betting_idempotency, test_comprehensive).
+- **Test DB izole:** `tests/conftest.py` temp DB'ye yonlendirir — suite bot
+  CALISIYORKEN de production DB'ye dokunmaz. Yine de guvenli tarafta kalmak icin
+  degisiklik sonrasi ilgili testler + full suite calistirilir.
+- **commit oncesi:** `ruff check . --ignore F401`, `mypy . --ignore-missing-imports`,
+  `ruff format --check` degisen dosyalarda.
+- **Bot start:** Windows servisi `JunboBot` (pythonservice.exe, AUTO_START).
+  Manuel baslatma: `Start-Process cmd -ArgumentList "/c", start_bot.bat -WindowStyle Hidden`
+  (bat SADECE watchdog.py calistirir; cift bot cakismasini onlemek icin dongu yok).

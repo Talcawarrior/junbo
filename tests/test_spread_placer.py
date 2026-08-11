@@ -259,3 +259,74 @@ def test_kayan_pencere_closes_out_of_window():
         closed = s.query(Bet).filter(Bet.status.in_(["closed", "cancelled"])).all()
     assert res["closed"] >= 1
     assert len(closed) >= 1
+
+
+def _add_calibration(session, city_code, bias):
+    """historical_calibrations'a tek (sehir, model) bias kaydi ekler."""
+    from database.models import HistoricalCalibration
+
+    session.add(
+        HistoricalCalibration(
+            city_code=city_code,
+            city=city_code,
+            date=datetime(2026, 8, 1),
+            metric="temperature_max",
+            model="gfs_seamless",
+            predicted_value=0.0,
+            actual_value=0.0,
+            bias=bias,
+        )
+    )
+
+
+def test_city_accuracy_uses_abs_bias():
+    """_city_accuracy: ortalama MUTLAK bias doner (dusuk = dogru)."""
+    from database.db import get_session
+    from executor.spread_placer import _city_accuracy
+
+    with get_session() as s:
+        _add_calibration(s, "ACC", 0.4)
+        _add_calibration(s, "ACC", 0.6)
+        _add_calibration(s, "DRIFT", 2.5)
+        _add_calibration(s, "DRIFT", 3.5)
+        s.commit()
+        acc = _city_accuracy(s)
+    assert acc["ACC"] == pytest.approx(0.5)
+    assert acc["DRIFT"] == pytest.approx(3.0)
+    assert acc["ACC"] < acc["DRIFT"]
+
+
+def test_spread_prefers_accurate_city_over_hot():
+    """Kullanici karari 2026-08-11: sehir secimi en sicak DEGIL, tahmini en
+    dogru tutan (dusuk |bias|) sehir once gelir. SICAK ama sapan sehir,
+    serin ama dogru sehirden SONRA betlenir (limit yetiyorsa)."""
+    from database.db import get_session
+    from database.models import Bet
+    from executor.spread_placer import place_spread_bets
+
+    day = _day()
+    with get_session() as s:
+        _add_portfolio(s, cash=1000.0)
+        # "ACC" serin ama DOGRU (bias 0.3) — tahmin 20C
+        _add_calibration(s, "ACC", 0.3)
+        _add_forecast(s, "ACC", "temperature_max", day, 20.0, datetime(2026, 8, 1, 10, 0))
+        for thr in range(17, 24):
+            _add_market(s, "Accville", "temperature_max", day, thr, yes_price=0.05, city_code="ACC")
+        # "HOT" sicak ama SAPAN (bias 4.0) — tahmin 40C
+        _add_calibration(s, "HOT", 4.0)
+        _add_forecast(s, "HOT", "temperature_max", day, 40.0, datetime(2026, 8, 1, 10, 0))
+        for thr in range(37, 44):
+            _add_market(s, "Hotville", "temperature_max", day, thr, yes_price=0.05, city_code="HOT")
+        s.commit()
+
+        # max_cities=1 ile SADECE en dogru sehir secilir
+        old = bot_config.strategy.spread_max_cities
+        bot_config.strategy.spread_max_cities = 1
+        try:
+            res = place_spread_bets(day, session=s)
+            s.commit()
+            cities = {b.city for b in s.query(Bet).filter(Bet.status == "placed").all()}
+        finally:
+            bot_config.strategy.spread_max_cities = old
+    assert res["placed"] >= 1
+    assert cities == {"Accville"}, f"SICAK ama sapan sehir degil, dogru sehir secilmeli: {cities}"

@@ -209,7 +209,7 @@ async def scan_and_bet_loop(state):
 
     stale_check_counter = 0
     last_day = None
-    previous_market_count = 0
+    last_open_dates: set = set()
     fast_mode_until = None
     last_weather_fetch = None  # Son weather fetch zamani
     last_two_day_date = None  # En son tetiklenen 2-gun (yeni tarih) acik market tarihi
@@ -218,9 +218,9 @@ async def scan_and_bet_loop(state):
     _POLY_VERIFY_INTERVAL = 24  # 5 dk dongu × 24 = 120 dk (2 saat)
 
     try:
-        previous_market_count = _get_market_count()
-        logger.info("Initial market count: %d", previous_market_count)
-        last_two_day_date = max(_get_open_target_dates(), default=None)
+        last_open_dates = _get_open_target_dates()
+        logger.info("Initial open target dates: %d", len(last_open_dates))
+        last_two_day_date = max(last_open_dates, default=None)
     except Exception as e:
         logger.warning("Could not get initial market state: %s", e)
 
@@ -311,23 +311,28 @@ async def scan_and_bet_loop(state):
             except Exception as e:
                 logger.debug("Model run detection error: %s", e)
 
-            # Yeni market algilama (scan hizli modu icin)
+            # Yeni market algilama (scan hizli modu icin).
+            # GUN BAZLI (kullanici tespiti 2026-08-11): market SAYISI degil,
+            # acik TARIH kumesinde yeni bir gunun belirmesi tetikler. Gun
+            # dongusunde bugunun marketleri kapanir, 2-gun-sonrasi acilir —
+            # toplam sayi YAKLASIK AYNI kalir, sayi artisi YANLIS sinyaldir.
+            # Dogru sinyal: acik tarih kumesine yeni bir takvim gunu eklenmesi.
             try:
-                current_count = _get_market_count()
-                if current_count > previous_market_count:
-                    new_markets = current_count - previous_market_count
+                current_dates = _get_open_target_dates()
+                new_dates = current_dates - last_open_dates
+                if new_dates:
                     fast_mode_until = (datetime.now(timezone.utc) + timedelta(minutes=_FAST_MODE_MINUTES)).replace(
                         tzinfo=None
                     )
                     logger.info(
-                        "NEW MARKETS DETECTED: +%d (total: %d) — FAST MODE for %d min",
-                        new_markets,
-                        current_count,
+                        "NEW MARKET DATES DETECTED: +%s (total dates: %d) — FAST MODE for %d min",
+                        sorted(d.isoformat() for d in new_dates),
+                        len(current_dates),
                         _FAST_MODE_MINUTES,
                     )
-                previous_market_count = current_count
+                last_open_dates = current_dates
             except Exception as e:
-                logger.warning("Market count check failed: %s", e)
+                logger.warning("Open-date check failed: %s", e)
 
             # 2 gun sonrasi (yeni tarih) marketler 'acilir acilmaz' fiyat poller'ini
             # 30 dk boyunca her dakika calistir. TARIH uzerinden: acik marketlerin

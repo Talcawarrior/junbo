@@ -95,6 +95,35 @@ def _find_market(session, city_name, metric, target_day, thr):
     )
 
 
+def _city_accuracy(session) -> dict[str, float]:
+    """(city_code) -> sehir bazli ortalama |bias| (tahmin - gercek, mutlak).
+
+    Deger NE KADAR KUCUKSE sehir tahmini o kadar DOGRU (gercege yakin) demektir.
+    `historical_calibrations.bias` per (sehir, metric, model) kaydedilir;
+    2-3 derece sapan sehirler yuksek |bias| verir ve elenir.
+
+    Kullanici tespiti 2026-08-11: spread sehir secimi "en sicak" DEGIL,
+    "tahmini en dogru tutan" olmali — backtestler en yuksek isabeti dusuk
+    biasli sehirlerde veriyor.
+    """
+    from database.models import HistoricalCalibration
+
+    rows = (
+        session.query(
+            HistoricalCalibration.city_code,
+            HistoricalCalibration.bias,
+        )
+        .filter(HistoricalCalibration.city_code.isnot(None), HistoricalCalibration.bias.isnot(None))
+        .all()
+    )
+    sums: dict[str, float] = {}
+    counts: dict[str, int] = {}
+    for code, bias in rows:
+        sums[code] = sums.get(code, 0.0) + abs(float(bias))
+        counts[code] = counts.get(code, 0) + 1
+    return {code: sums[code] / counts[code] for code in sums if counts[code] > 0}
+
+
 def place_spread_bets(target_day, session=None) -> dict:
     """Bir hedef gun icin spread betlerini acar/kapatir.
 
@@ -139,8 +168,22 @@ def _place_spread_bets_inner(session, target_day) -> dict:
         logger.info("spread: no forecasts for %s", target_day)
         return {"placed": 0, "closed": 0, "skipped": 0, "cities": []}
 
-    # En yuksek tahminli sehirler (en sicak) ilk N
-    selected = sorted(forecasts.items(), key=lambda kv: -kv[1])[:max_cities]
+    # Sehir secimi: tahmini en DOGRU tutanlar (dusuk |bias|) ilk N.
+    # (2026-08-11 kullanici karari: en sicak sehirler DEGIL — backtestler
+    # tahmini gercege yakin tutan sehirlerin en yuksek isabeti verdigini
+    # gosterdi; 2-3 derece sapan sehirler elenir.)
+    # Bias verisi olmayan sehirler de betlenebilir kalir (yeni sehir), ancak
+    # bias'i bilinenlerden SONRA gelir.
+    acc = _city_accuracy(session)
+
+    def _sort_key(item):
+        (code, _metric), fval = item
+        a = acc.get(code)
+        # (bias bilinmiyor mu? 1.0), (ortalama |bias|), (-tahmin degeri)
+        # bias yoksa 2. oncelik buyuk -> sona; bias varsa kucuk deger one.
+        return (0 if a is not None else 1, a if a is not None else 999.0, -fval)
+
+    selected = sorted(forecasts.items(), key=_sort_key)[:max_cities]
 
     # Bugunku acik spread betleri -> gunluk limit
     open_spread = (
@@ -231,10 +274,15 @@ def _place_spread_bets_inner(session, target_day) -> dict:
                 continue
             # CANLI fiyat kullan: weather_markets.yes_price, run_fetch_markets
             # her 5 dk'da bir (price poller + scan loop) Polymarket'ten gunceller.
-            # (2026-08-11 kullanici karari: bayat snapshot fiyati yerine canli
-            # fiyata gore ac — bet 594 entry=0.50 iken canli 0.0085'ti.)
-            entry = float(mkt.yes_price) if mkt.yes_price is not None else None
-            if entry is None or not (0 < entry < max_entry):
+            # Polymarket YES betleri daima fiyatla acilir (0.1 cent min tick);
+            # NULL sadece bozuk/yarim kayit durumunda olur (guvenlik, normalde
+            # tetiklenmez). Filtre: 0 < entry < max_entry (0.95).
+            if mkt.yes_price is None:
+                logger.warning("spread skip: %s %s %sC - market fiyati yok (bozuk kayit)", city_name, target_day, thr)
+                skipped += 1
+                continue
+            entry = float(mkt.yes_price)
+            if not (0 < entry < max_entry):
                 skipped += 1
                 continue
             pf = session.query(Portfolio).filter(Portfolio.id == 1).first()
