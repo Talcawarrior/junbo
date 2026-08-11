@@ -1,19 +1,14 @@
 @echo off
 REM ================================================
 REM JUNBO BOT + WATCHDOG
-REM Bot'u başlatır, çökerse otomatik yeniden başlatır.
+REM Bot'u baslatir, cokerse otomatik yeniden baslatir.
 REM ================================================
+REM ONEMLI (2026-08-11): SADECE watchdog.py calistirilir.
+REM watchdog.py bot'u kendisi baslatir ve olurse yeniden baslatir.
+REM Eski `goto START` dongusu kaldirildi — bat hem watchdog hem kendi
+REM dongusuyle bot baslatinca CIK BOT doguyordu (port cakismasi).
 
 cd /d "C:\Users\fdemir\Documents\New project\junbo"
 
-REM Watchdog'u başlat (arka planda)
 echo Watchdog baslatiliyor...
-start /B python watchdog.py
-
-REM Ana döngü - bot'u başlat ve izle
-:START
-echo [%date% %time%] Bot baslatiliyor...
-python main.py bot
-echo [%date% %time%] Bot durdu! 3 saniye sonra yeniden baslatilacak...
-timeout /t 3 /nobreak >nul
-goto START
+python watchdog.py

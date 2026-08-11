@@ -134,16 +134,11 @@ python main.py bot
 
 ---
 
-## 4. Bahis Penceresi (2026-08-08 karar)
+## 4. Bahis Penceresi (2026-08-11 karar — KAPALI)
 
-- **Pencere: 04:00 - 23:30 UTC arasi bet acilir.**
-- `config/settings.py` → `betting_windows = [(4, 23.5)]` (tek pencere).
-- `bet_placer._is_in_betting_window()` kesirli saat destekler (23.5 = 23:30).
-- Acili kisit (vade-kala): `target_date > now + 30dk` VE `target_date <= now + 20h`.
-  - 04:00'ten once (vadeye 20h+ kala): acilmaz.
-  - 23:30'ten sonra (vadeye 30dk az kala): acilmaz.
-- Hava modeli yuklenirken (00:00-04:00) ve kapanisa yakin (23:30-24:00) bet yok.
-- Kapi 24:00 UTC kapanir; settlement next ~21-22 UTC gelir.
+- **Pencere DEVRE DISI (2026-08-11 karar):** betler gun boyu acilir.
+  `betting_window_enabled=False` (`.env BETTING_WINDOW_ENABLED=false`).
+- Eski pencere mantigi (04:00-23:30 UTC) artik uygulanmaz.
 
 ---
 
@@ -153,10 +148,10 @@ python main.py bot
 
 - Yeni **2-gun-sonrasi tarih** acildiginda (bot_loop 2-day-ahead tespiti):
   - En son meteo tahmini etrafinda **+/- 3 dereceye** (spread) YES bet acilir.
-  - Giris fiyati = marketin **ilk snapshot fiyati** (acilis anindaki en dusuk fiyat).
-  - Entry < 0.30 olan esiklere, esik basina $2.
+  - Giris fiyati = **CANLI `weather_markets.yes_price`** (5 dk'da guncellenir; bayat snapshot degil, 2026-08-11).
+  - `0 < entry < 0.95` olan esiklere, esik basina $2 (2026-08-11: ust sinir 0.95).
   - Tahmini **en yuksek ilk 15 sehir** secilir (en sicak — longshot potansiyeli).
-  - Gunluk **max 30 bet**.
+  - Gunluk **max 100 bet**.
 - **Kayan pencere:** tahmin guncellendiginde (25C -> 27C) yeni merkezin +/-(radius)
   disinda kalan acik esikler **kapatilir**, yeni penceredeki esikler acilir.
 - Backtest (7 gun, gercek veri): spread=3, max_entry<0.30, RAW -> **+$36,814**,
@@ -169,9 +164,9 @@ python main.py bot
 | `BETTING_STRATEGY` | `spread` | `edge` = eski mod |
 | `SPREAD_RADIUS` | `3` | tahmin +/- derece |
 | `SPREAD_MAX_CITIES` | `15` | en sicak ilk N sehir |
-| `SPREAD_MAX_ENTRY` | `0.30` | ust fiyat siniri |
+| `SPREAD_MAX_ENTRY` | `0.95` | ust fiyat siniri (0.95 ve ustu acilmaz) |
 | `SPREAD_STAKE_USD` | `2.0` | esik basina stake |
-| `SPREAD_MAX_BETS_PER_DAY` | `30` | gunluk bet limiti |
+| `SPREAD_MAX_BETS_PER_DAY` | `100` | gunluk bet limiti |
 
 ---
 

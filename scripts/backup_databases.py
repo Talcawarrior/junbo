@@ -43,7 +43,7 @@ logger = logging.getLogger("backup_databases")
 TIMEOUT = 180  # 3 minutes for file operations
 MAX_RETRIES = 5  # retry count on failure
 RETRY_DELAY = 60  # seconds between retries
-RETENTION_DAYS = 30  # keep backups for 30 days
+RETENTION_DAYS = 90  # uzun backtest icin 3 aylik backup (2026-08-11: 30 -> 90)
 
 # Regex: filename icinden YYYYMMDD_HHMMSS zaman damgasini cikar.
 # Gercek dosya adlari cesitlidir:
