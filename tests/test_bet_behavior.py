@@ -26,6 +26,9 @@ def _clean_db():
     from config.settings import bot_config
 
     bot_config.strategy.current_fee_rate = 0.05
+    # Bu testler place_all_pending (edge bet mantigi), SL ve rotasyonu test
+    # eder -> EDGE moduna ozgu. spread modunda place_all_pending cagrilmaz.
+    bot_config.strategy.betting_strategy = "edge"
 
 
 def _td(hours_ahead):

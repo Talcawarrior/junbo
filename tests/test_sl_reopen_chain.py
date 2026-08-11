@@ -20,9 +20,13 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _clean_db():
+    from config.settings import bot_config
     from database.db import get_session
     from database.models import Bet, Portfolio, WeatherForecast, WeatherMarket
 
+    # Bu testler SL->settler->reopen zincirini test eder -> EDGE moduna ozgu
+    # (spread modunda stop-loss devre disi, reopen calismaz).
+    bot_config.strategy.betting_strategy = "edge"
     with get_session() as s:
         for tbl in [Bet, WeatherForecast, WeatherMarket, Portfolio]:
             s.query(tbl).delete()

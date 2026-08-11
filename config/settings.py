@@ -179,7 +179,8 @@ class StrategyConfig:
     # Her pencere (baslangic_saati, bitis_saati) tuple olarak tanimlanir.
     # Pencereler disinda bahis acma kapalidir.
     betting_windows: list = None  # type: ignore[assignment]  # __post_init__'te初始化
-    betting_window_enabled: bool = True  # bahis penceresi kontrolunu aktif et
+    # 2026-08-11: pencere kaldirildi (kullanici karari) — betler gun boyu acilir.
+    betting_window_enabled: bool = False  # bahis penceresi kontrolu DEVRE DISI
 
 
 @dataclass
@@ -535,6 +536,7 @@ class BotConfig:
         s.min_entry_price = float(os.getenv("MIN_ENTRY_PRICE", str(s.min_entry_price)))
         s.max_entry_price = float(os.getenv("MAX_ENTRY_PRICE", str(s.max_entry_price)))
         s.betting_strategy = os.getenv("BETTING_STRATEGY", s.betting_strategy)
+        s.betting_window_enabled = os.getenv("BETTING_WINDOW_ENABLED", str(s.betting_window_enabled)).lower() == "true"
         s.spread_radius = int(os.getenv("SPREAD_RADIUS", str(s.spread_radius)))
         s.spread_max_cities = int(os.getenv("SPREAD_MAX_CITIES", str(s.spread_max_cities)))
         s.spread_max_entry = float(os.getenv("SPREAD_MAX_ENTRY", str(s.spread_max_entry)))

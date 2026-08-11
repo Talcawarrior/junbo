@@ -57,6 +57,15 @@ _PRICE_POLL_INTERVAL = 300  # 5 dakika
 _WEATHER_FETCH_INTERVAL = 3600  # 1 saat
 
 
+def _get_price_poll_interval(state, now: datetime) -> int:
+    """Price poller interval karari (saf fonksiyon, test edilebilir).
+
+    2 gun sonrasi bahisler acildiysa 20 dk boyunca her dakika fiyat cek
+    (state.fast_price_until), sonra tekrar 5 dk'ya don.
+    """
+    return _FAST_PRICE_INTERVAL if state.fast_price_until and now < state.fast_price_until else _PRICE_POLL_INTERVAL
+
+
 def _get_market_count() -> int:
     with get_session() as db:
         return db.query(WeatherMarket).filter(WeatherMarket.status == "open").count()
@@ -179,11 +188,7 @@ async def price_poller_loop(state):
             # 2 gun sonrasi bahisler acildiysa 20 dk boyunca her dakika fiyat
             # cek (state.fast_price_until), sonra tekrar 5 dk'ya don.
             now = datetime.now(timezone.utc).replace(tzinfo=None)
-            interval = (
-                _FAST_PRICE_INTERVAL
-                if state.fast_price_until and now < state.fast_price_until
-                else _PRICE_POLL_INTERVAL
-            )
+            interval = _get_price_poll_interval(state, now)
             await asyncio.sleep(interval)
     logger.info("Price poller loop exited (is_running=%s)", state.is_running)
 
