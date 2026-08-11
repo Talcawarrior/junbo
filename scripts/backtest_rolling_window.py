@@ -77,6 +77,27 @@ def main() -> int:
         action="store_true",
         help="model_weight agirlikli ensemble (bot ile ayni; varsayilan: esit agirlik)",
     )
+    parser.add_argument(
+        "--no-shift",
+        action="store_true",
+        help="PENCERE KAYDIRMA YOK: acilan esikler settlement'a kadar tutulur; "
+        "merkez kayarsa bile eski esikler KAPATILMAZ (kapanis kaybi yok). "
+        "Sadece ILK forecast aninda acilis yapilir (2026-08-11).",
+    )
+    parser.add_argument(
+        "--bias-top",
+        type=int,
+        default=0,
+        help=">0 ise sadece ortalama |bias| en dusuk (en az sapan) ilk N sehir secilir "
+        "(historical_calibrations.bias, 2026-08-11 kullanici karari).",
+    )
+    parser.add_argument(
+        "--orderbook",
+        action="store_true",
+        help="GERCEK CLOB orderbook verisi kullan (orderbook.db): fiyat = best_ask, "
+        "derinlik(ask_depth_usd) < 2$ ise bet atlanir (slippage/likidite gercekci). "
+        "Varsayilan: 30dk snapshot fiyati (market_snapshots). 2026-08-11.",
+    )
     args = parser.parse_args()
 
     adb = sqlite3.connect(ACTUALS_DB)
@@ -107,25 +128,103 @@ def main() -> int:
             continue
         fc_history[(code, td, metric)].append((str(fetched), source, float(pval)))
 
-    # snapshot fiyat gecmisi: (city_name, day, metric, thr) -> [(snapshot_time, yes_price)]
-    cur.execute(
-        "SELECT city, metric, target_date, threshold, snapshot_time, yes_price "
-        "FROM market_snapshots ORDER BY snapshot_time ASC"
-    )
+    # fiyat gecmisi: (city_name, day, metric, thr) -> [(time, yes_price)]
     price_series: dict[tuple, list] = defaultdict(list)
-    for city, metric, tdate, thr, stime, yp in cur.fetchall():
-        td = str(tdate)[:10] if tdate else None
-        if not td or thr is None:
-            continue
+
+    if args.orderbook:
+        # GERCEL CLOB orderbook (orderbook.db): market_id -> (city, day, metric, thr)
+        # map'i weather_markets'tan; fiyat = best_ask, derinlik < 2$ ise yok say
+        # (slippage/likidite gercekci, 2026-08-11).
+        cur.execute(
+            "SELECT id, city, metric, target_date, threshold FROM weather_markets "
+            "WHERE threshold IS NOT NULL AND target_date IS NOT NULL"
+        )
+        mkt_key = {}
+        for mid, city, metric, tdate, thr in cur.fetchall():
+            td = str(tdate)[:10] if tdate else None
+            if not td or city is None or thr is None:
+                continue
+            mkt_key[str(mid)] = (city, td, metric, float(thr))
+        # orderbook.db bot tarafindan WAL ile yaziliyor — kilitliyken dogrudan
+        # okunamayabilir. Guvenli yol: dosyayi gecici kopyaya kopyala, kopyadan oku.
+        import shutil
+        import tempfile
+
+        ob_path = os.path.join(_REPO_ROOT, "data", "orderbook.db")
+        tmp_ob = None
         try:
-            p = float(yp)
-            if 0 < p < 1:
-                price_series[(city, td, metric, float(thr))].append((str(stime), p))
-        except (TypeError, ValueError):
-            continue
+            fd, tmp_ob = tempfile.mkstemp(suffix=".db")
+            os.close(fd)
+            shutil.copy2(ob_path, tmp_ob)
+            ob = sqlite3.connect(tmp_ob, timeout=15)
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARNING: orderbook.db kopyalanamadi ({exc}) — snapshot fallback")
+            ob = None
+        if ob is not None:
+            try:
+                for mid, ask, askd, stime in ob.execute(
+                    "SELECT market_id, best_ask, ask_depth_usd, snapshot_time "
+                    "FROM orderbook_snapshots WHERE best_ask IS NOT NULL"
+                ).fetchall():
+                    key = mkt_key.get(str(mid))
+                    if key is None:
+                        continue
+                    try:
+                        p = float(ask)
+                        d = float(askd or 0)
+                        if 0 < p < 1 and d >= STAKE:
+                            # snapshot_time "2026-08-11T21:42:08+00:00" -> forecast
+                            # ts ile karsilastirilabilir: space, Z suffix yok
+                            t = str(stime).replace("T", " ")[:19]
+                            price_series[key].append((t, p))
+                    except (TypeError, ValueError):
+                        continue
+            finally:
+                ob.close()
+                if tmp_ob and os.path.exists(tmp_ob):
+                    try:
+                        os.unlink(tmp_ob)
+                    except OSError:
+                        pass
+    else:
+        # varsayilan: 30dk snapshot fiyati (market_snapshots)
+        cur.execute(
+            "SELECT city, metric, target_date, threshold, snapshot_time, yes_price "
+            "FROM market_snapshots ORDER BY snapshot_time ASC"
+        )
+        for city, metric, tdate, thr, stime, yp in cur.fetchall():
+            td = str(tdate)[:10] if tdate else None
+            if not td or thr is None:
+                continue
+            try:
+                p = float(yp)
+                if 0 < p < 1:
+                    t = str(stime).replace("T", " ")[:19]
+                    price_series[(city, td, metric, float(thr))].append((t, p))
+            except (TypeError, ValueError):
+                continue
     # her seriyi zaman sirali oldugundan emin ol
     for k in price_series:
         price_series[k].sort(key=lambda x: x[0])
+
+    # sehir bazli ortalama |bias| (historical_calibrations) — bias-top icin
+    city_bias: dict[str, float] = {}
+    if args.bias_top > 0:
+        bias_sums: dict[str, float] = {}
+        bias_cnt: dict[str, int] = {}
+        for code, bias in cur.execute(
+            "SELECT city_code, bias FROM historical_calibrations " "WHERE bias IS NOT NULL AND city_code IS NOT NULL"
+        ).fetchall():
+            cname = code_name.get(code)
+            if not cname:
+                continue
+            bias_sums[cname] = bias_sums.get(cname, 0.0) + abs(float(bias))
+            bias_cnt[cname] = bias_cnt.get(cname, 0) + 1
+        for cname in bias_sums:
+            city_bias[cname] = bias_sums[cname] / bias_cnt[cname]
+        top = sorted(city_bias.items(), key=lambda kv: kv[1])[: args.bias_top]
+        keep_cities = {c for c, _b in top}
+        print(f"bias-top {args.bias_top}: {sorted(keep_cities)}")
 
     db.close()
 
@@ -139,6 +238,8 @@ def main() -> int:
         city_name = code_name.get(code)
         if not city_name:
             continue
+        if args.bias_top > 0 and city_name not in keep_cities:
+            continue  # bias-top secimi: bu sehir alinmadi
         # forecast guncellemelerini zaman sirasina diz
         by_time: dict[str, dict] = {}
         for fetched, source, pval in entries:
@@ -207,25 +308,31 @@ def main() -> int:
                     break
 
             # --- KAYAN PENCERE: yeni pencere disinda kalan esikleri kapat ---
-            for thr in list(open_pos.keys()):
-                if thr not in targets:
-                    # o anki fiyattan kapat (snapshot <= ft)
-                    p = _price_at(price_series.get((city_name, td, metric, thr), []), ft)
-                    if p is None:
-                        p = open_pos[thr]  # fiyat yoksa entry ile kapat (tarafsiz)
-                    entry = open_pos[thr]
-                    shares = STAKE / entry
-                    proceeds = shares * p
-                    pnl = proceeds - STAKE  # entry fee yok sayildi
-                    pnl_total += pnl
-                    closed_early += 1
-                    per_day[td]["closed"] += 1
-                    per_day[td]["pnl"] += pnl
-                    per_city[city_name]["closed"] += 1
-                    per_city[city_name]["pnl"] += pnl
-                    del open_pos[thr]
+            # (--no-shift: kapatma YOK — acilan betler settlement'a kadar tutulur)
+            if not args.no_shift:
+                for thr in list(open_pos.keys()):
+                    if thr not in targets:
+                        # o anki fiyattan kapat (snapshot <= ft)
+                        p = _price_at(price_series.get((city_name, td, metric, thr), []), ft)
+                        if p is None:
+                            p = open_pos[thr]  # fiyat yoksa entry ile kapat (tarafsiz)
+                        entry = open_pos[thr]
+                        shares = STAKE / entry
+                        proceeds = shares * p
+                        pnl = proceeds - STAKE  # entry fee yok sayildi
+                        pnl_total += pnl
+                        closed_early += 1
+                        per_day[td]["closed"] += 1
+                        per_day[td]["pnl"] += pnl
+                        per_city[city_name]["closed"] += 1
+                        per_city[city_name]["pnl"] += pnl
+                        del open_pos[thr]
 
             # --- yeni penceredeki eksik esikleri AÇ ---
+            # (--no-shift: sadece ILK forecast aninda acilir; merkez sonra
+            #  kayarsa YENI esik de acilmaz — ilk pencere sabit kalir)
+            if args.no_shift and ft != fc_times[0]:
+                continue
             for thr in sorted(targets):
                 if thr in open_pos:
                     continue
@@ -259,7 +366,10 @@ def main() -> int:
 
     # ---------------- rapor ----------------
     wlabel = "WEIGHTED" if args.weighted else "EQUAL"
-    label = f"rolling-window spread={args.spread} max_entry<{args.max_entry} {wlabel}"
+    shift = "NO-SHIFT" if args.no_shift else "SHIFT"
+    bias = f" bias-top={args.bias_top}" if args.bias_top > 0 else ""
+    src = " ORDERBOOK" if args.orderbook else ""
+    label = f"rolling-window spread={args.spread} max_entry<{args.max_entry} {wlabel} {shift}{bias}{src}"
     print(f"\n=== BACKTEST: {label} ===")
     print(f"bets={total} win={won} loss={lost} closed_early={closed_early} win-rate={won / max(total, 1) * 100:.1f}%")
     print(f"TOTAL PnL (${STAKE}/bet): ${pnl_total:.2f}  avg=${pnl_total / max(total, 1):.3f}/bet")
