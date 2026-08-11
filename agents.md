@@ -398,6 +398,21 @@ Degisiklik oldugunda bu bolumu de guncelle.
      guard'i sadece bozuk/yarim veri icin guvenliktir; normal kosulda tetiklenmez.
      Kullanici bunu "sallama" olarak isaretledi — aciklamalarda gercek mekanizma
      boyle soylenmemeli.
+  4. **SEHIR YA TAM 7 BETLI OLUR YA DA HIC OLMAZ (KATI KURAL, 2026-08-11).**
+     Bir sehirde forecast center +/- radius (7 esik) icindeki TUM esiklerin acik
+     marketi VAR ve fiyati `0 < yes_price < max_entry` olmali. Herhangi bir esik
+     eksikse (market yok / fiyat yuksek) O SEHRE HIC girilmez VE o sehrin o gun
+     acik betleri KAPATILIR. "7 betli olacak yoksa o sehir olmayacak."
+     Gerekce (Wellington 11.08): merkez 12C atlandi ama 9,10,11,13,14,15 ayaklara
+     girildi -> 6 bet lost, -12.60$. Eksik ayak = spread mantigi bozuk.
+     Kod: `spread_placer._place_spread_bets_inner` — `targets` (center±3) icin
+     once tam-7 kontrolu, eksikse `close_bet_for_rotation` ile mevcut betleri kapat.
+     Test: `test_city_skipped_when_center_market_missing`,
+     `test_city_skipped_when_center_price_high`.
+  4b. **`spread_max_entry=0.99` (fiyat onemsiz, test icin butun betlere gir).**
+     Kullanici basi: "ilk basta sana fiyat onemli degil butun betlere gir onemli
+     olan testi gormemiz demedim". 0.50 kurali KALDIRILDI (merkez esigi eliyordu).
+     0.99 ustu fiyat pratikte yoktur.
 - **Son suite durumu:** 712 passed, 6 skipped, 0 failed.
   (Ignore: test_betting_idempotency, test_comprehensive).
 - **Test DB izole:** `tests/conftest.py` temp DB'ye yonlendirir — suite bot

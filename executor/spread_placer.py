@@ -262,6 +262,58 @@ def _place_spread_bets_inner(session, target_day) -> dict:
         center = round(fval)
         targets = set(range(center - radius, center + radius + 1))
 
+        # KRITIK KURAL (2026-08-11 kullanici): bir sehirde TAM 7 esigin (center±3)
+        # hepsi acik markete sahip VE fiyati 0 < fiyat < max_entry olmali.
+        # Herhangi biri eksikse (market yok / fiyat yuksek) O SEHRE HIC girilmez
+        # ve o sehrin mevcut acik betleri KAPATILIR. "7 betli olacak yoksa o
+        # sehir olmayacak." Cunku eksik ayak = spread mantigi bozuk; ayaklar
+        # longshot oldugu icin merkezsiz kayip uretir.
+        # (Wellington 11.08: merkez 12C atlandi, 6 ayak girildi -> -12.60$.)
+        complete = True
+        for thr in sorted(targets):
+            mkt = _find_market(session, city_name, metric, target_day, thr)
+            if mkt is None:
+                complete = False
+                break
+            if mkt.yes_price is None or not (0 < float(mkt.yes_price) < max_entry):
+                complete = False
+                break
+        if not complete:
+            logger.info(
+                "spread skip (7 esik tamamlanamiyor): %s %s center=%sC",
+                city_name,
+                target_day,
+                center,
+            )
+            # O sehrin bu gun acik betlerini kapat (gereksiz ayaklar)
+            lo, hi = _day_range(target_day)
+            existing = (
+                session.query(Bet)
+                .filter(
+                    Bet.status.in_(OPEN_BET_STATUSES),
+                    Bet.city == city_name,
+                    Bet.market_id.in_(
+                        session.query(WeatherMarket.id).filter(
+                            WeatherMarket.target_date >= lo,
+                            WeatherMarket.target_date <= hi,
+                        )
+                    ),
+                )
+                .all()
+            )
+            for bet in existing:
+                from executor.bet_placer import BetPlacer
+
+                m = session.query(WeatherMarket).filter_by(id=bet.market_id).first()
+                if m is None:
+                    continue
+                cur = float(bet.current_price or bet.entry_price or 0)
+                logger.info("spread close (7 esik tamamlanamiyor): %s mkt=%s", city_name, bet.market_id)
+                BetPlacer().close_bet_for_rotation(bet, cur, session)
+                closed += 1
+            skipped += 1
+            continue
+
         # Kayan pencere: bu (city, day) icin acik betlerden yeni pencere
         # disinda kalanlari kapat. Bet'in marketinin target_date'i bu gun
         # olmalidir (placed_at degil).
@@ -291,8 +343,8 @@ def _place_spread_bets_inner(session, target_day) -> dict:
             mkt = session.query(WeatherMarket).filter_by(id=bet.market_id).first()
             if mkt is None:
                 continue
-            thr = float(mkt.threshold or 0)
-            if thr not in targets:
+            bet_thr = float(mkt.threshold or 0)
+            if bet_thr not in targets:
                 from executor.bet_placer import BetPlacer
 
                 cur = float(bet.current_price or bet.entry_price or 0)
@@ -300,7 +352,7 @@ def _place_spread_bets_inner(session, target_day) -> dict:
                     "spread close (window moved): %s %s thr=%s new_window=%s",
                     city_name,
                     str(target_day),
-                    thr,
+                    bet_thr,
                     sorted(targets),
                 )
                 BetPlacer().close_bet_for_rotation(bet, cur, session)

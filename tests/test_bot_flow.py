@@ -67,7 +67,7 @@ def _seed_market_and_forecast(session, target_day):
             bias=0.87,
         )
     )
-    for thr in range(28, 34):
+    for thr in range(28, 35):  # 28..34 = 7 esik (center 31 +/- 3) — tam-7 kurali
         mid = f"mkt-{thr}"
         session.add(
             WeatherMarket(

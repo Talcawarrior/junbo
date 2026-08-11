@@ -168,7 +168,7 @@ class StrategyConfig:
     betting_strategy: str = "spread"
     spread_radius: int = 3  # +/- derece (tahmin +/- 3)
     spread_max_cities: int = 15  # tahmini en yuksek ilk N sehir
-    spread_max_entry: float = 0.50  # ust sinir: 0.50 ve ustu fiyata O SEHRE hic girilmez (2026-08-11 kullanici karari)
+    spread_max_entry: float = 0.99  # fiyat onemsiz — test icin butun betlere gir (0.99 ustu yok; kullanici karari)
     spread_stake_usd: float = 2.0  # esik basina stake
     spread_max_bets_per_day: int = 350  # gunluk limit: 3 gun x 15 sehir x 7 esik = 315 + marj
 

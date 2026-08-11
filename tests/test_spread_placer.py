@@ -420,3 +420,55 @@ def test_past_day_no_bets_opened():
         placed = s.query(Bet).filter(Bet.status == "placed").count()
     assert res["placed"] == 0, "gecmis gune bet acilmamali"
     assert placed == 0
+
+
+def test_city_skipped_when_center_market_missing():
+    """Kritik kural 2026-08-11: merkez esigin marketi YOKSA o sehre HIC girilmez.
+    (Wellington 11.08: merkez 12C alinamadi ama 9,10,11,13,14,15 ayaklarina
+    girildi -> 6 bet lost, -12.60$. Boyle gereksiz kayip olmamali.)"""
+    from database.db import get_session
+    from database.models import Bet
+    from executor.spread_placer import place_spread_bets
+
+    day = _day()
+    with get_session() as s:
+        _add_portfolio(s, cash=1000.0)
+        _add_calibration(s, "AAA", 0.87)
+        _add_forecast(s, "AAA", "temperature_max", day, 25.0, datetime(2026, 8, 1, 10, 0))
+        # Merkez (25) HARI 22,23,24,26,27,28 marketleri var — merkez marketi YOK
+        for thr in [22, 23, 24, 26, 27, 28]:
+            _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.05)
+        s.commit()
+        res = place_spread_bets(day, session=s)
+        s.commit()
+        placed = s.query(Bet).filter(Bet.status == "placed").count()
+    assert res["placed"] == 0, "merkez marketi yoksa ayaklara girilmemeli"
+    assert placed == 0
+
+
+def test_city_skipped_when_center_price_high():
+    """Kritik kural 2026-08-11: merkez esik fiyati max_entry ustundeyse o sehre
+    HIC girilmez (ayaklar da acilmaz)."""
+    from database.db import get_session
+    from database.models import Bet
+    from executor.spread_placer import place_spread_bets
+
+    day = _day()
+    old = bot_config.strategy.spread_max_entry
+    bot_config.strategy.spread_max_entry = 0.30
+    try:
+        with get_session() as s:
+            _add_portfolio(s, cash=1000.0)
+            _add_calibration(s, "AAA", 0.87)
+            _add_forecast(s, "AAA", "temperature_max", day, 25.0, datetime(2026, 8, 1, 10, 0))
+            # Merkez 25 fiyat 0.40 (max_entry 0.30 ustu) -> sehir atlanir
+            for thr in range(22, 29):
+                _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.40)
+            s.commit()
+            res = place_spread_bets(day, session=s)
+            s.commit()
+            placed = s.query(Bet).filter(Bet.status == "placed").count()
+        assert res["placed"] == 0, "merkez fiyati yuksekse ayaklara girilmemeli"
+        assert placed == 0
+    finally:
+        bot_config.strategy.spread_max_entry = old

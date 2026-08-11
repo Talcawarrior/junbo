@@ -149,8 +149,11 @@ python main.py bot
 - Yeni **2-gun-sonrasi tarih** acildiginda (bot_loop 2-day-ahead tespiti):
   - En son meteo tahmini etrafinda **+/- 3 dereceye** (spread) YES bet acilir.
   - Giris fiyati = **CANLI `weather_markets.yes_price`** (5 dk'da guncellenir; bayat snapshot degil, 2026-08-11).
-  - `0 < entry < 0.50` olan esiklere, esik basina $2. **0.50 ve ustu fiyata o sehre hic girilmez**
-    (0.50->1.00 sadece 2x kazanc, longshot kayiplarini karsilamaz — 2026-08-11 kullanici karari).
+  - `0 < entry < 0.99` olan esiklere, esik basina $2 (fiyat onemsiz, test modu — 2026-08-11).
+  - **KATI KURAL: bir sehirde tam 7 esik (center ± 3) acilabilir olmali.** TUM
+    esiklerin acik marketi VAR ve fiyati `0 < yes < 0.99` ise 7 bet acilir; herhangi
+    biri eksikse O SEHRE HIC girilmez (mevcut betler kapatilir). "7 betli olacak
+    yoksa o sehir olmayacak."
   - Tahmini **en az sapan ilk 15 sehir** secilir (tahmini gercege en yakin tutanlar —
     dusuk |bias|; SICAKLIK DEGIL, 2026-08-11 kullanici karari. Bias'siz yeni sehir acilmaz).
   - Gunluk **max 350 bet** (3 gun x 15 sehir x 7 esik = 315 + marj; 13 Agustos acilinca
@@ -178,7 +181,7 @@ python main.py bot
 | `BETTING_STRATEGY` | `spread` | `edge` = eski mod |
 | `SPREAD_RADIUS` | `3` | tahmin +/- derece |
 | `SPREAD_MAX_CITIES` | `15` | tahmini en az sapan ilk N sehir (sicaklik degil) |
-| `SPREAD_MAX_ENTRY` | `0.50` | ust fiyat siniri (0.50 ve ustu acilmaz) |
+| `SPREAD_MAX_ENTRY` | `0.99` | ust fiyat siniri (0.99 ve ustu acilmaz; tam-7 kurali icin) |
 | `SPREAD_STAKE_USD` | `2.0` | esik basina stake |
 | `SPREAD_MAX_BETS_PER_DAY` | `350` | gunluk bet limiti (3 gun x 15 sehir x 7 = 315 + marj) |
 
