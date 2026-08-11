@@ -398,21 +398,17 @@ Degisiklik oldugunda bu bolumu de guncelle.
      guard'i sadece bozuk/yarim veri icin guvenliktir; normal kosulda tetiklenmez.
      Kullanici bunu "sallama" olarak isaretledi — aciklamalarda gercek mekanizma
      boyle soylenmemeli.
-  4. **SEHIR YA TAM 7 BETLI OLUR YA DA HIC OLMAZ (KATI KURAL, 2026-08-11).**
-     Bir sehirde forecast center +/- radius (7 esik) icindeki TUM esiklerin acik
-     marketi VAR ve fiyati `0 < yes_price < max_entry` olmali. Herhangi bir esik
-     eksikse (market yok / fiyat yuksek) O SEHRE HIC girilmez VE o sehrin o gun
-     acik betleri KAPATILIR. "7 betli olacak yoksa o sehir olmayacak."
-     Gerekce (Wellington 11.08): merkez 12C atlandi ama 9,10,11,13,14,15 ayaklara
-     girildi -> 6 bet lost, -12.60$. Eksik ayak = spread mantigi bozuk.
-     Kod: `spread_placer._place_spread_bets_inner` — `targets` (center±3) icin
-     once tam-7 kontrolu, eksikse `close_bet_for_rotation` ile mevcut betleri kapat.
-     Test: `test_city_skipped_when_center_market_missing`,
-     `test_city_skipped_when_center_price_high`.
-  4b. **`spread_max_entry=0.99` (fiyat onemsiz, test icin butun betlere gir).**
-     Kullanici basi: "ilk basta sana fiyat onemli degil butun betlere gir onemli
-     olan testi gormemiz demedim". 0.50 kurali KALDIRILDI (merkez esigi eliyordu).
-     0.99 ustu fiyat pratikte yoktur.
+  4. **TAM-7 KURALI KALDIRILDI (2026-08-11 kullanici karari A).** Backtest
+     (gercek bot davranisi, kayan pencere dahil — `scripts/backtest_rolling_window.py`):
+     tam-7 zorunlu karliligi DUSURUYOR: 0.30 tam-7'siz +$53,284 vs tam-7'li +$5,611;
+     0.99 tam-7'siz +$52,018 vs tam-7'li +$19,747. Sebep: 7 esigin hepsi acik +
+     fiyat siniri altinda sarti, merkez kayinca kARLI esikleri de kapatiyor.
+     Gecerli kural: `spread_max_entry=0.30` + KAYAN PENCERE (merkez kayinca eski
+     uclari kapat, yenileri ac) — tam-7 yok. Merkez marketi olmasa da acilabilen
+     ayaklar acilir. Test: `test_open_legs_when_center_market_missing`.
+  4b. **`spread_max_entry=0.30`.** Backtest en iyi config (kayan pencere + 0.30
+     -> +$53,284). 0.30 ustu fiyatli esiklere girilmez. (Onceden 0.99 denenmis,
+     kullanici "fiyat onemsiz" demisti; sonra veri 0.30'u gosterdi.)
 - **Son suite durumu:** 712 passed, 6 skipped, 0 failed.
   (Ignore: test_betting_idempotency, test_comprehensive).
 - **Test DB izole:** `tests/conftest.py` temp DB'ye yonlendirir — suite bot

@@ -168,7 +168,7 @@ class StrategyConfig:
     betting_strategy: str = "spread"
     spread_radius: int = 3  # +/- derece (tahmin +/- 3)
     spread_max_cities: int = 15  # tahmini en yuksek ilk N sehir
-    spread_max_entry: float = 0.99  # fiyat onemsiz — test icin butun betlere gir (0.99 ustu yok; kullanici karari)
+    spread_max_entry: float = 0.30  # ust sinir: 0.30+ fiyatli esiklere girilmez (backtest en iyi: +$53k, 2026-08-11)
     spread_stake_usd: float = 2.0  # esik basina stake
     spread_max_bets_per_day: int = 350  # gunluk limit: 3 gun x 15 sehir x 7 esik = 315 + marj
 
@@ -515,6 +515,10 @@ class BotConfig:
         if self.model_weights is None:
             # ECMWF-first allocation: research shows ECMWF HRES outperforms
             # GFS at all lead times. GFS weight reduced from 0.30 to 0.15.
+            # NOT: spread stratejisi ESIT ortalamayla daha karlı (backtest:
+            # eşit +$53,284 vs agirlikli +$48,964, 2026-08-11) — bu agirliklar
+            # yalnizca edge modu/calculator icin kullanilir, spread_placer
+            # model_weight'i KULLANMAZ (esit ortalama).
             self.model_weights = {
                 "ecmwf_ifs025": 0.35,
                 "gfs_seamless": 0.15,
