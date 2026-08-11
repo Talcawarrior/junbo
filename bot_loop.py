@@ -216,6 +216,8 @@ async def scan_and_bet_loop(state):
     model_run_fast_until: datetime | None = None  # Model run fast mode end time
     poly_verify_counter = 0  # 2 saatte bir DB vs Polymarket kontrolu
     _POLY_VERIFY_INTERVAL = 24  # 5 dk dongu × 24 = 120 dk (2 saat)
+    spread_retry_counter = 0  # Yeni acilan marketleri yakalamak icin periyodik spread retry
+    _SPREAD_RETRY_INTERVAL = 12  # her 12 dongu (~60 dk) bir
 
     try:
         last_open_dates = _get_open_target_dates()
@@ -385,6 +387,32 @@ async def scan_and_bet_loop(state):
                     last_two_day_date = new_date
             except Exception as e:
                 logger.warning("2-day-ahead detection failed: %s", e)
+
+            # PERIYODIK SPREAD RETRY (2026-08-11 kullanici istegi):
+            # Polymarket marketleri tek seferde degil, zamana yayilarak acilir.
+            # Yeni tarih tetiklemesi SADECE ilk acilista calisir; sonradan acilan
+            # esikler (orn. Ankara 32C "NEW") hic yakalanmazdi. Bu yuzden spread
+            # modunda her ~12 dongu (60 dk) bir, en yeni acik tarih icin
+            # place_spread_bets yeniden cagrilir. Dup kontrolu oldugu icin
+            # mevcut betler tekrar acilmaz; sadece eksik esikler tamamlanir.
+            spread_retry_counter += 1
+            if spread_retry_counter >= _SPREAD_RETRY_INTERVAL:
+                spread_retry_counter = 0
+                strategy = getattr(bot_config.strategy, "betting_strategy", "edge")
+                if strategy == "spread":
+                    try:
+                        from executor.spread_placer import place_spread_bets
+
+                        retry_dates = _get_open_target_dates()
+                        if retry_dates:
+                            retry_target = max(retry_dates)
+                            res = await asyncio.wait_for(
+                                asyncio.to_thread(place_spread_bets, retry_target),
+                                timeout=_CYCLE_TIMEOUT,
+                            )
+                            logger.info("SPREAD periodic retry %s -> %s", retry_target.isoformat(), res)
+                    except Exception as e:
+                        logger.error("SPREAD periodic retry failed: %s", e)
 
             # Stale cleanup her 10 dongude
             stale_check_counter += 1

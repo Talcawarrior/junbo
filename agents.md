@@ -364,11 +364,15 @@ Degisiklik oldugunda bu bolumu de guncelle.
      YAKLASIK AYNI KALIR. Sayi artisiyla tetikleme YANLIS. Dogru sinyal:
      acik TARIH kumesinde yeni bir gun belirmesi (13. gunun marketleri acilmasi).
      Bot bunu `_get_open_target_dates()` kumesiyle algilar, sayiyla DEGIL.
-  2. **Spread sehir secimi "en sicak 15" DEGIL, "en dogru tahminli" olmalidir.**
-     Backtest sonuclari: en yuksek sicaklikli sehirler DEGIL, tahmini gercege
-     en yakin tutan sehirler (dusuk |bias|) en yuksek olasilikla tutuyor.
-     `historical_calibrations.bias` sehir dogrulugunu verir (2-3 derece sapan
-     sehirler vardir, onlar elenmeli). Secim: dusuk |bias| -> once.
+  2. **Spread sehir secimi: ANA KRITER "tahmini EN AZ SAPAN" sehirdir, sicaklik DEGIL.**
+     Kullanici ornegi (2026-08-11): London tahmini 20C az sapiyorsa SECILIR,
+     Kahire tahmini 45C cok sapiyorsa ELENIR. Sicaklik degeri ONEMLIDIR.
+     Dogru metrik: `historical_calibrations.bias` uzerinden sehir bazli ortalama
+     |bias| (tahmin - gercek, mutlak). Dusuk |bias| = az sapan = SECILIR.
+     |bias| > 2.5C olan sehirler sapan sayilir, en sona atilir (elenir).
+     Siralama anahtari: (sapan mi?, |bias| kucuk once) — sicaklik SADECE
+     esitlikte tie-break. BU KURALI HICBIR ZAMAN "en sicak 15" diye YANLIS
+     YAZMA/YAPMA; kodda, yorumlarda, dokumanda, cevapta hep "en az sapan" olur.
   3. **`yes_price is None` (entry yok) pratikte olmaz.** Polymarket YES betleri
      daima fiyatla acilir (0.1 cent min tick). `entry = mkt.yes_price` NULL
      guard'i sadece bozuk/yarim veri icin guvenliktir; normal kosulda tetiklenmez.

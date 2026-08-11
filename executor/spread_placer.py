@@ -168,22 +168,33 @@ def _place_spread_bets_inner(session, target_day) -> dict:
         logger.info("spread: no forecasts for %s", target_day)
         return {"placed": 0, "closed": 0, "skipped": 0, "cities": []}
 
-    # Sehir secimi: tahmini en DOGRU tutanlar (dusuk |bias|) ilk N.
-    # (2026-08-11 kullanici karari: en sicak sehirler DEGIL — backtestler
-    # tahmini gercege yakin tutan sehirlerin en yuksek isabeti verdigini
-    # gosterdi; 2-3 derece sapan sehirler elenir.)
-    # Bias verisi olmayan sehirler de betlenebilir kalir (yeni sehir), ancak
-    # bias'i bilinenlerden SONRA gelir.
+    # Sehir secimi: SADECE bias'i bilinen (tahmini gercege kiyaslanmis) sehirler.
+    # Yeni sehir (bias verisi yok) ACILMAZ - kullanici karari 2026-08-11:
+    # "yeni sehir icin elimizde bias tahmini yok henuz".
+    # Siralama: EN AZ SAPAN (dusuk |bias|) once, en ustten ilk N secilir;
+    # esitse daha sicak once (tie-break). Sapan esigi (2.5C) KALDIRILDI
+    # (2026-08-11 kullanici karari: "backtest yap, en ustten ilk 15'i sec").
     acc = _city_accuracy(session)
 
-    def _sort_key(item):
-        (code, _metric), fval = item
-        a = acc.get(code)
-        # (bias bilinmiyor mu? 1.0), (ortalama |bias|), (-tahmin degeri)
-        # bias yoksa 2. oncelik buyuk -> sona; bias varsa kucuk deger one.
-        return (0 if a is not None else 1, a if a is not None else 999.0, -fval)
+    candidates = [(kv, acc[kv[0][0]]) for kv in forecasts.items() if kv[0][0] in acc]
+    if not candidates:
+        logger.info("spread: bias verisi olan sehir yok, bet acilmiyor (yeni sehirler atlanir)")
+        return {"placed": 0, "closed": 0, "skipped": 0, "cities": []}
 
-    selected = sorted(forecasts.items(), key=_sort_key)[:max_cities]
+    candidates.sort(key=lambda kv_acc: (kv_acc[1], -kv_acc[0][1]))
+    # Ayni sehir birden fazla metric ile gelirse (temperature_max/min) ilkini
+    # al, digerini atla — portfoy sehir bazinda unique, 15 farkli sehir olur.
+    selected = []
+    seen_codes: set[str] = set()
+    for kv, _a in candidates:
+        code = kv[0][0]
+        if code in seen_codes:
+            continue
+        seen_codes.add(code)
+        selected.append(kv)
+        if len(selected) >= max_cities:
+            break
+    selected_codes = {code for (code, _m), _v in selected}
 
     # Bugunku acik spread betleri -> gunluk limit
     open_spread = (
@@ -198,6 +209,41 @@ def _place_spread_bets_inner(session, target_day) -> dict:
 
     placed = closed = skipped = 0
     cities_used = set()
+
+    # Secili 15 sehir DISINDA kalan sehirlerin (bu hedef gun) acik betlerini kapat.
+    # (2026-08-11 kullanici karari: portfoy ilk 15 sehirle sinirli kalsin;
+    # 16+ sehirde acilan betler test karmasasi yaratiyor, kapatilir.)
+    if selected_codes:
+        lo, hi = _day_range(target_day)
+        out_of_selection = (
+            session.query(Bet)
+            .filter(
+                Bet.status.in_(OPEN_BET_STATUSES),
+                Bet.market_id.in_(
+                    session.query(WeatherMarket.id).filter(
+                        WeatherMarket.target_date >= lo,
+                        WeatherMarket.target_date <= hi,
+                    )
+                ),
+            )
+            .all()
+        )
+        for bet in out_of_selection:
+            if bet.city_code in selected_codes:
+                continue
+            mkt = session.query(WeatherMarket).filter_by(id=bet.market_id).first()
+            if mkt is None:
+                continue
+            from executor.bet_placer import BetPlacer
+
+            cur = float(bet.current_price or bet.entry_price or 0)
+            logger.info(
+                "spread close (out of top-15 selection): %s thr=%s",
+                bet.city,
+                mkt.threshold,
+            )
+            BetPlacer().close_bet_for_rotation(bet, cur, session)
+            closed += 1
 
     for (code, metric), fval in selected:
         city_name = code_name.get(code)

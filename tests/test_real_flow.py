@@ -81,8 +81,21 @@ def _add_portfolio(session, cash=1000.0):
 
 def _seed_market_and_forecast(session, target_day):
     """Market + snapshot + forecast: spread_placer'in ihtiyac duydugu veri."""
-    from database.models import MarketSnapshot, WeatherForecast, WeatherMarket
+    from database.models import HistoricalCalibration, MarketSnapshot, WeatherForecast, WeatherMarket
 
+    # AAA -> gercek LTAC (Ankara) bias olcumu: 0.87 — bias'siz sehir secilmez.
+    session.add(
+        HistoricalCalibration(
+            city_code="AAA",
+            city="Testville",
+            date=datetime(2026, 8, 1),
+            metric="temperature_max",
+            model="gfs_seamless",
+            predicted_value=25.0,
+            actual_value=24.13,
+            bias=0.87,
+        )
+    )
     for thr in range(28, 34):
         mid = f"mkt-{thr}"
         session.add(

@@ -149,11 +149,17 @@ python main.py bot
 - Yeni **2-gun-sonrasi tarih** acildiginda (bot_loop 2-day-ahead tespiti):
   - En son meteo tahmini etrafinda **+/- 3 dereceye** (spread) YES bet acilir.
   - Giris fiyati = **CANLI `weather_markets.yes_price`** (5 dk'da guncellenir; bayat snapshot degil, 2026-08-11).
-  - `0 < entry < 0.95` olan esiklere, esik basina $2 (2026-08-11: ust sinir 0.95).
-  - Tahmini **en yuksek ilk 15 sehir** secilir (en sicak — longshot potansiyeli).
-  - Gunluk **max 100 bet**.
+  - `0 < entry < 0.99` olan esiklere, esik basina $2 (2026-08-11: ust sinir 0.99, fiyat onemsiz).
+  - Tahmini **en az sapan ilk 15 sehir** secilir (tahmini gercege en yakin tutanlar —
+    dusuk |bias|; SICAKLIK DEGIL, 2026-08-11 kullanici karari. 2.5C+ sapan sehirler elenir).
+  - Gunluk **max 350 bet** (3 gun x 15 sehir x 7 esik = 315 + marj; 13 Agustos acilinca
+    da 15 sehir daha acilir, limite takilmaz).
 - **Kayan pencere:** tahmin guncellendiginde (25C -> 27C) yeni merkezin +/-(radius)
   disinda kalan acik esikler **kapatilir**, yeni penceredeki esikler acilir.
+- **Periyodik retry:** Polymarket marketleri zamana yayilarak acildigi icin bot her
+  ~60 dk bir en yeni acik tarih icin spread betlerini tekrar dener — sonradan acilan
+  esikler (orn. Ankara 32C "NEW") de yakalanir. Top-15 disinda kalan sehirlerin acik
+  betleri kapatilir (portfoy 15 sehirle sinirli).
 - Backtest (7 gun, gercek veri): spread=3, max_entry<0.30, RAW -> **+$36,814**,
   %50.6 kazanma, 5/5 gun pozitif. `scripts/backtest_early_spread.py`.
 - **Kalibrasyon spread'te kapatilir** (CALIB +$28k < RAW +$37k) — edge-tabanli
@@ -163,10 +169,10 @@ python main.py bot
 |---|---|---|
 | `BETTING_STRATEGY` | `spread` | `edge` = eski mod |
 | `SPREAD_RADIUS` | `3` | tahmin +/- derece |
-| `SPREAD_MAX_CITIES` | `15` | en sicak ilk N sehir |
-| `SPREAD_MAX_ENTRY` | `0.95` | ust fiyat siniri (0.95 ve ustu acilmaz) |
+| `SPREAD_MAX_CITIES` | `15` | tahmini en az sapan ilk N sehir (sicaklik degil) |
+| `SPREAD_MAX_ENTRY` | `0.99` | ust fiyat siniri (0.99 ve ustu acilmaz) |
 | `SPREAD_STAKE_USD` | `2.0` | esik basina stake |
-| `SPREAD_MAX_BETS_PER_DAY` | `100` | gunluk bet limiti |
+| `SPREAD_MAX_BETS_PER_DAY` | `350` | gunluk bet limiti (3 gun x 15 sehir x 7 = 315 + marj) |
 
 ---
 
