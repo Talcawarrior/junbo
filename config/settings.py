@@ -148,10 +148,6 @@ class StrategyConfig:
     flat_bet_usd: float = 2.0  # Fixed $2 per bet
     daily_loss_limit: float = 0.0  # Disabled: no daily loss circuit breaker
 
-    # ── Tie betting: ayni en yuksek fiyata sahip marketlere ayni anda ac ─
-    tie_bet_enabled: bool = False  # Kapali: gereksiz sermaye bolusu ve maliyet yaratir
-    tie_loser_gap: float = 0.10  # ikiz betlerden biri %10+ one gecerse digerini kapat
-
     # ── Smart rotation: eski bet'i kapatip yenisini ac ─
     rotation_threshold: float = 0.15  # %15+ improvement gerekli rotation icin
     daily_rotation_limit: int = 5  # Gunluk max rotation sayisi (0 = limitsiz)

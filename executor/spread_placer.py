@@ -204,7 +204,6 @@ def _place_spread_bets_inner(session, target_day) -> dict:
         selected.append(kv)
         if len(selected) >= max_cities:
             break
-    selected_codes = {code for (code, _m), _v in selected}
 
     # Bugunku acik spread betleri -> gunluk limit
     open_spread = (
@@ -220,40 +219,10 @@ def _place_spread_bets_inner(session, target_day) -> dict:
     placed = closed = skipped = 0
     cities_used = set()
 
-    # Secili 15 sehir DISINDA kalan sehirlerin (bu hedef gun) acik betlerini kapat.
-    # (2026-08-11 kullanici karari: portfoy ilk 15 sehirle sinirli kalsin;
-    # 16+ sehirde acilan betler test karmasasi yaratiyor, kapatilir.)
-    if selected_codes:
-        lo, hi = _day_range(target_day)
-        out_of_selection = (
-            session.query(Bet)
-            .filter(
-                Bet.status.in_(OPEN_BET_STATUSES),
-                Bet.market_id.in_(
-                    session.query(WeatherMarket.id).filter(
-                        WeatherMarket.target_date >= lo,
-                        WeatherMarket.target_date <= hi,
-                    )
-                ),
-            )
-            .all()
-        )
-        for bet in out_of_selection:
-            if bet.city_code in selected_codes:
-                continue
-            mkt = session.query(WeatherMarket).filter_by(id=bet.market_id).first()
-            if mkt is None:
-                continue
-            from executor.bet_placer import BetPlacer
-
-            cur = float(bet.current_price or bet.entry_price or 0)
-            logger.info(
-                "spread close (out of top-15 selection): %s thr=%s",
-                bet.city,
-                mkt.threshold,
-            )
-            BetPlacer().close_bet_for_rotation(bet, cur, session)
-            closed += 1
+    # Secili 15 sehir disinda kalan sehirlerin acik betleri KAPATILMAZ.
+    # (2026-08-12 kullanici karari: sehir top-15'ten dusse bile acik betler
+    # settlement'a kadar TUTULUR — erken kapanis backtest'i bosariyordu,
+    # kazanan esikler bile satiliyordu. Kapanis yok, sadece yeni bet acilmaz.)
 
     for (code, metric), fval in selected:
         city_name = code_name.get(code)
@@ -300,7 +269,8 @@ def _place_spread_bets_inner(session, target_day) -> dict:
 
                 cur = float(bet.current_price or bet.entry_price or 0)
                 logger.info(
-                    "spread close (window moved): %s %s thr=%s new_window=%s",
+                    "spread close (window moved): bet#%s %s %s thr=%s new_window=%s",
+                    bet.id,
                     city_name,
                     str(target_day),
                     bet_thr,
@@ -403,7 +373,7 @@ def _place_spread_bets_inner(session, target_day) -> dict:
                 placed += 1
                 remaining -= 1
                 cities_used.add(city_name)
-                logger.info("spread open: %s %s %sC entry=%.4f", city_name, str(target_day), thr, entry)
+                logger.info("spread open: bet#%s %s %s %sC entry=%.4f", bet.id, city_name, str(target_day), thr, entry)
             except ValueError as exc:
                 logger.warning("spread debit failed for %s: %s", mkt.id, exc)
                 skipped += 1

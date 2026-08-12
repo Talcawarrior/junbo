@@ -342,9 +342,10 @@ def test_spread_prefers_accurate_city_over_hot():
     assert cities == {"Accville"}, f"SICAK ama sapan sehir degil, dogru sehir secilmeli: {cities}"
 
 
-def test_out_of_selection_bets_closed():
-    """Kullanici karari 2026-08-11: secili ilk 15 sehir disinda kalan sehirlerin
-    (hedef gun) acik betleri kapatilir — portfoy top-15 ile sinirli kalir."""
+def test_out_of_selection_bets_kept_open():
+    """Kullanici karari 2026-08-12: ilk-15 bias SADECE yeni gun acilisinda sehir
+    secer; top-15 disinda kalan sehirlerin ACIK betleri KAPATILMAZ (settlement'a
+    kadar tutulur). Eski davranis (2026-08-11) kapatiyordu — kaldirildi."""
     from database.db import get_session
     from database.models import Bet
     from executor.spread_placer import place_spread_bets
@@ -364,7 +365,7 @@ def test_out_of_selection_bets_closed():
             _add_market(s, "Zzzville", "temperature_max", day, thr, yes_price=0.05, city_code="ZZZ")
         s.commit()
 
-        # once ZZZ bet acilir (manuel eski bet gibi) -> sonra place_spread_bets kapatmali
+        # once ZZZ bet acilir (manuel eski bet gibi) -> sonra place_spread_bets KAPATMAMALI
         from executor.spread_placer import _find_market
 
         m = _find_market(s, "Zzzville", "temperature_max", day, 40)
@@ -395,8 +396,8 @@ def test_out_of_selection_bets_closed():
             bot_config.strategy.spread_max_cities = old
     assert res["placed"] >= 1
     assert zzz_statuses, "ZZZ beti var olmali"
-    assert all(st not in ("placed", "active") for st in zzz_statuses), "top-15 disindaki sehir betleri kapatilmali"
-    assert res["closed"] >= 1
+    assert all(st in ("placed", "active") for st in zzz_statuses), "top-15 disindaki sehir betleri KAPATILMAMALI"
+    assert res["closed"] == 0
 
 
 def test_past_day_no_bets_opened():

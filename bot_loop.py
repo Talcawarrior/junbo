@@ -27,7 +27,6 @@ logger = logging.getLogger("BOT_LOOP")
 # Timeout values (seconds)
 _FETCH_TIMEOUT = 60
 _CYCLE_TIMEOUT = 180
-_CLEANUP_TIMEOUT = 60
 
 # Akilli tarama ayarlari
 _FAST_MODE_MINUTES = 30
@@ -262,7 +261,6 @@ async def scan_and_bet_loop(state):
     )
     from config.settings import bot_config
 
-    stale_check_counter = 0
     last_day = None
     last_open_dates: set = set()
     fast_mode_until = None
@@ -496,15 +494,6 @@ async def scan_and_bet_loop(state):
                     except Exception as e:
                         logger.error("SPREAD periodic retry failed: %s", e)
 
-            # Stale cleanup her 10 dongude
-            stale_check_counter += 1
-            if stale_check_counter >= 10:
-                stale_check_counter = 0
-                try:
-                    await asyncio.wait_for(asyncio.to_thread(_cleanup_stale_bets), timeout=_CLEANUP_TIMEOUT)
-                except Exception as e:
-                    logger.warning("Stale cleanup failed: %s", e)
-
             # DB vs Polymarket karsilastirma: 2 saatte bir
             poly_verify_counter += 1
             if poly_verify_counter >= _POLY_VERIFY_INTERVAL and _verify_poly:
@@ -643,43 +632,6 @@ async def snapshot_loop(state):
         await asyncio.sleep(_SNAPSHOT_INTERVAL)
 
     logger.info("Snapshot loop exited (is_running=%s)", state.is_running)
-
-
-def _cleanup_stale_bets():
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    with get_session() as session:
-        stale = (
-            session.query(Bet)
-            .filter(
-                Bet.status.in_(OPEN_BET_STATUSES),
-                Bet.placed_at < cutoff,
-            )
-            .all()
-        )
-        cancelled = 0
-        for bet in stale:
-            market = session.query(WeatherMarket).filter(WeatherMarket.id == bet.market_id).first()
-            should_cancel = False
-            if not market:
-                should_cancel = True
-            elif market.target_date and (now - market.target_date).total_seconds() > 48 * 3600:
-                should_cancel = True
-
-            if should_cancel:
-                from utils.accounting import credit_sale
-
-                bet.status = "cancelled"
-                bet.settled_at = now
-                bet.close_reason = "stale_cleanup"
-                amount = float(bet.amount or 0)
-                if amount > 0:
-                    credit_sale(session, amount, f"stale_cleanup:bet_{bet.id}")
-                cancelled += 1
-
-        if cancelled > 0:
-            session.commit()
-            logger.info("Stale cleanup: cancelled %d old bets", cancelled)
 
 
 async def _run_daily_maintenance() -> None:

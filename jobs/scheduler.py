@@ -389,18 +389,6 @@ def run_cycle():
             logger.error("Cycle update_prices error: %s", e)
             results.append(f"update_prices error: {e}")
 
-        try:
-            # Tie olarak acilan ikiz betlerden geride kalanini kapat
-            from executor.bet_placer import BetPlacer
-
-            placer = BetPlacer()
-            twin_closed = placer.close_losing_twin_bets()
-            if twin_closed:
-                results.append(f"twin loser close: {twin_closed}")
-        except Exception as e:
-            logger.error("Cycle twin loser close error: %s", e)
-            results.append(f"twin loser close error: {e}")
-
         # Commit all changes atomically at end of cycle.
         # Individual run_* functions that used the shared session
         # skip their own commit (get_session_or doesn't auto-commit

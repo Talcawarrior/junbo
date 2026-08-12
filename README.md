@@ -89,7 +89,7 @@ Log: `data/logs/data_watchdog.log` / `data/logs/db_maintenance.log`.
 - **Uyku/tarama sorunu (2026-08-08):** Windows "Allow wake timers" DC=Disabled, AC="Important only"
   idi → bilgisayar uyurken hicbir task uyanamiyordu (`powercfg /waketimers` bos). Duzeltildi:
   AC+DC=Enable; ayrica **Sleep after AC+DC = Never (0)**, Hibernate = Never — bot loop'lari
-  (tarama, stoploss, hesap) artik kesintisiz calisir. Kontrol: `powercfg /query SCHEME_CURRENT SUB_SLEEP`.
+  (tarama, hesap) artik kesintisiz calisir. Kontrol: `powercfg /query SCHEME_CURRENT SUB_SLEEP`.
 
 ---
 
@@ -150,12 +150,15 @@ python main.py bot
   - En son meteo tahmini etrafinda **+/- 3 dereceye** (spread) YES bet acilir.
   - Giris fiyati = **CANLI `weather_markets.yes_price`** (5 dk'da guncellenir; bayat snapshot degil, 2026-08-11).
   - `0 < entry < 0.30` olan esiklere, esik basina $2 (backtest en iyi config — 2026-08-11).
+    ⚠️ **2026-08-12 backtest taramasi:** 0.30 limiti kazananlarin %65'ini kesiyor (0.30 alti winrate %8.6 vs 0.30 ustu %45). Karar logu 0.99 diyor ama canli config 0.30 — tutarsiz, karar bekliyor.
   - **KAYAN PENCERE:** merkez kayinca (meteo tahmini guncellenir) eski pencerenin
     disinda kalan esikler **o anki fiyattan kapatilir**, yeni pencereye giren eksik
     esikler acilir. Tam-7 zorunlulugu YOKTUR (backtest karliligi dusurdugunden
     kaldirildi; merkez marketi olmasa da acilabilen ayaklar acilir).
   - Tahmini **en az sapan ilk 15 sehir** secilir (tahmini gercege en yakin tutanlar —
     dusuk |bias|; SICAKLIK DEGIL, 2026-08-11 kullanici karari. Bias'siz yeni sehir acilmaz).
+    **Top-15 sehir secimi SADECE yeni gun acilisinda kullanilir; sehir top-15'ten
+    dusse bile acik betleri KAPATILMAZ (2026-08-12 kullanici karari).**
   - Gunluk **max 350 bet** (3 gun x 15 sehir x 7 esik = 315 + marj; 13 Agustos acilinca
     da 15 sehir daha acilir, limite takilmaz).
 - **ERKEN GIRIS (0-13 UTC hafif probe):** Snapshot analizi ilk market acilislarinin
@@ -170,9 +173,11 @@ python main.py bot
 - **Periyodik retry:** Polymarket marketleri zamana yayilarak acildigi icin bot her
   ~60 dk bir en yeni acik tarih icin spread betlerini tekrar dener — sonradan acilan
   esikler (orn. Ankara 32C "NEW") de yakalanir. Top-15 disinda kalan sehirlerin acik
-  betleri kapatilir (portfoy 15 sehirle sinirli).
+  betleri KAPATILMAZ (2026-08-12 kullanici karari — kazanan esikler bile satiliyordu).
 - Backtest (7 gun, gercek veri): spread=3, max_entry<0.30, RAW -> **+$36,814**,
   %50.6 kazanma, 5/5 gun pozitif. `scripts/backtest_early_spread.py`.
+  **2026-08-12 taramasi:** en karlı senaryo spread=3 + KAYDIRMASIZ (acilan bet
+  settlement'a kadar) + tum fiyatlar = **+$74.26**; pencere kaydirmasi her config'de zarar.
 - **Kalibrasyon spread'te kapatilir** (CALIB +$28k < RAW +$37k) — edge-tabanli
   stratejide degerli oldugu icin calculator'da aktif kalir.
 
@@ -323,7 +328,9 @@ Detaylar icin `GELISTIRICI_NOTLARI.md`'ya bakin (bolum 12: dogrulanmis davranis 
 - **2026-08-10 (besinci tur):** **Spread stratejisi ANA MOD** — `executor/spread_placer.py`: yeni 2-gun-sonrasi tarih acildiginda en son meteo tahmini +/-3 dereceye, ilk snapshot fiyatindan, en sicak ilk 15 sehre YES bet (gunluk 30 limit). **Kayan pencere:** tahmin guncellenince yeni pencerenin disinda kalan esikler kapatilir. `BETTING_STRATEGY=spread` (varsayilan) / `edge` (eski mod, geri donulebilir). Test: `tests/test_spread_placer.py`.
 - **2026-08-10 (altinci tur):** **Spread commit bug'i duzeltildi** — `place_spread_bets` `with get_session()` wrapper'a cekildi (bet'ler commit edilmiyordu -> ayni markete dup bet). `snapshot_job` `YES_PRICE_MIN` 0.005 -> **0.0005** (0.005 alti longshot marketler artik fiyat gecmisinde); `_first_snapshot_price` snapshot yoksa market yes_price'a fallback. 11-12 Agustos icin catch-up: ~190 spread bet acildi, dup'lar kayan pencere ile temizlendi.
 - **2026-08-11:** **SPREAD_MAX_ENTRY 0.30 -> 0.99** (kullanici karari). **Spread modunda stop-loss devre disi** (`run_risk_management` spread'de SL atlar). **Portfolio yoksa spread placer otomatik olusturur** (0-cash sessiz skip bug'i). SPREAD_MAX_BETS_PER_DAY kalici **100**. Tam suite bot kapaliyken kosulmali (bot + test ayni anda production DB'yi bozuyordu).
-- **2026-08-12:** **Erken kapanis mekanizmalari komple kaldirildi** (kullanici karari: "sistemde hicbir yerde stoploss/take-profit/partial-TP ve benzeri kalmayacak"). `RiskConfig`, `run_risk_management`, `check_stop_loss`, `check_take_profit`, `check_trailing_stop`, `check_time_decay`, `check_early_exit`, `check_rebalance`, `check_model_reversal`, `_reopen_after_stop_loss` ve `partial_tp_done` kolonu kaldirildi. Betler yalnizca settlement'ta kapanir (backtest ile ayni davranis). SL/TP test dosyalari (test_active_risk_management, test_take_profit_comprehensive, test_risk_behavior, edge/test_sl_reopen_chain, scripts/replay_test) silindi. Suite: **635 passed, 7 skipped**.
+- **2026-08-12:** **Erken kapanis mekanizmalari komple kaldirildi** (kullanici karari: "sistemde hicbir yerde stoploss/take-profit/partial-TP ve benzeri kalmayacak"). `RiskConfig`, `run_risk_management`, `check_stop_loss`, `check_take_profit`, `check_trailing_stop`, `check_time_decay`, `check_early_exit`, `check_rebalance`, `check_model_reversal`, `_reopen_after_stop_loss` ve `partial_tp_done` kolonu kaldirildi. Betler yalnizca settlement'ta kapanir (backtest ile ayni davranis). SL/TP test dosyalari (test_active_risk_management, test_take_profit_comprehensive, test_risk_behavior, edge/test_sl_reopen_chain, scripts/replay_test) silindi.
+- **2026-08-12 (ikinci tur):** **Top-15 kapatma KALDIRILDI** (kullanici karari: "ilk 15 bias sadece yeni gun aciliminda kullanilacak, kapatma yapilmayacak"). Sehir top-15'ten dusse bile acik betler settlement'a kadar TUTULUR — sadece yeni bet acilmaz. Bu, Istanbul 13 Agustos betlerinin tamaminin "out of top-15 selection" ile satilmasini (kazanan esikler dahil) onler. Kullanilmayan `tie_loser` (`close_losing_twin_bets`), `stale_cleanup` (`_cleanup_stale_bets`) ve tarihsel `24h_rule` mekanizmalari da silindi (kodda kapanis uretmiyorlardi). Bet loglarina `bet#ID` eklendi (izlenebilirlik).
+- **2026-08-12 (ucuncu tur):** **Backtest dogrulamasi** — `max_entry` taramasi (0.29-0.12) ve spread (3/5/7) x kaydirma (shift/noshift) kombinasyonlarinin tamaminda EN KARLI senaryo: **spread=3 + KAYDIRMASIZ (acilan bet settlement'a kadar) + tum fiyatlar = +$74.26**. `spread_max_entry=0.30` kazananlarin %65'ini kesiyor (0.30 alti winrate %8.6 vs 0.30 ustu %45) — bot'un canli config'i hala 0.30, karar logu (0.99) ile celisiyor.
 
 ---
 

@@ -737,65 +737,6 @@ class BetPlacer:
         )
         return placed
 
-    def close_losing_twin_bets(self, session=None) -> int:
-        """Tie olarak acilan ikiz betlerden geride kalanini kapat.
-
-        Ayni (city, target_date, metric) grubunda birden fazla acik bet varsa
-        (tie acilimi nedeniyle) ve en yuksek fiyatli ile arasindaki fark
-        ``tie_loser_gap``'i asiyorsa, geride olan bet kapatilir. Boylece sona
-        dogru biri one gecince digeri otomatik satilir.
-        """
-        from collections import defaultdict
-
-        if not bool(getattr(bot_config.strategy, "tie_bet_enabled", True)):
-            return 0
-
-        gap = float(getattr(bot_config.strategy, "tie_loser_gap", 0.10) or 0.10)
-        if not gap or gap <= 0:
-            return 0
-
-        closed = 0
-        with get_session() as s:
-            active = s.query(Bet).filter(Bet.status.in_(OPEN_BET_STATUSES), Bet.side == "YES").all()
-            if not active:
-                return 0
-
-            # (city, date, metric) -> [(bet, market)]
-            groups: dict[tuple, list] = defaultdict(list)
-            for b in active:
-                wm = s.query(WeatherMarket).filter_by(id=b.market_id).first()
-                if not wm or not wm.target_date:
-                    continue
-                td = wm.target_date
-                if getattr(td, "tzinfo", None):
-                    td = td.replace(tzinfo=None)
-                key = (wm.city, td, wm.metric or "unknown")
-                cur = float(wm.yes_price or 0)
-                groups[key].append((b, wm, cur))
-
-            for key, entries in groups.items():
-                if len(entries) < 2:
-                    continue
-                entries.sort(key=lambda x: x[2], reverse=True)
-                leader_price = entries[0][2]
-                for bet, wm, cur in entries[1:]:
-                    if leader_price - cur >= gap:
-                        logger.info(
-                            "Twin loser close: %s %s %s cur=%.4f leader=%.4f gap=%.2f",
-                            key[0],
-                            str(key[1].date()),
-                            key[2],
-                            cur,
-                            leader_price,
-                            leader_price - cur,
-                        )
-                        self.close_bet_for_rotation(bet, cur, s)
-                        closed += 1
-
-        if closed:
-            logger.info("close_losing_twin_bets: %d positions closed", closed)
-        return closed
-
     def open_bet_on_market(self, market: WeatherMarket, session) -> Bet | None:
         """Dogrudan bir market'e bet ac. Analysis gerektirmez."""
 
@@ -1056,7 +997,8 @@ class BetPlacer:
         session.commit()
 
         logger.info(
-            "Bet closed (rotation): %s %s $%.2f -> $%.2f (pnl=$%.2f)",
+            "Bet closed (rotation): bet#%s %s %s $%.2f -> $%.2f (pnl=$%.2f)",
+            bet.id,
             bet.city,
             bet.market_id,
             entry_cost,
