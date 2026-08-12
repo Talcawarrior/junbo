@@ -1,21 +1,23 @@
 """Spread betting placer — ana mod (BETTING_STRATEGY=spread).
 
 Market acilir acilmaz, en son meteo tahmini etrafinda +/- ``spread_radius``
-dereceye YES bet acar. Tahmin guncellendiginde (kayan pencere) yeni merkezin
-+/-(radius) disinda kalan eski esikler kapatilir.
+dereceye YES bet acar. Acilan betler settlement'a kadar TUTULUR.
 
 Akis:
   1. Hedef gun icin (city, metric) basina EN SON meteo tahminini oku
      (weather_forecasts, fetched_at desc).
-  2. "Tahmini en yuksek" ilk ``spread_max_cities`` sehri sec.
+  2. "Tahmini en yuksek" ilk ``spread_max_cities`` sehri sec (SADECE acilis
+     icin; sehir top-15'ten dusse bile acik betler kapatilmaz).
   3. Her sehir icin center = round(tahmin), hedef esikler [center-radius ..
      center+radius].
   4. Her esik icin: market acik + CANLI yes_price < spread_max_entry +
      gunluk limit asilmadiysa -> YES bet ac (stake spread_stake_usd).
      (2026-08-11: snapshot fiyati degil, run_fetch_markets'in 5 dk'da bir
      guncelledigi canli weather_markets.yes_price kullanilir.)
-  5. KAYAN PENCERE: tahmin degisti -> eski pencerede acik olup YENI pencere
-     disinda kalan bet'ler kapatilir (eski spreadden cikanlar).
+  5. KAYDIRMA KAPALI (2026-08-12 kullanici karari): tahmin degisse bile eski
+     penceredeki acik betler kapatilmaz. Backtest: kaydirma her config'de
+     zarar (spread=3 shift -$26 vs noshift +$74); kapanis kayiplari kazanan
+     esikleri bile yiyordu.
 
 Eski edge-tabanli mod (BETTING_STRATEGY=edge) degistirilmez — bet_placer.py
 korunur; bu modul yalnizca spread modunda cagrilir.
@@ -234,50 +236,10 @@ def _place_spread_bets_inner(session, target_day) -> dict:
         center = round(fval)
         targets = set(range(center - radius, center + radius + 1))
 
-        # Kayan pencere: bu (city, day) icin acik betlerden yeni pencere
-        # disinda kalanlari kapat. Bet'in marketinin target_date'i bu gun
-        # olmalidir (placed_at degil).
-        lo, hi = _day_range(target_day)
-        day_market_ids = {
-            str(m.id)
-            for m in (
-                session.query(WeatherMarket)
-                .filter(
-                    WeatherMarket.city == city_name,
-                    WeatherMarket.target_date >= lo,
-                    WeatherMarket.target_date <= hi,
-                )
-                .all()
-            )
-        }
-        active_bets = (
-            session.query(Bet)
-            .filter(
-                Bet.status.in_(OPEN_BET_STATUSES),
-                Bet.city == city_name,
-                Bet.market_id.in_(day_market_ids) if day_market_ids else Bet.market_id.isnot(None),
-            )
-            .all()
-        )
-        for bet in active_bets:
-            mkt = session.query(WeatherMarket).filter_by(id=bet.market_id).first()
-            if mkt is None:
-                continue
-            bet_thr = float(mkt.threshold or 0)
-            if bet_thr not in targets:
-                from executor.bet_placer import BetPlacer
-
-                cur = float(bet.current_price or bet.entry_price or 0)
-                logger.info(
-                    "spread close (window moved): bet#%s %s %s thr=%s new_window=%s",
-                    bet.id,
-                    city_name,
-                    str(target_day),
-                    bet_thr,
-                    sorted(targets),
-                )
-                BetPlacer().close_bet_for_rotation(bet, cur, session)
-                closed += 1
+        # KAYDIRMA KAPALI (2026-08-12 kullanici karari): merkez kayarsa bile
+        # acilan betler settlement'a kadar TUTULUR. Backtest: kaydirma her
+        # config'de zarar (spread=3 shift -26 vs noshift +74); kapanis kayiplari
+        # kazanan esikleri bile yiyordu. Sadece yeni esikler acilir.
 
         # Yeni esikler
         for thr in sorted(targets):
@@ -333,7 +295,6 @@ def _place_spread_bets_inner(session, target_day) -> dict:
                 skipped += 1
                 continue
 
-            from executor.bet_placer import BetPlacer
             from utils.formulas import bet_shares, polymarket_fee_from_stake
 
             fill_price = max(0.01, min(0.99, round(entry, 4)))

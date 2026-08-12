@@ -240,7 +240,10 @@ def test_place_spread_bets_creates_portfolio_when_missing():
     assert res["placed"] >= 1
 
 
-def test_kayan_pencere_closes_out_of_window():
+def test_merkez_kayinca_betler_acik_kalir():
+    """Kullanici karari 2026-08-12: pencere kaydirmasi KAPATILDI. Tahmin kayarsa
+    (center 25 -> 28) eski penceredeki acik betler KAPATILMAZ — settlement'a kadar
+    tutulur. Backtest: kaydirma her config'de zarar (shift -26 vs noshift +74)."""
     from database.db import get_session
     from database.models import Bet
     from executor.spread_placer import place_spread_bets
@@ -261,14 +264,14 @@ def test_kayan_pencere_closes_out_of_window():
         opened = s.query(Bet).filter(Bet.status == "placed").count()
         assert opened >= 3
 
-        # tahmin 28'e kaydi -> window 25..31; 22,23,24 kapanmali
+        # tahmin 28'e kaydi -> window 25..31; 22,23,24 ESCKI pencerede ama KAPANMAMALI
         _add_forecast(s, "AAA", "temperature_max", day, 28.0, datetime(2026, 8, 2, 10, 0))
         s.commit()
         res = place_spread_bets(day, session=s)
         s.commit()
         closed = s.query(Bet).filter(Bet.status.in_(["closed", "cancelled"])).all()
-    assert res["closed"] >= 1
-    assert len(closed) >= 1
+    assert res["closed"] == 0
+    assert len(closed) == 0
 
 
 def _add_calibration(session, city_code, bias):
