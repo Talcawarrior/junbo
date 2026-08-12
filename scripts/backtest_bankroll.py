@@ -48,6 +48,13 @@ def main() -> int:
     parser.add_argument("--spread", type=int, default=SPREAD, help="center +/- derece")
     parser.add_argument("--fee-rate", type=float, default=FEE_RATE)
     parser.add_argument("--gas-usd", type=float, default=GAS_USD)
+    parser.add_argument(
+        "--orderbook",
+        action="store_true",
+        help="GERCEK CLOB orderbook (orderbook.db) fiyati kullan: fiyat=best_ask, "
+        "derinlik<1.5$ ise bet atlanir. Varsayilan: 30dk snapshot ilk fiyati.",
+    )
+    parser.add_argument("--stake", type=float, default=1.0, help="bet basina stake (USD)")
     args = parser.parse_args()
 
     adb = sqlite3.connect(ACTUALS_DB)
@@ -97,24 +104,77 @@ def main() -> int:
             fc[key][source] = float(pval)
 
     # fiyat gecmisi per (city, day, thr) -> [(snapshot_time, yes_price)] (kayan pencere icin)
-    cur.execute(
-        "SELECT city, target_date, threshold, snapshot_time, yes_price "
-        "FROM market_snapshots ORDER BY snapshot_time ASC"
-    )
     price_series: dict[tuple, list] = defaultdict(list)
-    for city, tdate, thr, stime, yp in cur.fetchall():
-        td = str(tdate)[:10] if tdate else None
-        if not td or thr is None:
-            continue
+
+    if args.orderbook:
+        # GERCEK CLOB orderbook (orderbook.db): market_id -> (city, day, thr) map'i,
+        # fiyat = best_ask, derinlik < 1.5$ ise atla (slippage/likidite gercekci).
+        cur.execute(
+            "SELECT id, city, metric, target_date, threshold FROM weather_markets "
+            "WHERE threshold IS NOT NULL AND target_date IS NOT NULL"
+        )
+        mkt_key = {}
+        for mid, city, metric, tdate, thr in cur.fetchall():
+            td = str(tdate)[:10] if tdate else None
+            if not td or city is None or thr is None:
+                continue
+            mkt_key[str(mid)] = (city, td, float(thr))
+        db.close()
+        import shutil
+        import tempfile
+
+        ob_path = os.path.join(_REPO_ROOT, "data", "orderbook.db")
+        tmp_ob = None
         try:
-            p = float(yp)
-            if 0 < p < 1:
-                price_series[(city, td, float(thr))].append((str(stime).replace("T", " ")[:19], p))
-        except (TypeError, ValueError):
-            continue
+            fd, tmp_ob = tempfile.mkstemp(suffix=".db")
+            os.close(fd)
+            shutil.copy2(ob_path, tmp_ob)
+            ob = sqlite3.connect(tmp_ob, timeout=15)
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARNING: orderbook.db kopyalanamadi ({exc}) — snapshot fallback")
+            ob = None
+        if ob is not None:
+            try:
+                for mid, ask, askd, stime in ob.execute(
+                    "SELECT market_id, best_ask, ask_depth_usd, snapshot_time "
+                    "FROM orderbook_snapshots WHERE best_ask IS NOT NULL"
+                ).fetchall():
+                    key = mkt_key.get(str(mid))
+                    if key is None:
+                        continue
+                    try:
+                        p = float(ask)
+                        d = float(askd or 0)
+                        if 0 < p < 1 and d >= 1.5:
+                            t = str(stime).replace("T", " ")[:19]
+                            price_series[key].append((t, p))
+                    except (TypeError, ValueError):
+                        continue
+            finally:
+                ob.close()
+                if tmp_ob and os.path.exists(tmp_ob):
+                    try:
+                        os.unlink(tmp_ob)
+                    except OSError:
+                        pass
+    else:
+        cur.execute(
+            "SELECT city, target_date, threshold, snapshot_time, yes_price "
+            "FROM market_snapshots ORDER BY snapshot_time ASC"
+        )
+        for city, tdate, thr, stime, yp in cur.fetchall():
+            td = str(tdate)[:10] if tdate else None
+            if not td or thr is None:
+                continue
+            try:
+                p = float(yp)
+                if 0 < p < 1:
+                    price_series[(city, td, float(thr))].append((str(stime).replace("T", " ")[:19], p))
+            except (TypeError, ValueError):
+                continue
+        db.close()
     for k in price_series:
         price_series[k].sort(key=lambda x: x[0])
-    db.close()
 
     # forecast guncelleme gecmisi per (city, day): fetched_at -> ensemble merkezi
     # (kayan pencere: merkez kayinca eski uclar kapatilir, yeniler acilir)
@@ -150,7 +210,7 @@ def main() -> int:
     previous_day_loss = False
 
     print(
-        f"Baslangic: {bankroll}$ | stake=1$ | en az sapan {args.bias_top} sehir | "
+        f"Baslangic: {bankroll}$ | stake={args.stake}$ | en az sapan {args.bias_top} sehir | "
         f"max_entry<{args.max_entry} spread={args.spread} | fee={args.fee_rate} gas={args.gas_usd}"
     )
     print(
@@ -159,7 +219,7 @@ def main() -> int:
     )
 
     for day in sorted(by_day)[-args.days :]:
-        stake = 1.0  # kullanici karari: sabit 1$
+        stake = args.stake  # kullanici karari: sabit stake
         cities = by_day[day]
         cost_per_bet = stake + stake * args.fee_rate * (1 - 0.05) + args.gas_usd
         max_openable = int((bankroll * EXPOSURE_PCT) / (cost_per_bet * BETS_PER_CITY))
