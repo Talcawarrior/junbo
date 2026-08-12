@@ -58,6 +58,28 @@ def _price_at(series: list[tuple[str, float]], ts: str) -> float | None:
     return best
 
 
+def _entry_cost(entry: float, fee_rate: float, gas_usd: float) -> float:
+    """Bir betin acilis maliyeti: STAKE + taker fee + gas.
+    fee = stake x fee_rate x (1-entry). 2026-08-11 kullanici: kayip 2$ degil
+    2.10$ cunku fee ve gas stake'in UZERINE biner."""
+    fee = STAKE * fee_rate * (1.0 - entry) if fee_rate > 0 else 0.0
+    return STAKE + fee + gas_usd
+
+
+def _close_pnl(entry: float, exit_price: float, fee_rate: float, gas_usd: float) -> float:
+    """Kapanis (rotasyon) PnL: proceeds - toplam acilis maliyeti (stake+fee+gas)."""
+    proceeds = (STAKE / entry) * exit_price
+    return proceeds - _entry_cost(entry, fee_rate, gas_usd)
+
+
+def _settle_pnl(entry: float, hit: bool, fee_rate: float, gas_usd: float) -> float:
+    """Settlement PnL: kazaninca payout - maliyet; kaybedince -maliyet."""
+    cost = _entry_cost(entry, fee_rate, gas_usd)
+    if hit and entry > 0:
+        return (STAKE / entry) - cost
+    return -cost
+
+
 def main() -> int:
     import argparse
 
@@ -97,6 +119,20 @@ def main() -> int:
         help="GERCEK CLOB orderbook verisi kullan (orderbook.db): fiyat = best_ask, "
         "derinlik(ask_depth_usd) < 2$ ise bet atlanir (slippage/likidite gercekci). "
         "Varsayilan: 30dk snapshot fiyati (market_snapshots). 2026-08-11.",
+    )
+    parser.add_argument(
+        "--fee-rate",
+        type=float,
+        default=0.05,
+        help="Polymarket taker fee orani (varsayilan 0.05 = %%5). fee = stake x fee_rate x (1-entry). "
+        "0 verilirse fee devre disi.",
+    )
+    parser.add_argument(
+        "--gas-usd",
+        type=float,
+        default=0.10,
+        help="Islem basina Polygon gas maliyeti USD (varsayilan 0.10, settings gas_cost_usd ile senkron). "
+        "0 verilirse gas devre disi.",
     )
     args = parser.parse_args()
 
@@ -294,8 +330,7 @@ def main() -> int:
                         if p is None:
                             p = open_pos[thr]
                         entry = open_pos[thr]
-                        shares = STAKE / entry
-                        pnl = shares * p - STAKE
+                        pnl = _close_pnl(entry, p, args.fee_rate, args.gas_usd)
                         pnl_total += pnl
                         closed_early += 1
                         per_day[td]["closed"] += 1
@@ -317,9 +352,7 @@ def main() -> int:
                         if p is None:
                             p = open_pos[thr]  # fiyat yoksa entry ile kapat (tarafsiz)
                         entry = open_pos[thr]
-                        shares = STAKE / entry
-                        proceeds = shares * p
-                        pnl = proceeds - STAKE  # entry fee yok sayildi
+                        pnl = _close_pnl(entry, p, args.fee_rate, args.gas_usd)
                         pnl_total += pnl
                         closed_early += 1
                         per_day[td]["closed"] += 1
@@ -350,13 +383,12 @@ def main() -> int:
             total += 1
             per_day[td]["bets"] += 1
             per_city[city_name]["bets"] += 1
+            gain = _settle_pnl(entry, hit, args.fee_rate, args.gas_usd)
             if hit:
-                gain = (1.0 - entry) * STAKE / entry if entry > 0 else -STAKE
                 won += 1
                 per_day[td]["win"] += 1
                 per_city[city_name]["win"] += 1
             else:
-                gain = -STAKE
                 lost += 1
                 per_day[td]["loss"] += 1
                 per_city[city_name]["loss"] += 1
@@ -369,7 +401,8 @@ def main() -> int:
     shift = "NO-SHIFT" if args.no_shift else "SHIFT"
     bias = f" bias-top={args.bias_top}" if args.bias_top > 0 else ""
     src = " ORDERBOOK" if args.orderbook else ""
-    label = f"rolling-window spread={args.spread} max_entry<{args.max_entry} {wlabel} {shift}{bias}{src}"
+    cost = f" fee={args.fee_rate} gas=${args.gas_usd:.2f}"
+    label = f"rolling-window spread={args.spread} max_entry<{args.max_entry} {wlabel} {shift}{bias}{src}{cost}"
     print(f"\n=== BACKTEST: {label} ===")
     print(f"bets={total} win={won} loss={lost} closed_early={closed_early} win-rate={won / max(total, 1) * 100:.1f}%")
     print(f"TOTAL PnL (${STAKE}/bet): ${pnl_total:.2f}  avg=${pnl_total / max(total, 1):.3f}/bet")

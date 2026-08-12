@@ -265,3 +265,39 @@ def test_probe_new_target_date_api_failure(monkeypatch):
     new_date, trigger = bot_loop._probe_new_target_date(date(2026, 8, 12))
     assert trigger is False
     assert new_date is None
+
+
+def test_get_open_target_dates_excludes_past(monkeypatch):
+    """2026-08-12 bugfix: gecmis gun (bugun oncesi) marketleri 'yeni tarih'
+    sayilmaz — +['2026-08-10'] yanlis pozitif FAST mode tetikliyordu."""
+    from bot_loop import _get_open_target_dates
+    from database.db import get_session
+    from database.models import WeatherMarket
+    from datetime import timedelta
+
+    today = (datetime.now(timezone.utc) + timedelta(hours=0)).date()
+    past_day = today - timedelta(days=1)
+    future_day = today + timedelta(days=2)
+
+    with get_session() as s:
+        s.query(WeatherMarket).delete()
+        # gecmis + bugun + gelecek market
+        for i, d in enumerate([past_day, today, future_day]):
+            s.add(
+                WeatherMarket(
+                    id=f"past-test-{i}",
+                    question="T?",
+                    city="Testville",
+                    city_code="AAA",
+                    metric="temperature_max",
+                    threshold=30.0,
+                    target_date=datetime(d.year, d.month, d.day, 12, 0),
+                    status="open",
+                    yes_price=0.05,
+                    no_price=0.95,
+                )
+            )
+        s.commit()
+        dates = _get_open_target_dates()
+    assert past_day not in dates, "gecmis gun dahil edilmemeli (settlement pending marketler)"
+    assert today in dates and future_day in dates

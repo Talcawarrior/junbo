@@ -72,19 +72,24 @@ def _get_market_count() -> int:
 
 
 def _get_open_target_dates() -> set:
-    """Acik marketlerin hedef TARIH (takvim gunu) kumesi.
+    """Acik marketlerin hedef TARIH (takvim gunu) kumesi — sadece BUGUN ve sonrasi.
 
     2-gun-sonrasi taramasi TARIH uzerinden yapilir: scan loop, acik
     marketlerin en guncel tarihinin ilerleyip ilerlemedigini takip eder.
     Orn. acik tarihler 18-19-20/7 iken 21/7 belirirse (gece yarisindan
     saatler sonra bile) fiyat poller'i 1 dakikaya alinir. Mevcut acik
     tarih degismezse (hala 18-19-20/7) 5 dk'da kalinir.
+
+    GECMIS tarihler (bugun oncesi) DAHIL EDILMEZ: settlement pending olan
+    eski gun marketleri hala open gorunebilir ama "yeni tarih" sayilmamali
+    (2026-08-12: +['2026-08-10'] yanlis pozitif FAST mode tetikliyordu).
     """
+    today = datetime.now(timezone.utc).replace(tzinfo=None).date()
     dates: set = set()
     with get_session() as db:
         for row in db.query(WeatherMarket.target_date).filter(WeatherMarket.status == "open").all():
             td = row[0]
-            if td is not None:
+            if td is not None and td.date() >= today:
                 dates.add(td.date())
     return dates
 
