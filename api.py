@@ -224,28 +224,12 @@ def get_status():
             )
             .scalar()
         ) or 0.0
-        # Daily PnL'ye partial TP'leri de ekle
-        daily_partial_tp = (
-            db.query(func.coalesce(func.sum(Bet.realized_pnl), 0.0))
-            .filter(
-                Bet.status.in_(OPEN_BET_STATUSES),
-                Bet.partial_tp_done.is_(True),
-                Bet.placed_at >= _today_start,
-            )
-            .scalar()
-        ) or 0.0
-        daily_pnl = round(daily_pnl + daily_partial_tp, 2)
+        daily_pnl = round(daily_pnl, 2)
 
         realized_pnl_db = (
             db.query(func.coalesce(func.sum(Bet.pnl), 0.0)).filter(Bet.status.in_(_closed_statuses)).scalar()
         ) or 0.0
-        # Partial TP: open betlerdeki realized_pnl'yi de ekle (partial_tp_done=True)
-        partial_tp_realized = (
-            db.query(func.coalesce(func.sum(Bet.realized_pnl), 0.0))
-            .filter(Bet.status.in_(OPEN_BET_STATUSES), Bet.partial_tp_done.is_(True))
-            .scalar()
-        ) or 0.0
-        realized_pnl_db = round(realized_pnl_db + partial_tp_realized, 2)
+        realized_pnl_db = round(realized_pnl_db, 2)
 
         # 2. Unrealized PnL (Open bets)
         open_statuses = OPEN_BET_STATUSES
@@ -274,7 +258,6 @@ def get_status():
                     "current_price": float(bet.current_price or bet.entry_price or 0),
                     "unrealized_pnl": float(bet.unrealized_pnl or 0),
                     "realized_pnl": float(bet.realized_pnl or 0),
-                    "partial_tp_done": bool(bet.partial_tp_done or False),
                     "covered_fraction": float(bet.covered_fraction or 0.0),
                     "edge": float(bet.expected_value or 0) * 100,
                     "shares": float(bet.shares or 0),
@@ -298,12 +281,7 @@ def get_status():
         closed_realized = (
             db.query(func.coalesce(func.sum(Bet.realized_pnl), 0.0)).filter(Bet.status.in_(_closed_statuses)).scalar()
         ) or 0.0
-        closed_partial_tp = (
-            db.query(func.coalesce(func.sum(Bet.realized_pnl), 0.0))
-            .filter(Bet.status.in_(OPEN_BET_STATUSES), Bet.partial_tp_done.is_(True))
-            .scalar()
-        ) or 0.0
-        realized_pnl_db = round(float(closed_realized) + float(closed_partial_tp), 2)
+        realized_pnl_db = round(float(closed_realized), 2)
 
         # 2) "Kapali+Acik PnL" ve "Toplam PnL": realized + unrealized
         equity_cash = (float(pf.cash_balance or 0.0) if pf else 0.0) + float(exposure_db) + float(unrealized_pnl_db)
@@ -503,8 +481,6 @@ def get_status():
             "limits": {
                 "max_bet_pct": state.config.MAX_BET_PCT * 100,
                 "max_exposure_pct": state.config.TOTAL_EXPOSURE_PCT * 100,
-                "daily_stop_loss_pct": 0,
-                "daily_stop_loss_enabled": False,
                 "city_cap": state.config.CITY_CAP,
             },
             "metrics": {
@@ -760,7 +736,6 @@ def get_signals():
                     "stake_amount": bet.amount or bet.stake_amount,
                     "unrealized_pnl": float(bet.unrealized_pnl or 0.0),
                     "realized_pnl": float(bet.realized_pnl or 0.0),
-                    "partial_tp_done": bool(bet.partial_tp_done or False),
                     "covered_fraction": float(bet.covered_fraction or 0.0),
                     "fair_value": fair_value,
                     "edge": live_edge,
@@ -954,15 +929,6 @@ def get_history():
         )
         avg_edge = float(avg_edge_q or 0.0)
 
-        # Partial TP: open betlerde partial_tp_done=True olanlar (islem gecmisinde goster)
-        partial_tp_bets = (
-            db.query(Bet)
-            .filter(Bet.status.in_(OPEN_BET_STATUSES), Bet.partial_tp_done.is_(True))
-            .order_by(Bet.placed_at.desc())
-            .limit(100)
-            .all()
-        )
-
         # History list: all settled + closed_early + closed (most recent 300)
         all_closed_statuses = ["settled", "won", "lost", "closed_early", "closed"]
         # Use coalesce(settled_at, closed_at) for correct ordering
@@ -992,17 +958,7 @@ def get_history():
             edge_pct = round((analysis.edge or 0) * 100, 2) if analysis and analysis.edge else None
             # Determine exit type code from status + close_reason
             if bet.status == "closed_early" and bet.close_reason:
-                cr = bet.close_reason.lower()
-                if cr.startswith("take_profit"):
-                    exit_type = "TP"
-                elif cr.startswith("stop_loss"):
-                    exit_type = "SL"
-                elif cr.startswith("trailing_stop"):
-                    exit_type = "TS"
-                elif cr.startswith("time_decay"):
-                    exit_type = "TD"
-                else:
-                    exit_type = "OT"
+                exit_type = "OT"
             elif bet.status == "closed" and bet.close_reason:
                 cr = bet.close_reason.lower()
                 if cr == "rotation":
@@ -1032,34 +988,6 @@ def get_history():
                     "exit_type": exit_type,
                 }
             )
-        # Partial TP entries: open betlerde partial_tp_done=True
-        partial_tp_count = 0
-        partial_tp_pnl = 0.0
-        for bet in partial_tp_bets:
-            pnl = float(bet.realized_pnl or 0.0)
-            stake = float(bet.amount or 0.0)
-            roi = roi_pct(pnl, stake)
-            partial_tp_pnl += pnl
-            partial_tp_count += 1
-            history.append(
-                {
-                    "id": bet.id,
-                    "city": bet.city,
-                    "strike_temp": float(bet.strike_temp) if bet.strike_temp else None,
-                    "outcome": bet.side or "YES",
-                    "entry_price": bet.entry_price,
-                    "stake_amount": stake,
-                    "realized_pnl": pnl,
-                    "roi": round(roi, 2),
-                    "edge": None,
-                    "result": "PARTIAL_TP",
-                    "placed_at": bet.placed_at.isoformat() if bet.placed_at else None,
-                    "settled_at": None,
-                    "closed_at": None,
-                    "exit_type": "PT",
-                }
-            )
-
         win_rate = win_rate_pct(total_won, total_won + total_lost)
         overall_roi = roi_pct(total_pnl_all, total_stake_all)
         profit_factor = round(total_win_pnl / total_loss_pnl, 2) if total_loss_pnl > 0 else 0.0
@@ -1107,8 +1035,6 @@ def get_history():
                 "total_loss_pnl": round(total_loss_pnl, 2),
                 "profit_factor": profit_factor,
                 "avg_edge": round(avg_edge * 100, 2) if avg_edge else 0.0,
-                "partial_tp_count": partial_tp_count,
-                "partial_tp_pnl": round(partial_tp_pnl, 2),
                 "roi_by_price_band": roi_by_price_band,
             },
         }
@@ -1488,25 +1414,22 @@ def get_health_check():
         roi_all = roi_pct(total_pnl_all_health, total_stake_all_health)
 
         # 4b. Exit type breakdown for wins/losses (donut charts)
-        exit_type_map = {
-            "take_profit": "TP",
-            "stop_loss": "SL",
-            "trailing_stop": "TS",
-            "time_decay": "TD",
-        }
-        wins_by_exit = {"TP": 0, "SL": 0, "TS": 0, "TD": 0, "ST": 0}
-        losses_by_exit = {"TP": 0, "SL": 0, "TS": 0, "TD": 0, "ST": 0}
+        # Early exits: rotation / tie-loser / manual. Settlement = ST.
+        wins_by_exit = {"RT": 0, "TL": 0, "CL": 0, "OT": 0, "ST": 0}
+        losses_by_exit = {"RT": 0, "TL": 0, "CL": 0, "OT": 0, "ST": 0}
         for b in settled_all:
             is_win = b.pnl and b.pnl > 0
-            if b.status == "closed_early" and b.close_reason:
+            code = "ST"
+            if b.status in ("closed", "closed_early") and b.close_reason:
                 cr = b.close_reason.lower()
-                code = "ST"
-                for prefix, c in exit_type_map.items():
-                    if cr.startswith(prefix):
-                        code = c
-                        break
-            else:
-                code = "ST"
+                if cr == "rotation":
+                    code = "RT"
+                elif cr == "tie_loser":
+                    code = "TL"
+                elif b.status == "closed":
+                    code = "CL"
+                else:
+                    code = "OT"
             if is_win:
                 wins_by_exit[code] = wins_by_exit.get(code, 0) + 1
             else:

@@ -7,13 +7,11 @@ Buldugumuz ve duzelttigimiz kritik hatalarin tekrarlanmasini onler:
 4. Bot startup zincir hatasi (ConfigProxy, import chain)
 5. DB koruma (testler production DB'ye dokunmaz)
 6. Backup mekanizmasi (reset oncesi backup)
-7. take_profit format string hatasi (double multiply)
-8. Fee rate tutarsizligi (hardcoded vs dynamic)
+7. Fee rate tutarsizligi (hardcoded vs dynamic)
 """
 
 import os
 from datetime import datetime, timezone, timedelta
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -46,26 +44,6 @@ class TestTimezoneSafety:
         elapsed = (now_utc - last_scan).total_seconds()
         assert isinstance(elapsed, float)
         assert elapsed >= 0
-
-    def test_check_time_decay_datetime_comparison(self):
-        """check_time_decay timezone-aware datetimes ile crash etmemeli."""
-        from engine.strategy import RiskManager
-        from config.settings import bot_config
-
-        rm = RiskManager(None, bot_config)
-        bet = MagicMock()
-        bet.entry_price = 0.50
-        bet.price = 0.50
-        bet.result_data = None
-
-        # Market target_date naive
-        market = MagicMock()
-        market.target_date = datetime(2026, 7, 18, 23, 59, 59)
-
-        # Crash etmemeli
-        result = rm.check_time_decay(bet, 0.40, market)
-        assert isinstance(result, tuple)
-        assert len(result) == 2
 
 
 # ── 2. GAMMA API FORMAT TESTLERI ─────────────────────────────────────
@@ -208,15 +186,6 @@ class TestBotStartupChain:
         assert Config.KELLY_FRACTION == bot_config.strategy.kelly_fraction
         assert Config.MAX_BET_PCT == bot_config.strategy.max_bet_pct
 
-    def test_risk_config_consistent(self):
-        """RiskConfig default degerleri tutarli olmali."""
-        from config.settings import bot_config
-
-        risk = bot_config.risk
-        assert 0 < risk.take_profit_pct, f"take_profit_pct={risk.take_profit_pct}"
-        assert 0 < risk.stop_loss_pct, f"stop_loss_pct={risk.stop_loss_pct}"
-        assert 0 < risk.trailing_stop_pct, f"trailing_stop_pct={risk.trailing_stop_pct}"
-
     def test_weather_engine_init(self):
         """WeatherEngine baslatilabilmeli."""
         from engine.calculator import WeatherEngine
@@ -297,64 +266,6 @@ class TestDBProtection:
         assert backup_path is not None
         assert os.path.exists(backup_path)
         os.unlink(backup_path)
-
-
-# ── 6. TAKE PROFIT FORMAT STRING TESTLERI ─────────────────────────────
-
-
-class TestTakeProfitFormat:
-    """Take profit format string hatasini yakala."""
-
-    def test_take_profit_at_100(self):
-        """%100 karda take_profit tetiklenmeli (partial veya full)."""
-        from engine.strategy import RiskManager
-        from config.settings import RiskConfig
-
-        custom_risk = RiskConfig(take_profit_pct=0.50)
-        rm = RiskManager(None)
-        rm._get_risk_config = lambda: custom_risk
-        bet = MagicMock()
-        bet.entry_price = 0.50
-        bet.price = 0.50
-        bet.result_data = None
-        bet.partial_tp_done = False
-
-        should_exit, reason = rm.check_take_profit(bet, 0.99)
-        assert should_exit is True
-        assert "take_profit" in reason
-
-    def test_take_profit_reason_not_double_multiplied(self):
-        """Reason string'inde absurt degerler olmamali (double multiply)."""
-        from engine.strategy import RiskManager
-        from config.settings import RiskConfig
-
-        custom_risk = RiskConfig(take_profit_pct=0.50)
-        rm = RiskManager(None)
-        rm._get_risk_config = lambda: custom_risk
-        bet = MagicMock()
-        bet.entry_price = 0.50
-        bet.price = 0.50
-        bet.result_data = None
-        bet.partial_tp_done = False
-
-        should_exit, reason = rm.check_take_profit(bet, 1.00)
-        assert should_exit is True
-        assert "17000" not in reason
-
-    def test_near_certain_win_at_098(self):
-        """Fiyat 0.98'de near_certain_win artik tetiklenmez (kaldirildi).
-        Take-profit esigi 999.0 oldugu icin normal TP de tetiklenmez."""
-        from engine.strategy import RiskManager
-
-        rm = RiskManager(None)
-        bet = MagicMock()
-        bet.entry_price = 0.50
-        bet.price = 0.50
-        bet.result_data = None
-        bet.partial_tp_done = False
-
-        should_exit, reason = rm.check_take_profit(bet, 0.98)
-        assert should_exit is False
 
 
 # ── 7. FEE RATE TUTARSIZLIGI ──────────────────────────────────────────

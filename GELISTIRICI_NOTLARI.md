@@ -25,7 +25,7 @@ python -m pytest tests/test_accounting.py tests/test_settler_polymarket.py tests
 
 # 6) FULL suite (push oncesi)
 python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q
-# HEDEF: "695 passed, 7 skipped, 0 failed" (2026-08-11 itibari; tsc --noEmit = 0 hata)
+# HEDEF: "635 passed, 7 skipped, 0 failed" (2026-08-12 itibari; tsc --noEmit = 0 hata)
 
 # 7) Dokumantasyon senkronu (ZORUNLU, agents.md kurali)
 # README.md + GELISTIRICI_NOTLARI.md — bugfix/karar/feature commit'lenmeden once ekle/duzelt
@@ -77,22 +77,22 @@ Aktif branchlar: `restore/05-clean-state` (production), `ponytail-audit`, `featu
 | 3 | Latent bug | import-all, dead-code, calibration | test_latent_bugs.py |
 | 4 | Core | calculator, ASI, calibrasyon | test_calculator.*, test_ai... |
 | 5 | Unit/regresyon | formuller, kelly, risk | test_units.py + digerleri |
-| 6 | E2E | uctan u can | test_e2e_system.py test_integration_e2e.py |
+| 6 | E2E | uctan u ca | test_e2e_system.py test_integration_e2e.py |
 | 7 | Full | hepsi | `pytest tests/ ...` |
-| 8 | **Davranis (2026-08-08)** | gercek DB + gercek modul, mock YOK | test_sl_reopen_chain.py, test_settlement_chain.py, test_bet_behavior.py, test_risk_behavior.py |
-| 9 | **Replay (2026-08-08)** | production DB kopyasi | `python scripts/replay_test.py` |
+| 8 | **Davranis** | gercek DB + gercek modul, mock YOK | test_settlement_chain.py, test_bet_behavior.py, test_bot_flow.py, test_real_flow.py |
 
-### Davranis Testleri Haritasi (2026-08-08)
+### Davranis Testleri Haritasi
 
 Hangi dosya hangi kurali korur:
 
 | Dosya | Kapsam |
 |---|---|
-| `tests/test_sl_reopen_chain.py` | SL -> settler -> reopen tam zincir; kayip market haric en yuksek fiyatli secim; kapanis gecmeden expired yok |
 | `tests/test_settlement_chain.py` | Settler: kapanis (target+12h) gecmeden expired YASAK; gectiyse expired; acik betli market asla expired |
 | `tests/test_bet_behavior.py` | Acilis: oglen sonrasi bugunku market acilabilir (kapanis 24:00); kapanis gectiyse kapali; 20h+ kala kapali; fiyat gate [0.10,0.95); duplicate yok; nakit siniri; grup basina tek bet; rotation threshold |
-| `tests/test_risk_behavior.py` | SL/TP/trailing/time-decay KARARLARI gercek bet ile; exit_position paper sell (bet kapatma scheduler'da) |
-| `scripts/replay_test.py` | Production DB kopyasi: settle_all + reopen gercek veriyle, invariant: kapanisi gecmemis market expired OLMAMALI |
+| `tests/test_bot_flow.py` | Gercek akis: forecast -> spread bet ac -> bet acik kalir (erken kapanis yok) |
+| `tests/test_real_flow.py` | Loop'lar gercek fonksiyonlarla: scan/settle/poller; update_prices -> settle zinciri |
+
+> **Erken kapanis mekanizmalari KALDIRILDI (2026-08-12):** `RiskConfig`, `run_risk_management`, `check_stop_loss`, `check_take_profit`, `check_trailing_stop`, `check_time_decay`, `check_early_exit`, `check_rebalance`, `check_model_reversal`, `_reopen_after_stop_loss`, `partial_tp_done` silindi. Betler yalnizca settlement'ta kapanir. Silinen testler: `test_active_risk_management.py`, `test_take_profit_comprehensive.py`, `test_risk_behavior.py`, `edge/test_sl_reopen_chain.py`, `scripts/replay_test.py`. Suite: **635 passed, 7 skipped**.
 
 **Kural:** Yeni bug bulundugunda once davranis testi yaz (sentetik + gercek DB), sonra duzelt.
 

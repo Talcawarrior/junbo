@@ -249,37 +249,6 @@ def portfolio_current_value(initial_capital: float, realized_pnl: float, unreali
 # ---------------------------------------------------------------------------
 
 
-def pnl_ratio(current_price: float, entry_price: float) -> float:
-    """Fiyat degisimi orani (0-1 arasi ratio, percentage DEGIL).
-
-    pnl_ratio = (current_price - entry_price) / entry_price
-
-    Tum exit check'ler bu fonksiyonu kullanmali.
-    1.0 = %100 kar, -0.3 = %30 zarar.
-
-    Kullanim:
-      - check_take_profit: pnl_ratio >= cfg.take_profit_pct
-      - check_stop_loss: pnl_ratio <= -cfg.stop_loss_pct
-      - check_time_decay: pnl_ratio <= cfg.time_decay_threshold
-    """
-    if entry_price <= 0:
-        return 0.0
-    return (current_price - entry_price) / entry_price
-
-
-def drop_ratio(peak_price: float, current_price: float) -> float:
-    """Tepeden dusus orani (trailing stop icin).
-
-    drop_ratio = (peak_price - current_price) / peak_price
-
-    Kullanim:
-      - check_trailing_stop: drop_ratio >= cfg.trailing_stop_pct
-    """
-    if peak_price <= 0:
-        return 0.0
-    return (peak_price - current_price) / peak_price
-
-
 def roi_pct(pnl: float, stake: float) -> float:
     """Return on investment as a percentage.
 

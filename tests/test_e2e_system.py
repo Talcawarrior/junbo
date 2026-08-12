@@ -185,63 +185,6 @@ class TestStep4_EdgeCalculation:
 
 
 # ============================================================================
-# STEP 5: RISK MANAGEMENT
-# ============================================================================
-
-
-class TestStep5_RiskManagement:
-    """Adim 5: Risk yonetimi mekanizmalari."""
-
-    def test_stop_loss_triggers(self):
-        """Stop-loss tetiklenmeli."""
-
-        # Use normal threshold for testing stop-loss trigger
-        stop_loss_pct = 0.25
-
-        entry = 0.50
-        current = 0.34  # %32 zarar
-
-        loss_pct = (current - entry) / entry
-        assert loss_pct <= -stop_loss_pct
-
-    def test_take_profit_triggers(self):
-        """Take-profit tetiklenmeli."""
-
-        # Use normal threshold for testing take-profit trigger
-        take_profit_pct = 1.0
-
-        entry = 0.25
-        current = 0.55  # %120 kar
-
-        profit_pct = (current - entry) / entry
-        assert profit_pct >= take_profit_pct
-
-    def test_near_certain_win_triggers(self):
-        """%98+ fiyat → otomatik kapat."""
-        current_price = 0.99
-        assert current_price >= 0.98  # near_certain_win esigi
-
-    def test_trailing_stop_logic(self):
-        """Trailing stop mantigi."""
-        peak = 0.60  # Tirmanis
-        current = 0.50  # Tepeden %16.7 dusus
-        trailing_stop_pct = 0.15
-
-        drop_pct = (peak - current) / peak
-        assert drop_pct >= trailing_stop_pct  # Tetiklenmeli
-
-    def test_time_decay_logic(self):
-        """Time decay mantigi."""
-        hours_left = 12  # 24 saatten az
-        loss_pct = -0.15  # %15 zararda
-        time_decay_hours = 24
-        time_decay_threshold = -0.10
-
-        should_close = hours_left <= time_decay_hours and loss_pct <= time_decay_threshold
-        assert should_close is True
-
-
-# ============================================================================
 # STEP 6: BET PLACEMENT
 # ============================================================================
 
@@ -507,25 +450,6 @@ class TestStep12_CompleteFlow:
 
         fee = polymarket_fee(shares=100, price=0.55, fee_rate=0.05)
         assert fee >= 0
-
-    def test_risk_check_flow(self):
-        """Risk kontrol akisi."""
-        # Use normal threshold for testing stop-loss trigger
-        stop_loss_pct = 0.25
-
-        # Mock bet
-        entry = 0.50
-        current = 0.35
-        loss_pct = (current - entry) / entry  # -0.30 = %30 zarar
-
-        # Stop-loss kontrolu (%30 zararda kapat)
-        if loss_pct <= -stop_loss_pct:
-            should_close = True
-        else:
-            should_close = False
-
-        # %30 zarar > %25 stop-loss threshold → tetiklenmeli
-        assert should_close is True
 
 
 # ============================================================================

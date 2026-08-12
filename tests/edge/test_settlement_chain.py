@@ -59,7 +59,7 @@ def _add_portfolio(session, cash=5000.0):
     session.commit()
 
 
-def _add_closed_bet(session, market_id, city, status="closed_early", reason="stop_loss: -25.0%"):
+def _add_closed_bet(session, market_id, city, status="closed_early", reason="rotation"):
     from datetime import datetime, timedelta, timezone
 
     from database.models import Bet
@@ -82,23 +82,6 @@ def _add_closed_bet(session, market_id, city, status="closed_early", reason="sto
 
 
 class TestSettlementExpiredRule:
-    def test_no_open_bet_market_not_yet_closed_not_expired(self):
-        """Kapanis gecmemis + acik bet yok -> expired OLMAMALI (2026-08-08 bug)."""
-        from executor.settler import SettlementEngine
-
-        td = _td(2)  # kapanis = now + 14h -> gecmemis
-        with __import__("database.db", fromlist=["get_session"]).get_session() as s:
-            _add_portfolio(s)
-            _add_market(s, "m1", 0.70, td)
-            _add_closed_bet(s, "m1", "Testville")  # SL ile kapandi
-
-            SettlementEngine().settle_all()
-
-            from database.models import WeatherMarket
-
-            m = s.query(WeatherMarket).filter_by(id="m1").first()
-            assert m.status != "expired", "kapanis gecmemis market expired yapilmamali - reopen yeni lider acamaz"
-
     def test_no_open_bet_market_past_close_expired(self):
         """Kapanis GECTI + acik bet yok -> expired olur (normal)."""
         from executor.settler import SettlementEngine
@@ -147,33 +130,3 @@ class TestSettlementExpiredRule:
 
             m = s.query(WeatherMarket).filter_by(id="m3").first()
             assert m.status != "expired", "acik betli market expired yapilmaz"
-
-
-class TestSettlementFullChain:
-    def test_sl_then_settler_then_reopen_opens_new_bet(self):
-        """SL -> settle_all -> reopen tam zincir: yeni bet acilmali."""
-        from executor.bet_placer import BetPlacer
-        from executor.settler import SettlementEngine
-
-        td = _td(2)
-        with __import__("database.db", fromlist=["get_session"]).get_session() as s:
-            _add_portfolio(s)
-            _add_market(s, "m1", 0.80, td)  # kayip market, hala en yuksek
-            _add_market(s, "m2", 0.55, td)  # ikinci en yuksek -> yeni lider
-            _add_closed_bet(s, "m1", "Testville")
-
-        # 1) Settler araya girip marketi expired yapmamali
-        SettlementEngine().settle_all()
-
-        # 2) Reopen m2'ye acmali
-        with __import__("database.db", fromlist=["get_session"]).get_session() as s:
-            bp = BetPlacer()
-            reopened = bp._reopen_after_stop_loss(s)
-
-            from database.models import Bet, WeatherMarket
-
-            m1 = s.query(WeatherMarket).filter_by(id="m1").first()
-            assert m1.status != "expired", "settle_all canli marketi expired yapmamali"
-            new_bet = s.query(Bet).filter(Bet.market_id == "m2", Bet.status.in_(("placed", "pending"))).first()
-            assert reopened >= 1, "reopen yeni lider acmali"
-            assert new_bet is not None, "m2'ye bet acilmali"

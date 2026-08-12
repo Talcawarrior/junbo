@@ -187,14 +187,6 @@ class TestRiskManagement:
         limit = daily_loss_limit_pct * portfolio
         assert daily_loss_amount == pytest.approx(limit, abs=0.01)
 
-    def test_stop_loss_trigger(self):
-        """Stop loss trigger."""
-        entry_price = 0.50
-        current_price = 0.34
-        stop_loss_pct = 0.30
-        stop_price = entry_price * (1 - stop_loss_pct)
-        assert current_price < stop_price
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

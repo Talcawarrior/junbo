@@ -217,7 +217,6 @@ async def price_poller_loop(state):
     from jobs.scheduler import (
         run_fetch_markets,
         run_refresh_open_prices,
-        run_risk_management,
         run_update_prices,
     )
 
@@ -230,12 +229,6 @@ async def price_poller_loop(state):
             # keeps the dashboard / PnL live through resolution.
             await asyncio.wait_for(asyncio.to_thread(run_refresh_open_prices), timeout=_FETCH_TIMEOUT)
             await asyncio.wait_for(asyncio.to_thread(run_update_prices), timeout=_FETCH_TIMEOUT)
-            # Risk yonetimini de fiyat poller'a bagla: stop-loss / take-profit /
-            # trailing stop kontrolleri artik her 5 dakikada bir (fiyat
-            # tazelemeyle ayni dongude) calisir. Boylece son dakikalarda hizla
-            # dusen, vadeye yakin bahisler tarama dongusunden
-            # kacip settlement'e gitmez.
-            await asyncio.wait_for(asyncio.to_thread(run_risk_management), timeout=_FETCH_TIMEOUT)
             state.last_price_update = datetime.now(timezone.utc).replace(tzinfo=None)
         except asyncio.CancelledError:
             logger.info("Price poller cancelled")

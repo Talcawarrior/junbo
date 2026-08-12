@@ -286,19 +286,14 @@ class TestPricePollerLoop:
             calls.append("update")
             return "0 acik bet guncellendi"
 
-        def _risk():
-            calls.append("risk")
-            return "Risk: no open positions"
-
         with (
             patch("jobs.scheduler.run_fetch_markets", _fetch),
             patch("jobs.scheduler.run_refresh_open_prices", _refresh),
             patch("jobs.scheduler.run_update_prices", _update),
-            patch("jobs.scheduler.run_risk_management", _risk),
         ):
             await _run_and_cancel(bot_loop.price_poller_loop(s))
 
-        assert calls == ["fetch", "refresh", "update", "risk"], f"sira yanlis: {calls}"
+        assert calls == ["fetch", "refresh", "update"], f"sira yanlis: {calls}"
         assert s.last_price_update is not None
 
     @pytest.mark.asyncio
@@ -436,18 +431,17 @@ class TestEndToEndSpreadFlow:
         assert placed >= 1
         assert cash_after is not None and cash_after < 1000.0, "stake kasadan dusmeli"
 
-    def test_update_prices_then_settle_then_risk(self):
-        """Gercek DB akisi: update_prices -> risk (spread'de SL yok) -> settle.
+    def test_update_prices_then_settle(self):
+        """Gercek DB akisi: update_prices -> settle.
 
         Bet acildiktan sonra:
           - run_update_prices current_price/unrealized_pnl gunceller
-          - run_risk_management spread modunda beti KAPATMAZ
           - run_settle gercek sonuca gore sonuclandirir (mock'lu ag)
         """
         from database.db import get_session
         from database.models import Bet, WeatherMarket
         from executor.settler import SettlementEngine
-        from jobs.scheduler import run_risk_management, run_update_prices
+        from jobs.scheduler import run_update_prices
         from unittest.mock import patch
 
         day = _day()
@@ -470,14 +464,7 @@ class TestEndToEndSpreadFlow:
             assert bet is not None
             assert bet.current_price is not None
 
-            # 2) risk — spread modunda stop-loss yok, bet acik kalmali
-            before = s.query(Bet).filter(Bet.status.in_(["placed", "partial_fill", "filled"])).count()
-            run_risk_management(session=s)
-            s.commit()
-            after = s.query(Bet).filter(Bet.status.in_(["placed", "partial_fill", "filled"])).count()
-            assert after == before, "spread modunda risk management beti kapatmamali"
-
-        # 3) settle — ag cagrisi mock'lu, crash olmamali
+        # 2) settle — ag cagrisi mock'lu, crash olmamali
         engine = SettlementEngine()
         with patch.object(engine, "_fetch_market_resolution", return_value=None):
             results = engine.settle_all()

@@ -21,11 +21,6 @@ from utils.slippage import check_orderbook_depth, estimate_slippage
 
 logger = logging.getLogger("EXECUTOR_BET_PLACER")
 
-# Stop-loss sonrasi ayni grupta yeni liderin acilabilmesi icin geriye
-# bakilan pencere (saat): bu sure icinde stop_loss kapanisi olmus bir grup,
-# pencere disinda bile yeni lideriyle yeniden acilabilir.
-_STOP_LOSS_REOPEN_WINDOW = 6
-
 
 class BetPlacer:
     """SADECE bet acar. Karar vermez - engine karar verir."""
@@ -537,140 +532,6 @@ class BetPlacer:
 
         return True
 
-    def _reopen_after_stop_loss(self, session) -> int:
-        """SL sonrasi ayni gruptaki yeni lideri SADECE bahis penceresi icinde acar.
-
-        Bir (city, target_date, metric) grubunda bet stop_loss ile kaybedildi
-        ise, o grubun yerine ayni tarihte su an en yuksek fiyatli ACIK
-        (farkli esik) market acilabilir. Kurallar:
-
-        - Acilim `_is_in_betting_window` (04:00-23:30 UTC) kuralina TABI:
-          pencere kapaliyken (gece 00:00-04:00 gibi) asla bet acilmaz. Bu,
-          Wellington 12C/13C'deki gibi gece yarisi otomatik cift-esik
-          acilimini engeller.
-        - Yeni lider, grupta hali hazirda ACIK bet varsa acilmez (tek pozisyon
-          kurali — ayni gruba ikinci esik ayni anda girilmez).
-        - Ayni kayip market, mevcut ``open_bet_on_market`` re-entry guardi
-          (6 saat) ile zaten engellenir.
-        """
-        # Pencere kapali ise SL sonrasi yeniden acilmaz (cift esik/aceles gece acilim yok)
-        if not self._is_in_betting_window():
-            return 0
-
-        reopened = 0
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        cutoff = now - timedelta(hours=_STOP_LOSS_REOPEN_WINDOW)
-
-        # Son _STOP_LOSS_REOPEN_WINDOW saat icindeki stop_loss kapanislarini bul
-        lost_bets = (
-            session.query(Bet)
-            .filter(
-                Bet.close_reason.like("stop_loss%"),
-                Bet.closed_at >= cutoff,
-                Bet.closed_at <= now,
-            )
-            .all()
-        )
-        if not lost_bets:
-            return 0
-
-        # Grup anahtari -> kayibin market id
-        lost_groups: dict[tuple, str] = {}
-        for bet in lost_bets:
-            wm = session.query(WeatherMarket).filter_by(id=bet.market_id).first()
-            if not wm or not wm.target_date:
-                continue
-            td = wm.target_date.replace(tzinfo=None) if getattr(wm.target_date, "tzinfo", None) else wm.target_date
-            key = (wm.city, td, wm.metric or "unknown")
-            lost_groups.setdefault(key, bet.market_id)
-
-        for key, lost_market_id in lost_groups.items():
-            city, td, metric = key
-
-            # Grupta zaten ACIK bet varsa -> tek pozisyon kurali, acilma
-            group_open = (
-                session.query(Bet)
-                .filter(Bet.status.in_(OPEN_BET_STATUSES))
-                .join(WeatherMarket, WeatherMarket.id == Bet.market_id)
-                .filter(
-                    WeatherMarket.city == city,
-                    WeatherMarket.target_date == td,
-                    WeatherMarket.metric == metric,
-                )
-                .first()
-            )
-            if group_open:
-                logger.info(
-                    "reopen_after_stop_loss: %s %s %s already open bet %s — single position, skip",
-                    city,
-                    str(td.date()),
-                    metric,
-                    group_open.market_id,
-                )
-                continue
-
-            # Grupta acik, fiyatli tum marketleri topla ve en yuksek fiyatliyi sec
-            candidates = (
-                session.query(WeatherMarket)
-                .filter(
-                    WeatherMarket.status == "open",
-                    WeatherMarket.city == city,
-                    WeatherMarket.target_date == td,
-                    WeatherMarket.metric == metric,
-                    WeatherMarket.yes_price.isnot(None),
-                    WeatherMarket.yes_price > 0,
-                )
-                .all()
-            )
-            if not candidates:
-                continue
-
-            # Kayip market disinda en yuksek fiyatliyi sec. 2026-08-08 bugfix:
-            # best == lost_market_id oldugunda skip ediyordu -> SL yiyen market
-            # hala en yuksek fiyatliysa grup ASLA yeniden acilmiyordu (Toronto
-            # 30C, Miami 33.6C, Buenos Aires 13C ornekleri). Simdi kayip market
-            # disindaki en yuksek fiyatliya gecilir; hicbir farkli market yoksa
-            # re-entry guardi zaten ayni markete girmeyi engeller.
-            best = max(
-                (m for m in candidates if str(m.id) != str(lost_market_id)),
-                key=lambda m: float(m.yes_price or 0),
-                default=None,
-            )
-            if best is None:
-                logger.info(
-                    "reopen_after_stop_loss: %s group only lost market (id=%s) remains, skip",
-                    city,
-                    lost_market_id,
-                )
-                continue
-
-            existing = (
-                session.query(Bet)
-                .filter(
-                    Bet.market_id == str(best.id),
-                    Bet.status.in_(OPEN_BET_STATUSES),
-                )
-                .first()
-            )
-            if existing:
-                continue
-
-            bet = self.open_bet_on_market(best, session)
-            if bet:
-                reopened += 1
-                logger.info(
-                    "reopen_after_stop_loss: opened %s %s %s (yes=%.4f) after lost %s",
-                    city,
-                    str(td.date()),
-                    metric,
-                    float(best.yes_price or 0),
-                    lost_market_id,
-                )
-
-        if reopened:
-            logger.info("reopen_after_stop_loss: %d new leader bet(s) opened", reopened)
-        return reopened
-
     def place_all_pending(self) -> int:
         """Tum acik Polymarket weather marketleri icin bet ac.
         Analiz sonucuna bakilmaz — Polymarket'te hangi derece en yuksek
@@ -689,10 +550,6 @@ class BetPlacer:
 
         with get_session() as session:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
-
-            # ── Stop-loss sonrasi yeni lider yeniden acilisi ──────────
-            # Bahis penceresi ve 8h/24h kuralindan BAGIMSIZ calisir.
-            placed += self._reopen_after_stop_loss(session)
 
             # ── Bahis penceresi kontrolu ──────────────────────────────
             if not self._is_in_betting_window():
@@ -954,10 +811,10 @@ class BetPlacer:
         if existing:
             return None
 
-        # Ayni markette son 6 saatte stop_loss ile kapanmis bet var mi?
-        # Stop-loss sonrasi ayni pozisyona HEMEN tekrar girmek, kayip
-        # dongusu yaratir (ac -> SL -> yeniden ac -> SL). Kapali bet'ler
-        # OPEN_BET_STATUSES'de olmadigi icin normal dedup bunlari yakalamaz.
+        # Ayni markette son 6 saatte kapanmis bet var mi?
+        # Kapanan (rotasyon vb.) pozisyonun ayni marketine HEMEN tekrar
+        # girmek kayip dongusu yaratir. Kapali bet'ler OPEN_BET_STATUSES'de
+        # olmadigi icin normal dedup bunlari yakalamaz.
         _stop_guard_window = timedelta(hours=6)
         _cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - _stop_guard_window
         recent_loss = (
@@ -971,7 +828,7 @@ class BetPlacer:
         )
         if recent_loss is not None:
             logger.info(
-                "open_bet_on_market: %s SKIPPED - recent close (%s) at %s (stop-loss/rotation re-entry guard)",
+                "open_bet_on_market: %s SKIPPED - recent close (%s) at %s (rotation re-entry guard)",
                 market.id,
                 recent_loss.close_reason,
                 recent_loss.closed_at,

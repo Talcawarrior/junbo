@@ -4,8 +4,8 @@
   1. RUFF        — full lint (F821, E722, F401, E712, F811, F541)
   2. PYLINT       — code quality (E, F, W categories)
   3. MYPY         — type check (sadece kritik dosyalar)
-  4. CRITICAL     — timezone, API, scraper, DB, backup, take profit, fee
-  5. UNIT+RISK    — formul, kelly, risk manager, take profit
+  4. CRITICAL     — timezone, API, scraper, DB, backup, fee
+  5. UNIT+RISK    — formul, kelly, risk manager
   6. REGRESSION   — bilinen hatalarin tekrarlamamasi
   7. IMPORT       — tum moduller import edilebilir mi
 
@@ -119,8 +119,6 @@ def main() -> int:
                 "python",
                 "-m",
                 "pytest",
-                "tests/test_take_profit_comprehensive.py",
-                "tests/test_active_risk_management.py",
                 "tests/test_units.py",
                 "-q",
                 "--tb=line",

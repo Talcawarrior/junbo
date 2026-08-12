@@ -16,7 +16,6 @@ from database.models import (
     WeatherMarket,
 )
 from utils.formulas import (
-    polymarket_fee,
     portfolio_total_value,
     unrealized_pnl as compute_unrealized_pnl,
 )
@@ -361,114 +360,6 @@ def run_report():
         return report
 
 
-def run_risk_management(session=None):
-    """Aktif risk yonetimi: stop-loss, take-profit, time-decay, trailing stop kontrolleri.
-    Optional session for batched cycles.
-    """
-    from config.settings import bot_config
-    from engine.strategy import RiskManager
-
-    with get_session_or(session) as sess:
-        rm = RiskManager(db_session=sess, cfg=bot_config)
-        bets = sess.query(Bet).filter(Bet.status.in_(OPEN_BET_STATUSES)).all()
-
-        if not bets:
-            return "Risk: no open positions"
-
-        # Pre-fetch market prices
-        market_ids = list(set(b.market_id for b in bets if b.market_id))
-        markets = {}
-        if market_ids:
-            for m in sess.query(WeatherMarket).filter(WeatherMarket.id.in_(market_ids)).all():
-                markets[m.id] = m
-
-        closed_count = 0
-        for bet in bets:
-            market = markets.get(bet.market_id)
-            if not market:
-                continue
-
-            # Current price in side terms
-            yes_price = float(market.yes_price or 0.5)
-            if bet.side and bet.side.upper() == "NO":
-                current_price = max(0.0, min(1.0, 1.0 - yes_price))
-            else:
-                current_price = max(0.0, min(1.0, yes_price))
-
-            # Stop-loss: minimum hold'dan MUAF — bet acilir acilmaz buyuk
-            # dususte pozisyonu keser. Take-profit/trailing/partial-TP
-            # kapali (kullanici karari).
-            #
-            # SPREAD modunda (BETTING_STRATEGY=spread) stop-loss DEVREDISI:
-            # spread longshot'lari (entry<0.30) resolve'a kadar tutulur; fiyat
-            # dususu payout sansini sifirlamamali. Kazanc 10-100x, kayip -stake.
-            # (2026-08-10 kullanici karari: backtest stop-loss'suz +$36k verdi.)
-            _strategy = getattr(bot_config.strategy, "betting_strategy", "edge")
-            if _strategy == "spread":
-                continue
-
-            should_exit, reason = rm.check_stop_loss(bet, current_price, market)
-            if not should_exit:
-                continue
-
-            from utils.accounting import credit_sale
-
-            entry = float(bet.entry_price if bet.entry_price is not None else bet.price or 0.0)
-            exit_shares = float(bet.shares or 0.0)
-            if exit_shares <= 0:
-                continue
-            raw_pnl = round(compute_unrealized_pnl(exit_shares, current_price, entry), 2)
-            proceeds = round(exit_shares * current_price, 2)
-
-            # Polymarket taker fee on early exit (sell order).
-            fee_rate = bot_config.strategy.current_fee_rate
-            fee = round(polymarket_fee(exit_shares, current_price, fee_rate), 2)
-            realized = round(raw_pnl - fee, 2)
-            proceeds_net = round(proceeds - fee, 2)
-
-            bet.status = "closed_early"
-            bet.close_reason = reason
-            bet.closed_at = datetime.now(timezone.utc)
-            bet.realized_pnl = realized
-            bet.pnl = realized
-            bet.current_price = current_price
-
-            # Credit net proceeds (after fee) to cash via central accounting.
-            credit_sale(sess, proceeds_net, f"early_exit:{bet.market_id}:{reason}")
-
-            portfolio = sess.query(Portfolio).filter(Portfolio.id == 1).first()
-            if portfolio:
-                open_exposure = (
-                    sess.query(func.coalesce(func.sum(Bet.amount), 0.0))
-                    .filter(Bet.status.in_(OPEN_BET_STATUSES))
-                    .scalar()
-                ) or 0.0
-                portfolio.total_value = portfolio_total_value(
-                    float(portfolio.cash_balance or 0.0), float(open_exposure)
-                )
-                portfolio.total_realized_pnl = round((portfolio.total_realized_pnl or 0.0) + realized, 2)
-                portfolio.total_won = (portfolio.total_won or 0) + (1 if realized > 0 else 0)
-                portfolio.total_lost = (portfolio.total_lost or 0) + (1 if realized <= 0 else 0)
-                portfolio.last_updated = datetime.now(timezone.utc).replace(tzinfo=None)
-
-            sess.add(bet)
-            if portfolio:
-                sess.add(portfolio)
-            closed_count += 1
-            logger.info(
-                "Stop-loss bet=%s market=%s reason=%s realized=$%.2f fee=$%.2f proceeds=$%.2f",
-                bet.id,
-                bet.market_id,
-                reason,
-                realized,
-                fee,
-                proceeds_net,
-            )
-
-        sess.commit()
-        return f"Risk: {closed_count} position(s) closed via stop-loss"
-
-
 def run_cycle():
     """Run one full bot cycle with a SINGLE shared DB session.
 
@@ -509,12 +400,6 @@ def run_cycle():
         except Exception as e:
             logger.error("Cycle twin loser close error: %s", e)
             results.append(f"twin loser close error: {e}")
-
-        try:
-            results.append(run_risk_management(session=session))
-        except Exception as e:
-            logger.error("Cycle risk_management error: %s", e)
-            results.append(f"risk_management error: {e}")
 
         # Commit all changes atomically at end of cycle.
         # Individual run_* functions that used the shared session

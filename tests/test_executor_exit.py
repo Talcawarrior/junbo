@@ -16,7 +16,7 @@ def test_exit_position_paper_safe_returns_paper_order(monkeypatch):
 
     placer = BetPlacer()
     market = SimpleNamespace(id="m_test_1")
-    res = placer.exit_position(market, "NO", 0.62, 100.0, "take_profit")
+    res = placer.exit_position(market, "NO", 0.62, 100.0, "rotation")
     assert res is not None
     assert res.get("paper") is True
     assert "orderID" in res
@@ -46,7 +46,7 @@ def test_exit_position_live_mode_calls_client(monkeypatch):
     p._get_token_id = lambda m, s: "tok_yes"
     market = SimpleNamespace(id="m_live_1")
 
-    res = p.exit_position(market, "YES", 0.40, 50.0, "stop_loss")
+    res = p.exit_position(market, "YES", 0.40, 50.0, "rotation")
     assert res is not None
     assert res.get("orderID") == "live_123"
     assert calls["payload"]["side"] == SELL

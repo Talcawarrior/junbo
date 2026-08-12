@@ -40,7 +40,7 @@ Open-Meteo + WeatherAPI ──> scrapers/meteo.py ──> weather_forecasts (DB)
 | Scraper | Polymarket + hava durumu cekici | `scrapers/` |
 | DB | SQLAlchemy + WAL | `database/db.py` |
 | Config | Tum ayarlar | `config/settings.py` |
-| Job scheduler | run_cycle, run_settle, risk_management | `jobs/scheduler.py` |
+| Job scheduler | run_cycle, run_settle | `jobs/scheduler.py` |
 
 **Stack:** Python 3.12+, FastAPI, SQLite (WAL), SQLAlchemy 2, Next.js 16 dashboard, pytest.
 
@@ -191,8 +191,8 @@ python main.py bot
 
 | Loop | Interval | Gorevi |
 |---|---|---|
-| `scan_and_bet_loop` | 300sn (hizli 60sn) | fetch → parse → analyze → bet → update → risk |
-| `price_poller_loop` | 300sn | fiyat tazele + risk (stop-loss/tp/trailing) |
+| `scan_and_bet_loop` | 300sn (hizli 60sn) | fetch → parse → analyze → bet → update |
+| `price_poller_loop` | 300sn | fiyat tazele + acik bet PnL guncelle |
 | `settlement_loop` | 120sn | settle + cleanup + daily maintenance |
 | `snapshot_loop` | 1800sn (30dk) | market_snapshots kaydi |
 
@@ -227,9 +227,8 @@ python main.py bot
 | total_exposure_pct | 100% | Toplam marjin |
 | kelly_fraction | 0.15 | |
 | edge_escalation_hours | 24 | kapanisa yaklasinca 2x min_edge |
-| stop_loss_pct | 30 | SL |
-| take_profit_pct | 100 | TP |
-| trailing_stop_pct | 15 | TS |
+
+> **Erken kapanis (stop-loss / take-profit / trailing / time-decay) KALDIRILDI (2026-08-12):** betler yalnizca settlement'ta kapanir. `RiskConfig`, `run_risk_management`, `_reopen_after_stop_loss`, `check_stop_loss`, `check_take_profit`, `check_trailing_stop`, `check_time_decay`, `check_early_exit`, `check_rebalance` kaldirildi.
 
 ---
 
@@ -282,11 +281,7 @@ python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=test
 # -> "695 passed, 7 skipped, 0 failed" (2026-08-11 durumda; tsc --noEmit 0 hata)
 
 # Davranis testleri (gercek DB, mock'suz — modul etkilesim bug'lari icin)
-python -m pytest tests/test_sl_reopen_chain.py tests/test_settlement_chain.py tests/test_bet_behavior.py tests/test_risk_behavior.py -q
-
-# Replay testi (production DB kopyasi uzerinde — conftest temp DB'ye mudahale ettigi icin script olarak calisir)
-python scripts/replay_test.py
-# -> SONUC: OK (0 yanlis expired + reopen crash'siz)
+python -m pytest tests/test_settlement_chain.py tests/test_bet_behavior.py -q
 
 # Latent bug (once)
 python -m pytest tests/test_latent_bugs.py -v --tb=long
@@ -328,6 +323,7 @@ Detaylar icin `GELISTIRICI_NOTLARI.md`'ya bakin (bolum 12: dogrulanmis davranis 
 - **2026-08-10 (besinci tur):** **Spread stratejisi ANA MOD** — `executor/spread_placer.py`: yeni 2-gun-sonrasi tarih acildiginda en son meteo tahmini +/-3 dereceye, ilk snapshot fiyatindan, en sicak ilk 15 sehre YES bet (gunluk 30 limit). **Kayan pencere:** tahmin guncellenince yeni pencerenin disinda kalan esikler kapatilir. `BETTING_STRATEGY=spread` (varsayilan) / `edge` (eski mod, geri donulebilir). Test: `tests/test_spread_placer.py`.
 - **2026-08-10 (altinci tur):** **Spread commit bug'i duzeltildi** — `place_spread_bets` `with get_session()` wrapper'a cekildi (bet'ler commit edilmiyordu -> ayni markete dup bet). `snapshot_job` `YES_PRICE_MIN` 0.005 -> **0.0005** (0.005 alti longshot marketler artik fiyat gecmisinde); `_first_snapshot_price` snapshot yoksa market yes_price'a fallback. 11-12 Agustos icin catch-up: ~190 spread bet acildi, dup'lar kayan pencere ile temizlendi.
 - **2026-08-11:** **SPREAD_MAX_ENTRY 0.30 -> 0.99** (kullanici karari). **Spread modunda stop-loss devre disi** (`run_risk_management` spread'de SL atlar). **Portfolio yoksa spread placer otomatik olusturur** (0-cash sessiz skip bug'i). SPREAD_MAX_BETS_PER_DAY kalici **100**. Tam suite bot kapaliyken kosulmali (bot + test ayni anda production DB'yi bozuyordu).
+- **2026-08-12:** **Erken kapanis mekanizmalari komple kaldirildi** (kullanici karari: "sistemde hicbir yerde stoploss/take-profit/partial-TP ve benzeri kalmayacak"). `RiskConfig`, `run_risk_management`, `check_stop_loss`, `check_take_profit`, `check_trailing_stop`, `check_time_decay`, `check_early_exit`, `check_rebalance`, `check_model_reversal`, `_reopen_after_stop_loss` ve `partial_tp_done` kolonu kaldirildi. Betler yalnizca settlement'ta kapanir (backtest ile ayni davranis). SL/TP test dosyalari (test_active_risk_management, test_take_profit_comprehensive, test_risk_behavior, edge/test_sl_reopen_chain, scripts/replay_test) silindi. Suite: **635 passed, 7 skipped**.
 
 ---
 

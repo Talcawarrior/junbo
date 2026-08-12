@@ -4,13 +4,12 @@ Bot'un calisma akisi (bot_loop.py scan_and_bet_loop + settlement_loop):
   1. run_fetch_markets  -> Polymarket marketleri weather_markets'e yazar
   2. run_parse_markets  -> ham veriden yapilandirilmis alanlar cikarilir
   3. 2-gun-sonrasi tarih tespiti (_next_two_day_target) -> spread bet acilir
-  4. run_risk_management -> risk kontrolleri (spread modunda stop-loss atlanir)
-  5. run_settle         -> gercek sicakliga gore betler sonuclanir
+  4. run_settle         -> gercek sicakliga gore betler sonuclanir
 
 Bu test, ag cagrilarini mock'layarak (Polymarket/Open-Meteo'ya gitmeden) bu
 zinciri GERCEK fonksiyonlarla calistirir ve her adimda beklenen DB durumunu
-dogrular. Boylece "fetch ok ama bet acilmadi", "bet acildi ama risk kapatti"
-gibi izole testlerin kacirdigi akis kopukluklari yakalanir.
+dogrular. Boylece "fetch ok ama bet acilmadi" gibi izole testlerin kacirdigi
+akis kopukluklari yakalanir.
 """
 
 from __future__ import annotations
@@ -122,16 +121,15 @@ def _seed_market_and_forecast(session, target_day):
 
 
 class TestFullBotFlow:
-    def test_spread_flow_opens_bets_and_risk_holds(self):
-        """Akis: forecast -> spread bet ac -> risk management beti KAPATMAZ.
+    def test_spread_flow_opens_bets_and_keeps_open(self):
+        """Akis: forecast -> spread bet ac -> bet 'placed' kalir.
 
-        Eski bug: run_risk_management spread modunda stop-loss ile bet'i
-        kapatiyordu (guard yokken). Simdi bet 'placed' kalmalı.
+        Erken kapanis mekanizmalari kaldirildi (2026-08-12): bet sadece
+        settlement'ta kapanir. Fiyat dusse bile bet acik kalir.
         """
         from database.db import get_session
         from database.models import Bet, WeatherMarket
         from executor.spread_placer import place_spread_bets
-        from jobs.scheduler import run_risk_management
 
         day = _day()
         with get_session() as s:
@@ -146,59 +144,15 @@ class TestFullBotFlow:
             open_bets = s.query(Bet).filter(Bet.status.in_(["placed", "partial_fill", "filled"])).count()
             assert open_bets >= 1
 
-            # 2) fiyati %50 dusur -> risk management CALISTIR
+            # 2) fiyati dusur -> bet yine de ACIK kalir (erken kapanis yok)
             for m in s.query(WeatherMarket).filter(WeatherMarket.city == "Testville").all():
                 m.yes_price = 0.03  # %50 dusus
             s.commit()
 
-            run_risk_management(session=s)
-            s.commit()
-
-            # spread modunda bet kapanmamali (stop-loss devre disi)
             still_open = s.query(Bet).filter(Bet.status.in_(["placed", "partial_fill", "filled"])).count()
             assert still_open == open_bets, (
-                f"spread modunda risk management beti kapatmamali: open before={open_bets} after={still_open}"
+                f"fiyat dusse bile bet acik kalmali: open before={open_bets} after={still_open}"
             )
-
-    def test_edge_flow_stop_loss_closes(self):
-        """Edge modunda fiyat duserse bet kapanir (eski davranis)."""
-        from database.db import get_session
-        from database.models import Bet, WeatherMarket
-        from jobs.scheduler import run_risk_management
-
-        old = bot_config.strategy.betting_strategy
-        bot_config.strategy.betting_strategy = "edge"
-        try:
-            day = _day()
-            with get_session() as s:
-                _add_portfolio(s)
-                _seed_market_and_forecast(s, day)
-                # bir bet manuel ekle
-                from database.models import Bet as BetModel
-
-                s.add(
-                    BetModel(
-                        market_id="mkt-30",
-                        city="Testville",
-                        city_code="AAA",
-                        side="YES",
-                        amount=2.0,
-                        price=0.20,
-                        entry_price=0.20,
-                        shares=10.0,
-                        status="placed",
-                        placed_at=datetime.now(timezone.utc),
-                    )
-                )
-                for m in s.query(WeatherMarket).filter(WeatherMarket.city == "Testville").all():
-                    m.yes_price = 0.05  # -%75 -> SL tetiklenir
-                s.commit()
-                run_risk_management(session=s)
-                s.commit()
-                bet = s.query(Bet).filter_by(market_id="mkt-30").first()
-                assert bet.status == "closed_early", f"edge modunda SL kapatmali: {bet.status}"
-        finally:
-            bot_config.strategy.betting_strategy = old
 
     def test_new_date_triggers_spread(self):
         """2-gun-sonrasi tarih acildiginda _next_two_day_target tetikler."""

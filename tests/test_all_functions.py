@@ -257,13 +257,10 @@ class TestOpenBetOnMarket:
             result = bp.open_bet_on_market(market, s)
             assert result is None
 
-    def test_rejects_reentry_after_recent_stop_loss(self):
-        """Stop-loss ile kapanan ayni markete hemen tekrar bet ACILMAMALI.
+    def test_rejects_reentry_after_recent_rotation(self):
+        """Kapanan (rotasyon vb.) ayni markete hemen tekrar bet ACILMAMALI.
 
-        Bug: bet_placer.once_2026_08_07 ayni market_id 3374736'ya 2 kez
-        girdi — bet 144 SL ile kapandi (14:46), 10 sn sonra bet 186 ayni
-        markete yeniden acildi (14:46:29) ve yine SL'ye dustu. Kapali
-        betler OPEN_BET_STATUSES'de olmadigi icin normal dedup bunlari
+        Kapali betler OPEN_BET_STATUSES'de olmadigi icin normal dedup bunlari
         yakalayamaz; re-entry guard'i olmadan kayip dongusu olusur.
         """
         from database.db import get_session
@@ -273,7 +270,7 @@ class TestOpenBetOnMarket:
         with get_session() as s:
             _add_portfolio(s, 1000.0)
             _add_market(s, "m7", 0.50)
-            # Stop-loss 5 dk once kapanmis bir bet var
+            # 5 dk once kapanmis bir bet var
             s.add(
                 Bet(
                     market_id="m7",
@@ -283,7 +280,7 @@ class TestOpenBetOnMarket:
                     amount=10.0,
                     price=0.50,
                     status="closed_early",
-                    close_reason="stop_loss: -54.5%",
+                    close_reason="rotation",
                     closed_at=(datetime.now(timezone.utc) - timedelta(minutes=5)).replace(tzinfo=None),
                 )
             )
@@ -292,71 +289,7 @@ class TestOpenBetOnMarket:
             WM = __import__("database.models", fromlist=["WeatherMarket"]).WeatherMarket
             market = s.query(WM).filter_by(id="m7").first()
             result = bp.open_bet_on_market(market, s)
-            assert result is None, "stop_loss sonrasi ayni markete yeniden bet acilmamali"
-
-    def test_reopens_new_leader_after_stop_loss_in_window(self):
-        """Pencere ICINDEYKEN SL sonrasi yeni lider acilir; DISINDAYSA acilmaz.
-
-        Bug-kaynagi (2026-08-07/08): `_reopen_after_stop_loss` pencere
-        disinda bile otomatik yeni-lider aciliyordu -> ayni sehire/gune birden
-        fazla esige ard arda bet (Wellington 12C/13C cift kayip).
-
-        Yeni kural (2026-08-08): SL sonrasi yeniden acilim `_is_in_betting_window`
-        (04:00-23:30 UTC) kuralina tabidir. Pencere kapaliyken acilim YOK.
-        """
-        from unittest.mock import patch
-        from database.db import get_session
-        from executor.bet_placer import BetPlacer
-        from database.models import Bet
-
-        def _mk(sess):
-            _add_market(sess, "m9", 0.60)
-            _add_market(sess, "m10", 0.80)
-            sess.add(
-                Bet(
-                    market_id="m9",
-                    city="Testville",
-                    city_code="TEST",
-                    side="YES",
-                    amount=10.0,
-                    price=0.60,
-                    status="closed_early",
-                    close_reason="stop_loss: -54.5%",
-                    closed_at=(datetime.now(timezone.utc) - timedelta(minutes=1)).replace(tzinfo=None),
-                )
-            )
-            sess.commit()
-
-        # 1) Pencere ACIK -> yeni lider m10'a bet acilir
-        with get_session() as s:
-            _add_portfolio(s, 1000.0)
-            _mk(s)
-            bp1 = BetPlacer()
-            with patch.object(bp1, "_is_in_betting_window", return_value=True):
-                reopened = bp1._reopen_after_stop_loss(s)
-            assert reopened == 1, f"pencere acikka yeni lider acilmali, acilan={reopened}"
-            existing = (
-                s.query(Bet).filter(Bet.market_id == "m10", Bet.status.in_(("active", "placed", "pending"))).first()
-            )
-            assert existing is not None, "pencere aciken m10'a bet acilmali"
-
-        # 2) Pencere KAPALI -> acilma YOK (Wellington gece 00:10 ornegi)
-        with get_session() as s2:
-            # Ayni test icinde DB paylasildigi icin once onu temizle
-            from database.models import WeatherMarket
-
-            s2.query(Bet).delete()
-            s2.query(WeatherMarket).delete()
-            s2.commit()
-            _mk(s2)
-            bp2 = BetPlacer()
-            with patch.object(bp2, "_is_in_betting_window", return_value=False):
-                reopened2 = bp2._reopen_after_stop_loss(s2)
-            assert reopened2 == 0, f"pencere kapaliyken yeniden acilma olmamali, acilan={reopened2}"
-            existing2 = (
-                s2.query(Bet).filter(Bet.market_id == "m10", Bet.status.in_(("active", "placed", "pending"))).first()
-            )
-            assert existing2 is None, "pencere kapaliyken m10'a bet acilmamali"
+            assert result is None, "kapanis sonrasi ayni markete yeniden bet acilmamali"
 
     def test_allows_reentry_after_old_non_loss_close(self):
         """Eski (guard penceresi disinda) kapanmalar re-entry'i engellememeli."""
@@ -468,114 +401,8 @@ class TestCloseBetForRotation:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 3. SCHEDULER (run_risk_management, run_update_prices)
+# 3. SCHEDULER (run_update_prices)
 # ══════════════════════════════════════════════════════════════════════════
-
-
-class TestRunRiskManagement:
-    def test_no_open_bets_returns_message(self):
-        from jobs.scheduler import run_risk_management
-
-        result = run_risk_management()
-        assert "no open positions" in result
-
-    def test_updates_unrealized_pnl(self):
-        from database.db import get_session
-        from jobs.scheduler import run_risk_management
-        from database.models import Bet
-
-        with get_session() as s:
-            _add_portfolio(s, 1000.0)
-            _add_market(s, "m9", 0.50)
-            s.add(
-                Bet(
-                    market_id="m9",
-                    city="Testville",
-                    city_code="TEST",
-                    side="YES",
-                    amount=100.0,
-                    price=0.50,
-                    shares=200.0,
-                    entry_price=0.50,
-                    entry_fee=0.40,
-                    status="placed",
-                )
-            )
-            s.commit()
-            result = run_risk_management(session=s)
-            assert "no open positions" not in result
-            bet = s.query(Bet).filter_by(market_id="m9").first()
-            assert bet.unrealized_pnl is not None
-
-    def test_stop_loss_closes_position(self):
-        """Fiyat %stop_loss_pct'den fazla duserse bet closed_early + close_reason alir."""
-
-        # Stop-loss yalnizca EDGE modunda aktiftir (spread modunda devre disi).
-        from config.settings import bot_config
-
-        _old_strategy = bot_config.strategy.betting_strategy
-        bot_config.strategy.betting_strategy = "edge"
-        try:
-            self._run_stop_loss_test()
-        finally:
-            bot_config.strategy.betting_strategy = _old_strategy
-
-    def _run_stop_loss_test(self):
-        from database.db import get_session
-        from jobs.scheduler import run_risk_management
-        from database.models import Bet
-
-        with get_session() as s:
-            _add_portfolio(s, 1000.0)
-            _add_market(s, "m10", yes_price=0.05)  # yes_price 0.50 -> 0.05 = %90 dusus
-            s.add(
-                Bet(
-                    market_id="m10",
-                    city="Testville",
-                    city_code="TEST",
-                    side="YES",
-                    amount=100.0,
-                    price=0.50,
-                    shares=200.0,
-                    entry_price=0.50,
-                    entry_fee=0.40,
-                    status="placed",
-                )
-            )
-            s.commit()
-            run_risk_management(session=s)
-            bet = s.query(Bet).filter_by(market_id="m10").first()
-            assert bet.status == "closed_early"
-            assert bet.close_reason and "stop_loss" in bet.close_reason
-            assert bet.closed_at is not None
-
-    def test_stop_loss_holds_when_price_ok(self):
-        """Fiyat makul seviyedeyse bet acik kalir."""
-        from database.db import get_session
-        from jobs.scheduler import run_risk_management
-        from database.models import Bet
-
-        with get_session() as s:
-            _add_portfolio(s, 1000.0)
-            _add_market(s, "m11", yes_price=0.48)  # %4 dusus < %20 stop-loss
-            s.add(
-                Bet(
-                    market_id="m11",
-                    city="Testville",
-                    city_code="TEST",
-                    side="YES",
-                    amount=100.0,
-                    price=0.50,
-                    shares=200.0,
-                    entry_price=0.50,
-                    entry_fee=0.40,
-                    status="placed",
-                )
-            )
-            s.commit()
-            run_risk_management(session=s)
-            bet = s.query(Bet).filter_by(market_id="m11").first()
-            assert bet.status == "placed"
 
 
 class TestRunUpdatePrices:

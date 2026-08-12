@@ -150,12 +150,8 @@ class SettlementEngine:
         )
 
         if not open_bets:
-            # 2026-08-08 bugfix: SL ile kapanmis betin marketi hala CANLI
-            # olabilir (kapanis 24:00 UTC = target_date + 12h). Onceki mantik
-            # acik bet yoksa hemen "expired" yapiyordu -> _reopen_after_stop_loss
-            # status='open' aradigi icin yeni lider ASLA acilamiyordu (Toronto
-            # 30C, Miami 33.6C, Buenos Aires 13C). Kapanis gecmeden expired
-            # isaretlenmez; Gamma cozumlemesi yine ayni dongude denenir.
+            # Kapanis gecmeden expired isaretlenmez; Gamma cozumlemesi yine
+            # ayni dongude denenir.
             now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
             if market.target_date:
                 _close = market.target_date + timedelta(hours=12)  # 24:00 UTC kapanis

@@ -183,29 +183,6 @@ class StrategyConfig:
     betting_window_enabled: bool = False  # bahis penceresi kontrolu DEVRE DISI
 
 
-@dataclass
-class RiskConfig:
-    """Active risk management: position-level stop-loss, take-profit, time decay, rebalance.
-
-    DISABLED: all early exits set to extreme values so bets ONLY close at settlement (ST).
-    """
-
-    # Position-level limits
-    stop_loss_pct: float = 0.20  # %20 kayipta pozisyonu kapat
-    take_profit_pct: float = 999.0  # %999 karda kapat = asla tetiklenmez
-    trailing_stop_pct: float = 999.0  # %999 trailing drop = asla tetiklenmez
-
-    # Time-based exits
-    time_decay_hours: int = 0  # 0 saat = time decay devre disi
-    time_decay_threshold: float = -999.0  # %999 zararda kapat = asla tetiklenmez
-
-    # Rebalancing (disabled via extreme ratio)
-    min_rebalance_edge_ratio: float = 999.0
-    rebalance_min_loss: float = -999.0
-
-    # Risk management loop interval (seconds)
-
-
 # ── Large constant dicts (module-level, shared by all) ────────────────────
 _ICAO_COORDS = {
     # Turkey (4)
@@ -473,13 +450,11 @@ class BotConfig:
     polymarket: PolymarketConfig = None  # type: ignore[assignment]
     meteo: MeteoConfig = None  # type: ignore[assignment]
     strategy: StrategyConfig = None  # type: ignore[assignment]
-    risk: RiskConfig = None  # type: ignore[assignment]
 
     def __post_init__(self):
         self.polymarket = self.polymarket or PolymarketConfig()
         self.meteo = self.meteo or MeteoConfig()
         self.strategy = self.strategy or StrategyConfig()
-        self.risk = self.risk or RiskConfig()
 
         # ── Betting windows initialization ──────────────────────────
         # Karar (2026-08-08): tek pencere 04:00-23:30 UTC. Pazar geceleri

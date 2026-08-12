@@ -66,9 +66,7 @@ def test_single_fill_deduction():
         # Second call with same reason — would be a double-debit in real code
         debit_stake(session, 50.0, "bet_open:test-single-fill")
         session.commit()
-        assert _portfolio_cash() == 900.0, (
-            f"Expected 900.0 after two $50 debits, got {_portfolio_cash()}"
-        )
+        assert _portfolio_cash() == 900.0, f"Expected 900.0 after two $50 debits, got {_portfolio_cash()}"
         assert first_deduction == 50.0
 
 
@@ -89,11 +87,9 @@ def test_early_exit_returns_principal():
     assert _portfolio_cash() == 800.0, f"Expected 800, got {_portfolio_cash()}"
 
     with get_session() as session:
-        credit_sale(session, 200.0, "early_exit:test-principal:stop_loss")
+        credit_sale(session, 200.0, "early_exit:test-principal:rotation")
         session.commit()
-    assert _portfolio_cash() == 1000.0, (
-        f"Expected 1000 (net zero), got {_portfolio_cash()}"
-    )
+    assert _portfolio_cash() == 1000.0, f"Expected 1000 (net zero), got {_portfolio_cash()}"
 
 
 def test_early_exit_with_profit():
@@ -113,11 +109,9 @@ def test_early_exit_with_profit():
     assert _portfolio_cash() == 900.0
 
     with get_session() as session:
-        credit_sale(session, 150.0, "early_exit:test-profit:take_profit")
+        credit_sale(session, 150.0, "early_exit:test-profit:rotation")
         session.commit()
-    assert _portfolio_cash() == 1050.0, (
-        f"Expected 1050 (900+150), got {_portfolio_cash()}"
-    )
+    assert _portfolio_cash() == 1050.0, f"Expected 1050 (900+150), got {_portfolio_cash()}"
 
 
 def test_negative_cash_guard():
@@ -135,9 +129,7 @@ def test_negative_cash_guard():
             assert "Insufficient cash" in str(exc), f"Unexpected message: {exc}"
 
     # Cash unchanged after failed debit
-    assert _portfolio_cash() == 100.0, (
-        f"Cash should still be 100, got {_portfolio_cash()}"
-    )
+    assert _portfolio_cash() == 100.0, f"Cash should still be 100, got {_portfolio_cash()}"
 
 
 def test_invariant_full_cycle():
@@ -159,13 +151,9 @@ def test_invariant_full_cycle():
     assert _portfolio_cash() == 900.0
 
     with get_session() as session:
-        credit_settlement(
-            session, payout=200.0, fee=10.0, reason="settle:test-cycle:won"
-        )
+        credit_settlement(session, payout=200.0, fee=10.0, reason="settle:test-cycle:won")
         session.commit()
-    assert _portfolio_cash() == 1090.0, (
-        f"Expected 1090 (900+200-10), got {_portfolio_cash()}"
-    )
+    assert _portfolio_cash() == 1090.0, f"Expected 1090 (900+200-10), got {_portfolio_cash()}"
 
     # Total profit = 1090 - 1000 = $90 correct
     profit = _portfolio_cash() - 1000.0

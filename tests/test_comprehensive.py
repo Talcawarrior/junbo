@@ -161,18 +161,6 @@ class TestRiskManagement:
         expected = (1000.0 + 50.0) * 0.25
         assert abs(max_exposure - expected) < 0.01
 
-    def test_stop_loss_trigger(self):
-        """Stop-loss trigger testi."""
-        edge = -0.03
-        stop_loss_threshold = -0.02
-        assert edge < stop_loss_threshold
-
-    def test_stop_loss_safe_zone(self):
-        """Stop-loss safe zone testi."""
-        edge = -0.01
-        stop_loss_threshold = -0.02
-        assert not (edge < stop_loss_threshold)
-
 
 # ============================================================================
 # 5. E2E TESTLERI

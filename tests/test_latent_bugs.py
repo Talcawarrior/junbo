@@ -359,7 +359,6 @@ ALLOWED_DEAD = {
     "run_refresh_open_prices",
     "run_settle",
     "run_report",
-    "run_risk_management",
     "analyze_single",
     # Accounting internal
     "debit_stake",
@@ -374,13 +373,6 @@ ALLOWED_DEAD = {
     "get_total_exposure",
     "get_daily_pnl",
     "daily_loss_limit_amount",
-    "check_rebalance",
-    "check_model_reversal",
-    "check_stop_loss",
-    "check_take_profit",
-    "check_time_decay",
-    "check_trailing_stop",
-    "check_early_exit",
     "is_bot_locked",
     # Settler internal
     "settle_all",
@@ -493,6 +485,10 @@ ALLOWED_DEAD = {
     "load_snapshots",
     "hours_between",
     "mins",
+    # Excel export script (standalone, run via __main__)
+    "bet_rows",
+    # Outcome parsing utility helper (used inside parse_resolved_outcome)
+    "market_is_resolved",
 }
 
 
