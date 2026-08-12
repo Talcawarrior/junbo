@@ -47,7 +47,13 @@ def _day_range(day):
 
 
 def _last_forecast_per_city_metric(session, target_day):
-    """(city_code, metric) -> en son ensemble tahmini (tum modeller ortalamasi)."""
+    """(city_code, metric) -> (en son ensemble tahmini, model spread std).
+
+    Ortalama: tum modellerin esit ortalamasi (2026-08-11 kullanici karari;
+    agirlikli merkezi tek modele kaydirip spread'i bozuyordu).
+    std: en son fetched_at anindaki model degerlerinin yari acikligi
+    (max-min)/2 — fair-value hesaplarinda kullanilir.
+    """
     from sqlalchemy import func
 
     lo, hi = _day_range(target_day)
@@ -75,13 +81,27 @@ def _last_forecast_per_city_metric(session, target_day):
             )
             .all()
         )
-        # ESIT ORTALAMA (2026-08-11 kullanici karari: geri alindi). Backtest:
-        # esit ortalama +$53,284 vs agirlikli (ecmwf 0.45) +$48,964 — agirlikli
-        # merkezi tek modele kaydirip spread'i bozuyor. model_weight KULLANILMAZ.
         vals = [m.predicted_value for m in models if m.predicted_value is not None]
         if vals:
-            result[(code, metric)] = sum(vals) / len(vals)
+            mean = sum(vals) / len(vals)
+            std = (max(vals) - min(vals)) / 2.0 if len(vals) > 1 else 1.0
+            result[(code, metric)] = (mean, std)
     return result
+
+
+def _fair_price(mean: float, std: float, threshold: float, days_ahead: int = 2) -> float:
+    """Fair YES fiyati: HIGH market P(T >= X) = 1 - CDF((X-mean)/std).
+
+    days_ahead basina 0.5C belirsizlik eklenir (min total_std=1.0) — botun
+    `utils.probability.estimate_probability` mantigiyla ayni.
+    """
+    from utils.probability import normal_cdf
+
+    import math
+
+    total_std = max(math.sqrt(std**2 + (days_ahead * 0.5) ** 2), 1.0)
+    prob = 1.0 - normal_cdf((threshold - mean) / total_std)
+    return max(0.01, min(0.99, prob))
 
 
 def _find_market(session, city_name, metric, target_day, thr):
@@ -193,7 +213,8 @@ def _place_spread_bets_inner(session, target_day) -> dict:
         logger.info("spread: bias verisi olan sehir yok, bet acilmiyor (yeni sehirler atlanir)")
         return {"placed": 0, "closed": 0, "skipped": 0, "cities": []}
 
-    candidates.sort(key=lambda kv_acc: (kv_acc[1], -kv_acc[0][1]))
+    # Siralama: EN AZ SAPAN (dusuk |bias|) once; esitse daha SICAK (yuksek mean) once.
+    candidates.sort(key=lambda kv_acc: (kv_acc[1], -kv_acc[0][1][0]))
     # Ayni sehir birden fazla metric ile gelirse (temperature_max/min) ilkini
     # al, digerini atla — portfoy sehir bazinda unique, 15 farkli sehir olur.
     selected = []
@@ -233,7 +254,8 @@ def _place_spread_bets_inner(session, target_day) -> dict:
         if remaining <= 0:
             skipped += 1
             continue
-        center = round(fval)
+        fmean, fstd = fval
+        center = round(fmean)
         targets = set(range(center - radius, center + radius + 1))
 
         # KAYDIRMA KAPALI (2026-08-12 kullanici karari): merkez kayarsa bile
@@ -271,6 +293,22 @@ def _place_spread_bets_inner(session, target_day) -> dict:
                 continue
             entry = float(mkt.yes_price)
             if not (0 < entry < max_entry):
+                skipped += 1
+                continue
+
+            # FAIR-VALUE FILTRESI (2026-08-12 kullanici karari):
+            # Sadece market fiyati model olasiliginin ALTINDA (ucuz) ise gir.
+            # Backtest: filtresiz -$51 vs fair-value +$113 (0.10-0.20 kesik).
+            # Market fiyat > model probu ise "piyasa zaten biliyor" — edge yok.
+            fair = _fair_price(fmean, fstd, float(thr), days_ahead=2)
+            if entry >= fair:
+                skipped += 1
+                continue
+
+            # 0.10-0.20 OLUM BOLGE (2026-08-12 kullanici karari):
+            # Backtest: 0.10-0.20 arasi ne carpan ne winrate veriyor (-$81);
+            # 0.00-0.10 longshot'lar +$78 (nadir ama 40-200x). Bu band girilmez.
+            if 0.10 <= entry < 0.20:
                 skipped += 1
                 continue
             pf = session.query(Portfolio).filter(Portfolio.id == 1).first()
