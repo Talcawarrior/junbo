@@ -599,7 +599,14 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
         return iso === filterDate;
       });
     }
-    if (search) data = data.filter((t) => t.city.toLowerCase().includes(search.toLowerCase()) || t.strategy.toLowerCase().includes(search.toLowerCase()));
+    if (search) {
+      const q = search.toLowerCase().trim();
+      data = data.filter((t) =>
+        t.id.toLowerCase().includes(q) ||
+        t.city.toLowerCase().includes(q) ||
+        t.strategy.toLowerCase().includes(q)
+      );
+    }
     data.sort((a, b) => {
       let cmp = 0;
       if (sortBy === "date") cmp = 0;
@@ -665,7 +672,7 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
               <input
                 type="text"
-                placeholder="Şehir veya strateji ara..."
+                placeholder="Bet #, şehir veya strateji ara..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-full pl-8 pr-3 py-1.5 text-xs border rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-teal-300"
@@ -788,6 +795,7 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
+                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: TEXT_MUTED }}>#</TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider cursor-pointer select-none" style={{ color: TEXT_MUTED }} onClick={() => toggleSort("date")}>Tarih <SortIcon col="date" /></TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: TEXT_MUTED }}>Şehir</TableHead>
                     <TableHead className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: TEXT_MUTED }}>Sıcaklık</TableHead>
@@ -803,6 +811,7 @@ function TradesTab({ tradeHistory, historyStats, totalPnl }: { tradeHistory: Tra
                 <TableBody>
                   {filtered.map((t) => (
                     <TableRow key={t.id}>
+                      <TableCell className="text-xs tabular-nums font-mono" style={{ color: TEXT_MUTED }}>{t.id}</TableCell>
                       <TableCell className="text-xs tabular-nums" style={{ color: TEXT_MUTED }}>{t.timestamp}</TableCell>
                       <TableCell className="font-medium text-sm" style={{ color: TEXT_PRIMARY }}>{t.city}</TableCell>
                       <TableCell className="text-xs tabular-nums" style={{ color: TEXT_MUTED }}>{t.strikeTemp != null ? t.strikeTemp + "°C" : "—"}</TableCell>
