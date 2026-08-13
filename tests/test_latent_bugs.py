@@ -489,6 +489,10 @@ ALLOWED_DEAD = {
     "bet_rows",
     # Outcome parsing utility helper (used inside parse_resolved_outcome)
     "market_is_resolved",
+    # Empirical CDF probability model (2026-08-12, kod entegrasyonu settlement sonrasi)
+    "estimate_probability_empirical",
+    "empirical_cdf",
+    "load_empirical_errors",
 }
 
 

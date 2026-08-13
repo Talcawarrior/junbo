@@ -113,23 +113,99 @@ def estimate_probability(  # pylint: disable=too-many-arguments,too-many-positio
     elif mt == "LOW":
         prob = normal_cdf(z)
     elif mt == "RANGE":
-        low = (
-            range_low
-            if (range_low is not None and range_high is not None)
-            else threshold - 0.5
-        )
-        high = (
-            range_high
-            if (range_low is not None and range_high is not None)
-            else threshold + 0.5
-        )
-        prob = normal_cdf((high - mean) / total_std) - normal_cdf(
-            (low - mean) / total_std
-        )
+        low = range_low if (range_low is not None and range_high is not None) else threshold - 0.5
+        high = range_high if (range_low is not None and range_high is not None) else threshold + 0.5
+        prob = normal_cdf((high - mean) / total_std) - normal_cdf((low - mean) / total_std)
     else:
         logger.warning("Unknown market_type=%r, falling back to HIGH", market_type)
         prob = 1.0 - normal_cdf(z)
 
+    return max(0.01, min(0.99, prob))
+
+
+# ── Empirical CDF (kalın kuyruklu gerçek hata dağılımı) ─────────────────────
+# Gaussian varsayımı hatalı: gerçek tahmin hataları kalın kuyruklu
+# (|hata|>2C: %18.8 gerçek vs %4.5 Gaussian; |hata|>3C: %7.3 vs %0.3).
+# Empirical CDF, geçmiş (tahmin - gerçek) hata dağılımından P(gerçek >= esik)
+# hesaplar ve Gaussian'dan daha doğru fair-value verir (tutma %48->%53, 2026-08-12).
+
+_EMPIRICAL_ERRORS: dict[str, list[float]] | None = None
+_EMPIRICAL_SORTED: dict[str, list[float]] | None = None
+
+
+def load_empirical_errors(metric: str = "temperature_max") -> list[float]:
+    """Kalibrasyon verisinden hata dagilimini yukler (bir kez, lazy, metrik ayri).
+
+    hata = gercek - tahmin. `historical_calibrations` tablosundan
+    (actual_value - predicted_value) toplanir. MAX ve MIN ayri dagilimlardir
+    (std farki 0.46C, 2026-08-12 olcumu). Tablo bos/eksikse bos liste.
+    """
+    global _EMPIRICAL_ERRORS, _EMPIRICAL_SORTED
+    if _EMPIRICAL_ERRORS is not None:
+        return _EMPIRICAL_ERRORS.get(metric, [])
+    errs: dict[str, list[float]] = {"temperature_max": [], "temperature_min": []}
+    try:
+        import sqlite3
+
+        from database.db import DB_PATH
+
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute(
+            "SELECT metric, actual_value - predicted_value FROM historical_calibrations "
+            "WHERE actual_value IS NOT NULL AND predicted_value IS NOT NULL"
+        ).fetchall()
+        conn.close()
+        for met, e in rows:
+            if e is None or met not in errs:
+                continue
+            errs[met].append(float(e))
+    except Exception:
+        errs = {"temperature_max": [], "temperature_min": []}
+    _EMPIRICAL_ERRORS = errs
+    _EMPIRICAL_SORTED = {k: sorted(v) for k, v in errs.items()}
+    return errs.get(metric, [])
+
+
+def empirical_cdf(x: float, metric: str = "temperature_max") -> float:
+    """Gercek hata dagiliminda P(hata <= x). Kalin kuyruk dahil, metrik ayri."""
+    errs = load_empirical_errors(metric)
+    if not errs or _EMPIRICAL_SORTED is None:
+        return normal_cdf(x)  # veri yoksa Gaussian fallback
+    import bisect
+
+    return bisect.bisect_right(_EMPIRICAL_SORTED.get(metric, []), x) / len(errs)
+
+
+def estimate_probability_empirical(
+    mean: float,
+    threshold: float,
+    side: str = "HIGH",
+    metric: str = "temperature_max",
+    lag_hours: float = 48.0,
+) -> float:
+    """Empirical CDF ile P(YES). Kalibrasyon hatalarindan gercek dagilim.
+
+    HIGH (max): P(T >= esik) = P(hata >= esik - mean) = 1 - CDF(esik - mean)
+    LOW  (min): P(T <= esik) = P(hata <= esik - mean) = CDF(esik - mean)
+
+    metric: max/min ayri dagilimlar (std farki 0.46C, 2026-08-12).
+    lag_hours: tahmin vadeye ne kadar uzak -> hata std'sine +0.5C/48h belirsizlik.
+
+    Veri yoksa Gaussian'a duser (eski davranis korunur).
+    """
+    errs = load_empirical_errors(metric)
+    if not errs or _EMPIRICAL_SORTED is None or not _EMPIRICAL_SORTED.get(metric):
+        # fallback: Gaussian (arsiv ort std, lag belirsizligi ile)
+        base_std = 1.98 if metric == "temperature_max" else 1.53
+        total_std = math.sqrt(base_std**2 + (lag_hours / 48.0 * 0.5) ** 2)
+        z = (threshold - mean) / total_std
+        prob = 1.0 - normal_cdf(z) if side.upper() == "HIGH" else normal_cdf(z)
+        return max(0.01, min(0.99, prob))
+    z = threshold - mean
+    if side.upper() == "HIGH":
+        prob = 1.0 - empirical_cdf(z, metric)
+    else:
+        prob = empirical_cdf(z, metric)
     return max(0.01, min(0.99, prob))
 
 
@@ -165,9 +241,7 @@ def compute_effective_min_edge(market, std: float | None = None) -> float:
         base = s.min_edge
 
     try:
-        resolution = getattr(market, "resolution_date", None) or getattr(
-            market, "target_date", None
-        )
+        resolution = getattr(market, "resolution_date", None) or getattr(market, "target_date", None)
         if resolution is None:
             return base
         now = datetime.now(timezone.utc)
