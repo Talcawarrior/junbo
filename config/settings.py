@@ -162,8 +162,14 @@ class StrategyConfig:
     # dereceye YES bet acar (ilk snapshot fiyati). Eski edge-tabanli mod
     # BETTING_STRATEGY=edge ile geri donulebilir.
     betting_strategy: str = "spread"
-    spread_radius: int = 3  # +/- derece (tahmin +/- 3)
-    spread_max_cities: int = 15  # tahmini en yuksek ilk N sehir
+    # 2026-08-14 kullanici karari: 7'li spread KALDIRILDI. RANGE marketlerde
+    # sadece 1 esik kazanir (7'den 6'si matematiksel kayip). Tek esik = merkez.
+    # Backtest (orderbook, gercek fiyat, empirical CDF, 99 gunluk bias):
+    #   spread=0 + bias-top 12 -> +$41.86 (winrate %43.6)
+    #   spread=3 (eski)       -> -$317 (winrate %11)
+    spread_radius: int = 0  # TEK ESIK: +/- 0 derece (sadece merkez)
+    # 2026-08-14: 12 sehir (en az sapan). Backtest: bias-top 12 en karli (+$41.9).
+    spread_max_cities: int = 12  # tahmini en yuksek ilk N sehir
     spread_max_entry: float = 0.30  # ust sinir: 0.30+ fiyatli esiklere girilmez (backtest en iyi: +$53k, 2026-08-11)
     spread_stake_usd: float = 2.0  # esik basina stake
     spread_max_bets_per_day: int = 350  # gunluk limit: 3 gun x 15 sehir x 7 esik = 315 + marj
