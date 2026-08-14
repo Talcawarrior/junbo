@@ -390,6 +390,14 @@ class PolymarketScraper:
         )
         metric = "temperature_max" if "highest" in question_lower or "above" in question_lower else "temperature_min"
         city_code = self._extract_city(question)
+        # Cozum kaynagi istasyonu (2026-08-13): Polymarket marketleri
+        # resolutionSource'taki ICAO istasyonundan cozuluyor (orn. UUWW, EGLC).
+        # Bu istasyon bazen city_code'dan (CITY_ICAO_MAP) farkli — yanlis
+        # istasyondan meteo verisi alininca tahminler sapiyor. Resolution
+        # source'taki ICAO config'te varsa onu kullan (koordinat dogru olsun).
+        rs_icao = self._extract_resolution_icao(raw)
+        if rs_icao and rs_icao in config.ICAO_COORDS:
+            city_code = rs_icao
         market_type = self._determine_market_type(question)
         coords = self.get_city_coords(city_code) if city_code else None
 
@@ -643,6 +651,30 @@ class PolymarketScraper:
         for city_name, icao_code in config.CITY_ICAO_MAP.items():
             if city_name in text_lower:
                 return icao_code
+        return ""
+
+    def _extract_resolution_icao(self, raw: dict) -> str:
+        """Cozum istasyonu ICAO'sunu cikar: resolutionSource URL'inden veya
+        description'daki 'site=XXXX' (NOAA timeseries) kaynagindan.
+
+        Polymarket marketleri bu istasyondan cozuluyor; city_code ile farkli
+        olabiliyor. ICAO bulunamazsa bos doner.
+        """
+        import re
+
+        try:
+            rs = raw.get("resolutionSource") or raw.get("resolution_source") or ""
+            if rs:
+                parts = str(rs).rstrip("/").split("/")
+                last = parts[-1] if parts else ""
+                if len(last) == 4 and last.isalpha() and last.isupper():
+                    return last
+            desc = raw.get("description") or ""
+            m = re.search(r"site=([A-Z]{4})", desc)
+            if m:
+                return m.group(1)
+        except Exception:
+            pass
         return ""
 
     def _determine_market_type(self, question: str) -> str:

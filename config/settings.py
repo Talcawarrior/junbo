@@ -230,6 +230,16 @@ _ICAO_COORDS = {
     "ESSA": (59.6498, 17.9294),
     "LGAV": (37.9364, 23.9472),
     "LPPT": (38.7750, -9.1354),
+    # Polymarket cozum istasyonlari (resolutionSource) — bot bunlardan veri almali
+    # (2026-08-13: marketler bu ICAO'larla cozuluyor, city_code'dan farkli olabiliyor)
+    "UUWW": (55.5915, 37.2615),   # Moscow Vnukovo (cozum) vs UUEE Sheremetyevo (bot)
+    "EGLC": (51.5053, 0.0553),    # London City (cozum) vs EGLL Heathrow (bot)
+    "LFPB": (48.9694, 2.4414),    # Paris Le Bourget (cozum) vs LFPG CDG (bot)
+    "RKSI": (37.4492, 126.4510),  # Seoul Incheon (cozum) vs RKSS Gimpo (bot)
+    "KBKF": (39.7056, -104.7551), # Denver Buckley AFB (cozum) vs KDEN (bot)
+    "KHOU": (29.6524, -95.2772),  # Houston Hobby (cozum) vs KIAH Bush (bot)
+    "RCSS": (25.0641, 121.5502),  # Taipei Songshan (cozum) vs RCTP Taoyuan (bot)
+    "MPMG": (8.9733, -79.5556),   # Panama City Albrook (cozum) vs MPTO (bot)
     # Middle East (3)
     "OMDB": (25.2532, 55.3657),
     "LLBG": (32.0114, 34.8867),
