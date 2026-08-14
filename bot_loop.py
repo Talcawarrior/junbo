@@ -55,6 +55,9 @@ _PRICE_POLL_INTERVAL = 300  # 5 dakika
 # Meteo tahmin dongusu — Open-Meteo saatlik guncellenir
 _WEATHER_FETCH_INTERVAL = 3600  # 1 saat
 
+# METAR canli sicaklik dongusu — aviationweather.gov 30dk'da bir guncellenir
+_METAR_POLL_INTERVAL = 1800  # 30 dakika
+
 
 def _get_price_poll_interval(state, now: datetime) -> int:
     """Price poller interval karari (saf fonksiyon, test edilebilir).
@@ -245,6 +248,39 @@ async def price_poller_loop(state):
             interval = _get_price_poll_interval(state, now)
             await asyncio.sleep(interval)
     logger.info("Price poller loop exited (is_running=%s)", state.is_running)
+
+
+async def metar_loop(state):
+    """METAR canli sicaklik dongusu — her 30dk'da bir.
+
+    Aviationweather.gov (NOAA, bedava) istasyon sicakligini 30dk'da bir
+    gunceller. Bu dongu her 30dk'da bir acik marketlerin METAR'ini ceker;
+    sicaklik max'a cikip 2 kez arka arkaya dustuyse zirve kilitlenir ve
+    o sehrin kazanan bucket'ina TEK ESIK YES bet acilir.
+
+    Kullanici karari (2026-08-14): "acik bet sehirleri listesini al, gun
+    icinde metardan takip et, sicaklik dustugunu teyit ettiginde beti
+    yapistir. %100 tutturmamiz onemli degil, tek esik olacagi icin kayip
+    cok olmayacaktir."
+    """
+    from jobs.metar_peak import run_metar_peak_bets
+
+    logger.info("METAR loop basladi (interval=%ds)", _METAR_POLL_INTERVAL)
+    while state.is_running:
+        try:
+            await asyncio.wait_for(asyncio.to_thread(run_metar_peak_bets), timeout=_FETCH_TIMEOUT)
+        except asyncio.CancelledError:
+            logger.info("METAR loop cancelled")
+            break
+        except asyncio.TimeoutError:
+            logger.error("METAR poll timed out — retry in 5min")
+            await asyncio.sleep(300)
+        except Exception as e:
+            logger.error("METAR loop error: %s — retry in 5min", e)
+            await asyncio.sleep(300)
+        else:
+            await asyncio.sleep(_METAR_POLL_INTERVAL)
+    logger.info("METAR loop exited (is_running=%s)", state.is_running)
 
 
 async def scan_and_bet_loop(state):

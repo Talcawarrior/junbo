@@ -32,10 +32,11 @@ Open-Meteo + WeatherAPI ──> scrapers/meteo.py ──> weather_forecasts (DB)
 | Modul | Sorumluluk | Dosya |
 |---|---|---|
 | API | FastAPI endpoints, WebSocket, BotState | `api.py` |
-| Bot loop | 4 asyncio arka plan dongusu | `bot_loop.py` |
+| Bot loop | 6 asyncio arka plan dongusu | `bot_loop.py` |
 | Calculator | 8-model ensemble olasilik, Kelly | `engine/calculator.py` |
 | Strategy | RiskManager + BettingEngine + early exit | `engine/strategy.py` |
 | Bet Placer | Paper + canli bahis | `executor/bet_placer.py` |
+| METAR peak | Canli istasyon sicakligi -> zirve tespiti -> tek esik bet | `jobs/metar_peak.py` + `scrapers/metar.py` |
 | Settler | Gamma API settlement kontrol, PnL | `executor/settler.py` |
 | Scraper | Polymarket + hava durumu cekici | `scrapers/` |
 | DB | SQLAlchemy + WAL | `database/db.py` |
@@ -331,6 +332,7 @@ Detaylar icin `GELISTIRICI_NOTLARI.md`'ya bakin (bolum 12: dogrulanmis davranis 
 - **2026-08-12:** **Erken kapanis mekanizmalari komple kaldirildi** (kullanici karari: "sistemde hicbir yerde stoploss/take-profit/partial-TP ve benzeri kalmayacak"). `RiskConfig`, `run_risk_management`, `check_stop_loss`, `check_take_profit`, `check_trailing_stop`, `check_time_decay`, `check_early_exit`, `check_rebalance`, `check_model_reversal`, `_reopen_after_stop_loss` ve `partial_tp_done` kolonu kaldirildi. Betler yalnizca settlement'ta kapanir (backtest ile ayni davranis). SL/TP test dosyalari (test_active_risk_management, test_take_profit_comprehensive, test_risk_behavior, edge/test_sl_reopen_chain, scripts/replay_test) silindi.
 - **2026-08-12 (ikinci tur):** **Top-15 kapatma KALDIRILDI** (kullanici karari: "ilk 15 bias sadece yeni gun aciliminda kullanilacak, kapatma yapilmayacak"). Sehir top-15'ten dusse bile acik betler settlement'a kadar TUTULUR — sadece yeni bet acilmaz. Bu, Istanbul 13 Agustos betlerinin tamaminin "out of top-15 selection" ile satilmasini (kazanan esikler dahil) onler. Kullanilmayan `tie_loser` (`close_losing_twin_bets`), `stale_cleanup` (`_cleanup_stale_bets`) ve tarihsel `24h_rule` mekanizmalari da silindi (kodda kapanis uretmiyorlardi). Bet loglarina `bet#ID` eklendi (izlenebilirlik).
 - **2026-08-12 (ucuncu tur):** **Backtest dogrulamasi** — `max_entry` taramasi (0.29-0.12) ve spread (3/5/7) x kaydirma (shift/noshift) kombinasyonlarinin tamaminda EN KARLI senaryo: **spread=3 + KAYDIRMASIZ (acilan bet settlement'a kadar) + tum fiyatlar = +$74.26**. `spread_max_entry=0.30` kazananlarin %65'ini kesiyor (0.30 alti winrate %8.6 vs 0.30 ustu %45) — bot'un canli config'i hala 0.30, karar logu (0.99) ile celisiyor.
+- **2026-08-14:** **METAR zirve-tespiti tek esik stratejisi.** Polymarket weather marketleri Weather Underground istasyon verisinden cozuluyor; WU ticari API ~$500/ay ama aviationweather.gov (NOAA resmi METAR, **bedava**, 30dk guncelleme) AYNI istasyon verisini verir. `scrapers/metar.py` + `jobs/metar_peak.py`: acik marketli sehirlerin METAR'ini gun icinde izler, sicaklik max'a cikip **2 kez arka arkaya dustugunde** zirve kilitlenir, o sehrin kazanan bucket'ina (round(max)) **tek esik YES** bet acar ($1 stake, order_id `metar_*`). `bot_loop.metar_loop` 30dk'da bir calisir. Kapanisa <4 saat kalan sehirler atlanir. Sermaye +1000 USD (cash $191->$1191). Manuel dogrulama: 14 Agu'da 5 bet acildi (London 25C, Dallas 37C, Toronto 26C, Mexico City 19C, Buenos Aires 10C, entry 0.010). Kullanici karari: "acik bet sehirleri listesini al, metardan takip et, dustugunu teyit edince beti yapistir, %100 onemli degil, tek esik kayip az". Suite: 636 passed.
 
 ---
 

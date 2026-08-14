@@ -493,6 +493,16 @@ ALLOWED_DEAD = {
     "estimate_probability_empirical",
     "empirical_cdf",
     "load_empirical_errors",
+    # METAR live helpers (2026-08-14 — metar_loop ana akista, live/health araclari yedek)
+    "fetch_metar_live",
+    "metar_live_check",
+    # Backtest analiz script'leri (standalone, kullanici istegiyle olusturuldu)
+    "ask_at_utc",
+    "ask_before",
+    "ask_until",
+    "core_bet",
+    "last_ask_before_close",
+    "single_bet",
 }
 
 

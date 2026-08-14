@@ -96,6 +96,8 @@ Hangi dosya hangi kurali korur:
 
 > **Top-15 kapatma KALDIRILDI (2026-08-12):** `spread_placer` artik top-15 disi sehirlerin betlerini KAPATMAZ (kullanici karari: "ilk 15 bias sadece yeni gun aciliminda, kapatma yapilmayacak"). Kullanilmayan `close_losing_twin_bets` (tie_loser), `_cleanup_stale_bets` (stale_cleanup) ve tarihsel `24h_rule` mekanizmalari silindi — kodda hicbir kapanis uretmiyorlardi. Bet loglarina `bet#ID` eklendi.
 
+> **METAR zirve-tespiti (2026-08-14):** `scrapers/metar.py` (aviationweather.gov NOAA, bedava) + `jobs/metar_peak.py` + `bot_loop.metar_loop` (30dk). Acik marketli sehirlerin METAR sicakligi gun icinde izlenir; max'a cikip **2 kez arka arkaya duserse** zirve kilitlenir, kazanan bucket'a (round(max)) tek esik YES bet ($1, order_id `metar_*`). Kapanisa <4 saat kalan sehirler atlanir. Not: aviationweather.gov sadece son 30 saat veri tutar — gecmis gun dogrulamasi yapilamaz, canli izleme icin tasarlandi. Sermaye +1000 USD. 14 Agu'da 5 bet acildi (entry 0.010).
+
 **Kural:** Yeni bug bulundugunda once davranis testi yaz (sentetik + gercek DB), sonra duzelt.
 
 **ALLOWED_DEAD** guncellemesi: yeni public fonksiyon eklediginde ya caller ekle ya da `tests/test_latent_bugs.py::ALLOWED_DEAD` kumesine aciklama ile ekle (entry point ise otomatik gecer).
