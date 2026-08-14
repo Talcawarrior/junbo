@@ -481,13 +481,13 @@ class TestStep13_SmartScan:
 
     def test_scan_interval_selection(self):
         """Dogru scan interval secilmeli."""
-        from bot_loop import _get_scan_interval
+        from bot_loop import _get_scan_interval, _is_midnight_window
         from utils.model_run_detector import is_in_model_run_window
 
         now = datetime.now(timezone.utc)
 
-        # Midnight window kontrolu - su an aktif olabilir
-        is_midnight = now.hour == 0 and now.minute < 60
+        # Midnight window kontrolu - su an aktif olabilir (0-13 UTC, bot_loop ile uyumlu)
+        is_midnight = _is_midnight_window(now)
 
         # Model run window kontrolu - su an aktif olabilir
         in_model_window = is_in_model_run_window(now)
