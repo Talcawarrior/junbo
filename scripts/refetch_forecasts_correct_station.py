@@ -39,6 +39,11 @@ MODEL_SOURCES = {
     "ukmo_seamless": "ukmo_seamless",
     "meteofrance_seamless": "meteofrance_seamless",
 }
+# metric -> archive API daily alan adi
+METRIC_FIELDS = {
+    "temperature_max": "temperature_2m_max",
+    "temperature_min": "temperature_2m_min",
+}
 
 
 def main() -> int:
@@ -72,7 +77,7 @@ def main() -> int:
                 params={
                     "latitude": lat,
                     "longitude": lon,
-                    "daily": "temperature_2m_max",
+                    "daily": "temperature_2m_max,temperature_2m_min",
                     "start_date": args.start,
                     "end_date": args.end,
                     "temperature_unit": "celsius",
@@ -94,10 +99,11 @@ def main() -> int:
         cname = city_name[0] if city_name else code
         for i, t in enumerate(times):
             for model, source in MODEL_SOURCES.items():
-                key = f"temperature_2m_max_{model}"
-                vals = daily.get(key, [])
-                if i < len(vals) and vals[i] is not None:
-                    results.append((code, cname, t, source, float(vals[i])))
+                for metric, field in METRIC_FIELDS.items():
+                    key = f"{field}_{model}"
+                    vals = daily.get(key, [])
+                    if i < len(vals) and vals[i] is not None:
+                        results.append((code, cname, t, metric, source, float(vals[i])))
         print(f"  {code} ({cname}): {len(times)} gun, {len(results)} satir")
 
     print(f"\ntoplam forecast satiri: {len(results)}")
@@ -109,13 +115,13 @@ def main() -> int:
 
     # weather_forecasts'i yeniden doldur (dogru istasyon)
     cur.execute("DELETE FROM weather_forecasts")
-    for code, cname, t, source, pval in results:
+    for code, cname, t, metric, source, pval in results:
         lat, lon = stations[code]
         cur.execute(
             "INSERT INTO weather_forecasts "
             "(city, lat, lon, target_date, metric, source, predicted_value, model_weight, fetched_at) "
             "VALUES (?,?,?,?,?,?,?,1.0, datetime('now'))",
-            (code, lat, lon, t + " 00:00:00", "temperature_max", source, pval),
+            (code, lat, lon, t + " 00:00:00", metric, source, pval),
         )
     db.commit()
     n = cur.execute("SELECT COUNT(*) FROM weather_forecasts").fetchone()[0]
