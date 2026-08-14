@@ -303,3 +303,27 @@ class HistoricalCalibration(Base):
         DateTime,
         default=lambda: datetime.now(timezone.utc),
     )
+
+
+class MetarObservation(Base):
+    """METAR canli istasyon sicakligi arsivi — gecmis high backtesti icin.
+
+    aviationweather.gov (NOAA) METAR'i 30dk'da bir gunceller ama sadece son
+    30 saat tutar. Bu tablo bot'un her METAR cekisini kalici olarak kaydeder,
+    boylece zamanla gercek istasyon high verisi birikir ve kapanmis Polymarket
+    sonuclariyla backtest yapilabilir (2026-08-14 kullanici istegi).
+    """
+
+    __tablename__ = "metar_observations"
+
+    __table_args__ = (
+        Index("ix_metar_obs_city_time", "city_code", "obs_time"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    city_code = Column(String, nullable=False)
+    city = Column(String, nullable=True)
+    temp_c = Column(Float, nullable=False)  # anlik sicaklik
+    obs_time = Column(DateTime, nullable=False)  # METAR gozlem zamani (UTC)
+    day = Column(String, nullable=False)  # YYYY-MM-DD (UTC)
+    recorded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

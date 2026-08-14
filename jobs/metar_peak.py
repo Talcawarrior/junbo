@@ -147,6 +147,10 @@ def run_metar_peak_bets() -> int:
             day = m.target_date.date().isoformat() if m.target_date else today
             try:
                 day_rows = fetch_metar_day(m.city_code, day)
+                # Arsivle (gecmis backtest icin kalici METAR verisi)
+                from scrapers.metar import archive_metar_observations
+
+                archive_metar_observations(m.city_code, m.city or "", day_rows)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("metar_peak: METAR fetch fail %s: %s", m.city_code, exc)
                 continue

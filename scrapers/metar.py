@@ -153,3 +153,48 @@ def metar_live_check() -> bool:
         return bool(rows)
     except Exception:  # noqa: BLE001
         return False
+
+
+def archive_metar_observations(icao: str, city: str, day_rows: list[tuple[int, float]]) -> int:
+    """METAR gozlemlerini kalici arsive kaydeder (gecmis backtest icin).
+
+    aviationweather.gov sadece son 30 saat tutar; bu arsiv her gozlemi saklar.
+    Ayni (city_code, obs_time) kaydi tekrarlanmaz.
+    """
+    from database.db import get_session
+    from database.models import MetarObservation
+    from datetime import datetime, timezone
+
+    if not day_rows:
+        return 0
+    added = 0
+    try:
+        with get_session() as session:
+            for epoch, temp in day_rows:
+                obs_dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
+                exists = (
+                    session.query(MetarObservation)
+                    .filter(
+                        MetarObservation.city_code == icao,
+                        MetarObservation.obs_time == obs_dt.replace(tzinfo=None),
+                    )
+                    .first()
+                )
+                if exists:
+                    continue
+                session.add(
+                    MetarObservation(
+                        city_code=icao,
+                        city=city,
+                        temp_c=temp,
+                        obs_time=obs_dt.replace(tzinfo=None),
+                        day=obs_dt.strftime("%Y-%m-%d"),
+                    )
+                )
+                added += 1
+            if added:
+                session.commit()
+    except Exception:  # noqa: BLE001
+        logger.exception("metar archive fail %s", icao)
+        return 0
+    return added
