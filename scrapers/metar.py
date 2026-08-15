@@ -114,12 +114,17 @@ def fetch_metar_day(icao: str, day: str) -> list[tuple[int, float]]:
     return day_rows
 
 
-def detect_peak(day_rows: list[tuple[int, float]]) -> tuple[Optional[float], bool]:
+def detect_peak(day_rows: list[tuple[int, float]], min_utc_hour: int = 15) -> tuple[Optional[float], bool]:
     """Gun icinde kumulatif max'i takip eder, zirve KILITLI mi doner.
 
     Kural (kullanici 2026-08-14): sicaklik max'a cikar, sonra DUSER. Zirve
-    kilitlenmesi = max olusan degerden sonra EN AZ 2 ardışık gozlem max'in
+    kilitlenmesi = max olusan degerden sonra EN AZ 2 ardısık gozlem max'in
     altinda (dusus teyidi). O an kazanan bucket = round(cummax).
+
+    BUGFIX (2026-08-15): sabahin gece sicakligi (00:00'da 25C) zirve
+    saniliyordu -> gercel max oglen sonrasi 31C iken 25C'ye bet acildi.
+    Cozum: zirve ancak UTC saat >= min_utc_hour (varsayilan 15:00) olduktan
+    sonra kilitlenir. Boylece sabah dususu (00:00->23C) zirve sayilmaz.
 
     Returns: (kilitli_max, is_confirmed). is_confirmed=False ise henuz zirve
     teyit edilmemis (hala yukselebilir).
@@ -130,7 +135,12 @@ def detect_peak(day_rows: list[tuple[int, float]]) -> tuple[Optional[float], boo
     drop_count = 0
     confirmed_max = None
     for i in range(1, len(day_rows)):
-        cur = day_rows[i][1]
+        epoch, cur = day_rows[i]
+        # Saat esigi: sabah dususu zirve sayilmaz
+        if datetime.fromtimestamp(epoch, tz=timezone.utc).hour < min_utc_hour:
+            cummax = max(cummax, cur)
+            drop_count = 0
+            continue
         if cur > cummax:
             cummax = cur
             drop_count = 0
