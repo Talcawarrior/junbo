@@ -293,7 +293,7 @@ _ICAO_COORDS = {
     "EFHK": (60.3172, 24.9633),  # Helsinki
     "OEJN": (21.6796, 39.1565),  # Jeddah
     "OPKC": (24.9065, 67.1608),  # Karachi
-    "RKSI": (37.4602, 126.4407),  # Seoul Incheon
+    "RKSI": (37.4492, 126.4510),  # Seoul Incheon (cozum istasyonu)
     "ZGSZ": (22.6393, 113.8107),  # Shenzhen
     "NZWN": (-41.3272, 174.8053),  # Wellington
     "ZHHH": (30.7838, 114.2081),  # Wuhan
@@ -317,11 +317,11 @@ _CITY_ICAO_MAP = {
     "los angeles": "KLAX",
     "las vegas": "KLAS",
     "phoenix": "KPHX",
-    "houston": "KIAH",
+    "houston": "KHOU",
     "atlanta": "KATL",
     "boston": "KBOS",
     "seattle": "KSEA",
-    "denver": "KDEN",
+    "denver": "KBKF",
     "washington": "KDCA",
     "san francisco": "KSFO",
     "orlando": "KMCO",
@@ -360,10 +360,10 @@ _CITY_ICAO_MAP = {
     "manila": "RPLL",
     "milan": "LIMC",
     "warsaw": "EPWA",
-    "london": "EGLL",
-    "paris": "LFPG",
+    "london": "EGLC",
+    "paris": "LFPB",
     "berlin": "EDDT",
-    "moscow": "UUEE",
+    "moscow": "UUWW",
     "frankfurt": "EDDF",
     "amsterdam": "EHAM",
     "madrid": "LEMD",
@@ -381,9 +381,9 @@ _CITY_ICAO_MAP = {
     "tokyo": "RJTT",
     "shanghai": "ZSPD",
     "beijing": "ZBAA",
-    "seoul": "RKSS",
+    "seoul": "RKSI",
     "hong kong": "VHHH",
-    "taipei": "RCTP",
+    "taipei": "RCSS",
     "singapore": "WSSS",
     "bangkok": "VTBS",
     "cape town": "FACT",
