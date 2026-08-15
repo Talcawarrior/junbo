@@ -167,7 +167,7 @@ class StrategyConfig:
     # Backtest (orderbook, gercek fiyat, empirical CDF, 99 gunluk bias):
     #   spread=0 + bias-top 12 -> +$41.86 (winrate %43.6)
     #   spread=3 (eski)       -> -$317 (winrate %11)
-    spread_radius: int = 0  # TEK ESIK: +/- 0 derece (sadece merkez)
+    spread_radius: int = 1  # 3 ESIK: +/- 1 derece (merkez ve komsulari) — 2026-08-15 kullanici karari
     # 2026-08-14: 12 sehir (en az sapan). Backtest: bias-top 12 en karli (+$41.9).
     spread_max_cities: int = 12  # tahmini en yuksek ilk N sehir
     spread_max_entry: float = 0.30  # ust sinir: 0.30+ fiyatli esiklere girilmez (backtest en iyi: +$53k, 2026-08-11)

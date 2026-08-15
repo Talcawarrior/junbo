@@ -52,7 +52,32 @@ BACKUP_DIR = os.path.join(DB_DIR, "backups")
 # geri donus noktasi). Uzun backtest / felaket kurtarma icin 5 cok azdi
 # (2026-08-11 kullanici karari). 30 x ~210MB = ~6.3GB — disk dolu degilken uygun.
 MAX_BACKUPS = 30
+# "startup" backup'lari her bot restartinda alinir (gun gelistirme surecinde
+# 20+ restart). 270MB x 30 = ~8GB birikiyordu. Startup backup'i GUNDE 1 kez
+# alinir (marker) — geri donus noktasi ayni, disk tasarrufu buyuk (2026-08-16).
+STARTUP_DAILY_MARKER = os.path.join(DB_DIR, ".last_startup_backup")
 PBKDF2_ITERATIONS = 200_000
+
+
+def _startup_backup_due() -> bool:
+    """Startup backup'i bugun henuz alinmadiysa True (gunde 1 kez)."""
+    try:
+        if os.path.exists(STARTUP_DAILY_MARKER):
+            with open(STARTUP_DAILY_MARKER) as fh:
+                last = fh.read().strip()
+            if last == datetime.now().strftime("%Y%m%d"):
+                return False
+    except Exception:  # noqa: BLE001
+        pass
+    return True
+
+
+def _mark_startup_backup() -> None:
+    try:
+        with open(STARTUP_DAILY_MARKER, "w") as fh:
+            fh.write(datetime.now().strftime("%Y%m%d"))
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _offsite_dir():
@@ -240,6 +265,9 @@ def mirror_offsite(backup_path):
 # Backup / restore
 # --------------------------------------------------------------------------
 def create_backup(label="auto"):
+    # Startup backup'lari gunde 1 kez (her bot restartinda 270MB birikiyordu)
+    if label == "startup" and not _startup_backup_due():
+        return None
     os.makedirs(BACKUP_DIR, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     backup_name = f"bot_{label}_{timestamp}.db"
@@ -285,6 +313,8 @@ def create_backup(label="auto"):
 
     _prune_backups(label)
     mirror_offsite(backup_path)
+    if label == "startup":
+        _mark_startup_backup()
     return backup_path
 
 
