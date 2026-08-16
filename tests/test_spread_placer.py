@@ -29,8 +29,8 @@ def _clean_db():
     # 2026-08-16: full suite'te diger test dosyalari (test_bot_flow, test_real_flow)
     # spread_radius=3 / max_entry=0.99 set edip geri yuklemiyor; burada her testten
     # once GUNCEL config'i garantile — aksi halde izole test gecip full suite'te
-    # radius=0 / max_entry=0.95 testleri patliyordu.
-    bot_config.strategy.spread_radius = 0
+    # radius testleri patliyordu.
+    bot_config.strategy.spread_radius = 1
     bot_config.strategy.spread_max_entry = 0.95
     bot_config.strategy.spread_max_bets_per_day = 40
     bot_config.strategy.spread_max_cities = 40
@@ -179,9 +179,10 @@ def test_spread_skips_snapshot_low_but_live_high():
         bot_config.strategy.spread_max_entry = 0.99
 
 
-def test_spread_opens_single_center_leg():
-    """2026-08-16 kullanici karari: radius=0 — SADECE tam merkez esigine bet.
-    Forecast center 25 -> tek esik 25C acilir, komsulara (24,26) bet acilmaz."""
+def test_spread_opens_three_legs_around_center():
+    """2026-08-16 kullanici karari: radius=1 — merkez +-1 (3 esik) bet acilir.
+    Forecast center 25 -> esikler 24,25,26. Kullanici fikri: T-2'de 3 esige
+    dusukten girilir, peak gunu kazanan tutulur, komsular satilir."""
     from database.db import get_session
     from database.models import Bet
     from executor.spread_placer import place_spread_bets
@@ -191,7 +192,7 @@ def test_spread_opens_single_center_leg():
         _add_portfolio(s)
         # AAA -> gercek LTAC (Ankara) bias olcumu: 0.87
         _add_calibration(s, "AAA", 0.87)
-        # forecast center = 25, radius 0 -> SADECE esik 25
+        # forecast center = 25, radius 1 -> SADECE esikler 24,25,26
         _add_forecast(s, "AAA", "temperature_max", day, 25.0, datetime(2026, 8, 1, 10, 0))
         for thr in range(22, 29):
             _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.05)
@@ -201,10 +202,9 @@ def test_spread_opens_single_center_leg():
         s.commit()
 
         placed = s.query(Bet).filter(Bet.status == "placed").all()
-        strikes = [p.strike_temp for p in placed]
-    assert res["placed"] == 1, f"radius=0 -> sadece 1 merkez esigi acilmali: {res}"
-    assert len(placed) == 1
-    assert strikes == [25.0], f"merkez esik 25C olmali: {strikes}"
+        strikes = sorted(p.strike_temp for p in placed)
+    assert res["placed"] >= 3, f"radius=1 -> en az 3 esik acilmali: {res}"
+    assert strikes == [24.0, 25.0, 26.0], f"esikler 24,25,26 olmali: {strikes}"
 
 
 def test_spread_limit_respected():
@@ -441,8 +441,8 @@ def test_past_day_no_bets_opened():
 
 
 def test_open_legs_when_center_market_missing():
-    """2026-08-16 kullanici karari: radius=0 (tek esik = merkez).
-    Merkez esigin marketi YOKSA hicbir bet acilmaz (komsu esik yok)."""
+    """2026-08-16 kullanici karari: radius=1 (3 esik = merkez +-1).
+    Merkez (25) marketi YOKSA kom$ular (24, 26) acilir (tam-7 zorunlu yok)."""
     from database.db import get_session
     from database.models import Bet
     from executor.spread_placer import place_spread_bets
@@ -452,16 +452,15 @@ def test_open_legs_when_center_market_missing():
         _add_portfolio(s, cash=1000.0)
         _add_calibration(s, "AAA", 0.87)
         _add_forecast(s, "AAA", "temperature_max", day, 25.0, datetime(2026, 8, 1, 10, 0))
-        # Merkez (25) YOK; sadece 22,23,24,26,27,28 var — radius=0 oldugu icin
-        # hedef sadece 25C; market yok -> acilmaz
-        for thr in [22, 23, 24, 26, 27, 28]:
+        # Merkez (25) YOK; 24 ve 26 marketleri var -> bunlar acilir
+        for thr in [24, 26]:
             _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.05)
         s.commit()
         res = place_spread_bets(day, session=s)
         s.commit()
         placed = s.query(Bet).filter(Bet.status == "placed").count()
-    assert res["placed"] == 0, "merkez marketi yoksa (radius=0) bet acilmamali"
-    assert placed == 0
+    assert res["placed"] >= 1, "merkez marketi yoksa komsu esikler acilir (radius=1)"
+    assert placed >= 1
 
 
 def test_spread_opens_any_price_below_max_entry():

@@ -6,6 +6,26 @@
 
 ---
 
+## 📌 2026-08-16 YENİ STRATEJİ: 3 EŞİK + PEAK'TE KOMŞU SATIŞI (YARIN TEST)
+
+> **Kullanıcı fikri:** "3'lü eşik açarsak, peak yaklaşırken komşu eşikler de yükselir.
+> Gerçek eşik bizim eşiklerimizden biriyse, diğer 2 komşuyu HEMEN satarsak (millet
+> uyanmadan) onlardan da para kazanırız."
+>
+> **Yapıldı (16 Ağu):**
+> - `spread_radius` 0 -> 1 (3 eşik: merkez±1, config/.env) — T-2'de 3 eşiğe de düşükten gir
+> - `_close_wrong_bucket_bets` (metar_peak.py) — peak kilitlenince kazanan bucket
+>   dışındaki TÜM açık betleri (komşular dahil) canlı fiyattan satar
+> - `test_spread_placer` radius=1'e güncellendi (3 eşik açılır)
+>
+> **YARIN DOĞRULANACAK (17 Ağu orderbook verisi toplanınca):**
+> - [ ] Komşu eşikler peak öncesi gerçekten yükseliyor mu? (orderbook'ta 13:00 vs peak anı)
+> - [ ] Peak kilitlenince bot komşuları henüz çökmeden satabiliyor mu? (pencere genişliği)
+> - [ ] Komşu satışından net kar var mı? (entry düşük - satış yüksek mi?)
+> - [ ] `backtest_metar_peak.py` / `backtest_kayan_pencere.py` ile 3-eşik + satış simülasyonu
+
+---
+
 ## ✅ YAPILDI (ölçüldü, sonuçları kaydedildi)
 
 | # | Madde | Sonuç |

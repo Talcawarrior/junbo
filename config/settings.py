@@ -167,9 +167,11 @@ class StrategyConfig:
     # Backtest (orderbook, gercek fiyat, empirical CDF, 99 gunluk bias):
     #   spread=0 + bias-top 12 -> +$41.86 (winrate %43.6)
     #   spread=3 (eski)       -> -$317 (winrate %11)
-    # 2026-08-16 kullanici karari: TEK esik (radius=0, tam merkez), fiyat ne
-    # olursa olsun 0.01-0.95 arasi ilk 40 markete bet.
-    spread_radius: int = 0  # TEK ESIK: sadece tam merkez (meteo tahmini round)
+    # 2026-08-16 kullanici karari: 3 esik (radius=1, merkez+-1). Fikir: T-2'de
+    # 3 esige de dusukten girilir; peak gunu kazanan bucket belli olunca kazanan
+    # TUTULUR, komsu 2 esik HEMEN satilir (piyasa cokmeden, `_close_wrong_bucket_bets`).
+    # Komsu esikler peak oncesi degerli oldugu icin satista kar olabilir.
+    spread_radius: int = 1  # 3 ESIK: merkez +-1 derece
     # 2026-08-14: 12 sehir (en az sapan). Backtest: bias-top 12 en karli (+$41.9).
     # 2026-08-16: "ilk 40 markete ac" -> max_cities 40 (23 marketli sehir de degerlendirilir).
     spread_max_cities: int = 40  # tahmini en yuksek ilk N sehir
