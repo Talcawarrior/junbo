@@ -19,8 +19,8 @@ class TestMetarPeakConfig:
         assert mp.BIAS_TOP_CITIES == 40
 
     def test_min_hours_before_close(self):
-        """Kapanisa <4 saat kala bet acilmaz."""
-        assert mp.MIN_HOURS_BEFORE_CLOSE == 4
+        """Kullanici karari 2026-08-16: erken giris -> kapanisa <2 saat kala bet acilmaz."""
+        assert mp.MIN_HOURS_BEFORE_CLOSE == 2
 
 
 class TestMetarPeakBiasFilter:

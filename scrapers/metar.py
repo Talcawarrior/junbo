@@ -118,7 +118,7 @@ def fetch_metar_day(icao: str, day: str) -> list[tuple[int, float]]:
     return day_rows
 
 
-def detect_peak(day_rows: list[tuple[int, float]], min_utc_hour: int = 15) -> tuple[Optional[float], bool]:
+def detect_peak(day_rows: list[tuple[int, float]], min_local_hour: int = 13, utc_offset_hours: float = 0.0) -> tuple[Optional[float], bool]:
     """Gun icinde kumulatif max'i takip eder, zirve KILITLI mi doner.
 
     Kural (kullanici 2026-08-14): sicaklik max'a cikar, sonra DUSER. Zirve
@@ -127,8 +127,15 @@ def detect_peak(day_rows: list[tuple[int, float]], min_utc_hour: int = 15) -> tu
 
     BUGFIX (2026-08-15): sabahin gece sicakligi (00:00'da 25C) zirve
     saniliyordu -> gercel max oglen sonrasi 31C iken 25C'ye bet acildi.
-    Cozum: zirve ancak UTC saat >= min_utc_hour (varsayilan 15:00) olduktan
-    sonra kilitlenir. Boylece sabah dususu (00:00->23C) zirve sayilmaz.
+    Cozum: zirve ancak YEREL saat >= min_local_hour (varsayilan 13:00, gunduz
+    max'in olustugu dilim) olduktan sonra kilitlenir.
+
+    BUGFIX (2026-08-16): kullanici "benim saatimle degil, sehirin YEREL
+    saatine gore gir" dedi. Sabit UTC saat kistiri sehirlerin gercek max
+    saatine uymuyordu (Wellington 03:00 UTC, Hong Kong 07:00 UTC max yapiyor
+    ama UTC>=15 kisti peak'i kaciriyordu). Artik kilitlenme kurali YEREL
+    saat uzerinden: utc_offset_hours ile epoch'u sehir yerel saatine cevir,
+    yerel saat >= min_local_hour ise peak say.
 
     Returns: (kilitli_max, is_confirmed). is_confirmed=False ise henuz zirve
     teyit edilmemis (hala yukselebilir).
@@ -140,8 +147,10 @@ def detect_peak(day_rows: list[tuple[int, float]], min_utc_hour: int = 15) -> tu
     confirmed_max = None
     for i in range(1, len(day_rows)):
         epoch, cur = day_rows[i]
-        # Saat esigi: sabah dususu zirve sayilmaz
-        if datetime.fromtimestamp(epoch, tz=timezone.utc).hour < min_utc_hour:
+        # Yerel saat: UTC epoch + sehir offset
+        local_dt = datetime.fromtimestamp(epoch + utc_offset_hours * 3600, tz=timezone.utc)
+        # Saat esigi: sabah/gece dususu zirve sayilmaz (yerel gunduz max olusur)
+        if local_dt.hour < min_local_hour:
             cummax = max(cummax, cur)
             drop_count = 0
             continue

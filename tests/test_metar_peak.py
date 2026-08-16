@@ -45,11 +45,11 @@ class TestDetectPeakMorningBug:
         assert peak == 31.0
 
     def test_saat_esigi_oncesi_kilitlenmez(self):
-        """UTC 14:59'a kadar (15 oncesi) 2 dusus olsa bile kilitlenmez."""
+        """Yerel 13:00 oncesi (sabah) 2 dusus olsa bile kilitlenmez."""
         from scrapers.metar import detect_peak
 
-        # 12:00 30, 13:00 29, 14:00 28 -> 2 dusus ama saat < 15 -> kilitlenmez
-        rows = _rows_at([(12, 30.0), (13, 29.0), (14, 28.0)])
+        # 06:00 30, 07:00 29, 08:00 28 -> 2 dusus ama yerel saat < 13 -> kilitlenmez
+        rows = _rows_at([(6, 30.0), (7, 29.0), (8, 28.0)])
         peak, confirmed = detect_peak(rows)
         assert confirmed is False
 
@@ -66,3 +66,40 @@ class TestDetectPeakMorningBug:
         peak, confirmed = detect_peak(rows)
         assert confirmed is True
         assert peak == 31.0, f"Paris gercek max 31 olmali: {peak}"
+
+
+class TestDetectPeakLocalTime:
+    """2026-08-16 kullanici karari: peak sehirin YEREL saatine gore kilitlenir.
+
+    Kullanici: "benim saatimle degil, sehirin yerel saatine gore gir. Yerel
+    saatte en yuksek ne zaman oluyorsa o zaman gir." Sabit UTC esigi (15:00)
+    dogu sehirlerinde peak'i kaciriyordu (Wellington 03:00 UTC max yapiyor).
+    """
+
+    def test_wellington_local_offset_erken_peak_yakalar(self):
+        """Wellington (UTC+12): 03:00 UTC = yerel 15:00 -> peak kilitlenmeli."""
+        from scrapers.metar import detect_peak
+
+        # Wellington: 01:00 UTC 8, 02:00 9, 03:00 9 (max), 04:00 8, 05:00 7
+        rows = _rows_at([(1, 8.0), (2, 9.0), (3, 9.0), (4, 8.0), (5, 7.0)])
+        peak, confirmed = detect_peak(rows, utc_offset_hours=12.0)
+        assert confirmed is True, f"Wellington yerel 15:00 peak kilitlenmeli: {peak}"
+        assert peak == 9.0
+
+    def test_wellington_same_rows_no_offset_not_confirmed(self):
+        """Ayni seri offset'siz (UTC esigi 13) kilitlenmez — offset sart."""
+        from scrapers.metar import detect_peak
+
+        rows = _rows_at([(1, 8.0), (2, 9.0), (3, 9.0), (4, 8.0), (5, 7.0)])
+        peak, confirmed = detect_peak(rows, utc_offset_hours=0.0)
+        # 01-05 UTC = yerel 01-05 (offset 0) -> yerel < 13 -> kilitlenmez
+        assert confirmed is False
+
+    def test_hong_kong_local_offset(self):
+        """Hong Kong (UTC+8): 07:00 UTC = yerel 15:00 -> peak kilitlenmeli."""
+        from scrapers.metar import detect_peak
+
+        rows = _rows_at([(5, 32.0), (6, 34.0), (7, 34.0), (8, 33.0), (9, 32.0)])
+        peak, confirmed = detect_peak(rows, utc_offset_hours=8.0)
+        assert confirmed is True, f"Hong Kong yerel 15:00 peak kilitlenmeli: {peak}"
+        assert peak == 34.0

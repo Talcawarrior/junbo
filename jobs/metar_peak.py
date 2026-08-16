@@ -23,8 +23,10 @@ from sqlalchemy import func
 
 logger = logging.getLogger("SCHEDULER_METAR_PEAK")
 
-# Kapanisa bu kadar saat kala hala zirve kilitlenmediyse bet acilmaz
-MIN_HOURS_BEFORE_CLOSE = 4
+# Kapanisa bu kadar saat kala hala zirve kilitlenmediyse bet acilmaz.
+# 2026-08-16: kullanici "peak YEREL saatte olunca gir" dedi -> erken giris.
+# 4 saat -> 2 saat (kapanisa cok yakin olanlar riski; peak kilitlenince girilir)
+MIN_HOURS_BEFORE_CLOSE = 2
 # METAR stake (kullanici karari 2026-08-16: 1 -> 2 -> 3 USD optimum.
 # Backtest: bias-top 40 + tek esik, $3 stake = %91.7, +$120, maxDD $3.2.
 # ROI stake'ten bagimsiz ama mutlak kazanc ve risk dengede $3 en iyi.)
@@ -184,7 +186,15 @@ def run_metar_peak_bets() -> int:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("metar_peak: METAR fetch fail %s: %s", m.city_code, exc)
                 continue
-            peak, confirmed = detect_peak(day_rows)
+            # Kullanici karari 2026-08-16: "sehirin YEREL saatine gore gir,
+            # benim saatimle degil". Boylamdan kaba UTC offset (lon/15).
+            # Ornek: Wellington 03:00 UTC max yapiyor (yerel 15:00) -> offset +12.
+            utc_offset = 0.0
+            try:
+                utc_offset = round(float(m.longitude) / 15.0)
+            except (TypeError, ValueError):
+                utc_offset = 0.0
+            peak, confirmed = detect_peak(day_rows, utc_offset_hours=utc_offset)
             if not confirmed or peak is None:
                 continue  # zirve henuz kilitlenmedi
             bucket = round(peak)
