@@ -291,6 +291,12 @@ class SettlementEngine:
 
     def _call_gamma_api(self, market) -> dict | None:
         """Make GET request to Gamma API and return parsed JSON."""
+        # Rate limit korumasi (2026-08-16): Cloudflare 10054 ile baglanti
+        # sifirliyordu (saniyede ~10 istek -> IP gecici blok). Is?kler arasi
+        # kisa bekleme + basarisizlikta daha uzun bekleme eklenir.
+        import time as _time
+
+        _time.sleep(0.25)
         try:
             url = f"{GAMMA_API_BASE}/markets/{market.id}"
             from config.settings import bot_config
@@ -304,6 +310,7 @@ class SettlementEngine:
                 market.id,
                 e,
             )
+            _time.sleep(1.0)  # basarisizlikta Cloudflare'e nefes payi
             return None
 
     @staticmethod

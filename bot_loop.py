@@ -689,6 +689,42 @@ async def _run_daily_maintenance() -> None:
         logger.error("Scheduled backup failed: %s", e)
 
 
+def _archive_clob_price(wm, price: float) -> None:
+    """CLOB fiyat olayini orderbook.db'ye kalici arsivler (backtest icin).
+
+    clob_stream WebSocket her fiyat degisimini aninda verir. Bu deger
+    orderbook_snapshots'a best_ask olarak yazilir; zamanla gercek CLOB fiyat
+    gecmisi birikir (backtest'ler bu seriyi kullanir). Best-effort: hata
+    sessiz gecilir, fiyat guncellemesini bloklamaz.
+    """
+    import sqlite3
+
+    try:
+        _repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        ob_path = os.path.join(_repo_root, "data", "orderbook.db")
+        conn = sqlite3.connect(ob_path, timeout=5)
+        try:
+            conn.execute(
+                "INSERT INTO orderbook_snapshots "
+                "(market_id, token_id, city, metric, target_date, best_ask, snapshot_time, created_at) "
+                "VALUES (?,?,?,?,?,?,?, datetime('now'))",
+                (
+                    str(wm.id),
+                    "0",
+                    getattr(wm, "city", None),
+                    getattr(wm, "metric", None),
+                    getattr(wm, "target_date", None),
+                    float(price),
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("CLOB arsiv hatasi %s: %s", getattr(wm, "id", "?"), exc)
+
+
 async def clob_stream_loop(state):
     """Polymarket CLOB WebSocket — acik betlerin marketlerini gercek zamanli dinler.
 
@@ -728,6 +764,9 @@ async def clob_stream_loop(state):
                     wm.yes_price = float(price)
                     wm.no_price = max(0.0, min(1.0, 1.0 - float(price)))
                     wm.last_updated = datetime.now(timezone.utc).replace(tzinfo=None)
+                    # CLOB fiyatini orderbook.db'ye arsivle (backtest icin kalici).
+                    # WebSocket fiyat olayi ~anlik: best_ask olarak kaydedilir.
+                    _archive_clob_price(wm, float(price))
         except Exception as e:  # noqa: BLE001
             logger.warning("CLOB event isleme hatasi: %s", e)
 
