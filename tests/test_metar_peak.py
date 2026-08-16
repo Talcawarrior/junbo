@@ -103,3 +103,51 @@ class TestDetectPeakLocalTime:
         peak, confirmed = detect_peak(rows, utc_offset_hours=8.0)
         assert confirmed is True, f"Hong Kong yerel 15:00 peak kilitlenmeli: {peak}"
         assert peak == 34.0
+
+
+class TestCloseWrongBucketBets:
+    """2026-08-16 kullanici karari (3. adim): peak kilitlenince kazanan bucket
+    DISINDAKI acik betler kapatilir. Onceden 75 acik betin 69'u yanlis
+    bucket'ta settlement'a kadar acik kaldi."""
+
+    def test_closes_only_wrong_bucket(self):
+        from database.db import get_session
+        from database.models import Bet, Portfolio, WeatherMarket
+        from datetime import datetime, timezone
+
+        from jobs.metar_peak import _close_wrong_bucket_bets
+
+        day = datetime(2026, 8, 16, 12, 0, tzinfo=timezone.utc).replace(tzinfo=None)
+        with get_session() as s:
+            s.query(Bet).delete()
+            s.query(WeatherMarket).delete()
+            s.query(Portfolio).delete()
+            pf = Portfolio(id=1, cash_balance=100.0, total_value=100.0)
+            s.add(pf)
+            # kazanan bucket 34C; 32C ve 34C marketleri
+            w1 = WeatherMarket(id="M1", city="Hong Kong", city_code="VHHH",
+                               question="Hong Kong temperature", threshold=32.0,
+                               target_date=day, status="open",
+                               yes_price=0.25, latitude=22.3, longitude=114.2)
+            w2 = WeatherMarket(id="M2", city="Hong Kong", city_code="VHHH",
+                               question="Hong Kong temperature", threshold=34.0,
+                               target_date=day, status="open",
+                               yes_price=0.45, latitude=22.3, longitude=114.2)
+            s.add_all([w1, w2])
+            b1 = Bet(id=1, market_id="M1", city="Hong Kong", side="YES",
+                     amount=2.0, stake_amount=2.0, price=0.25, entry_price=0.25,
+                     shares=8.0, current_price=0.25, status="placed",
+                     strike_temp=32.0, order_id="spread_1")
+            b2 = Bet(id=2, market_id="M2", city="Hong Kong", side="YES",
+                     amount=2.0, stake_amount=2.0, price=0.45, entry_price=0.45,
+                     shares=4.44, current_price=0.45, status="placed",
+                     strike_temp=34.0, order_id="spread_2")
+            s.add_all([b1, b2])
+            s.commit()
+
+            closed = _close_wrong_bucket_bets(s, "VHHH", day, 34)
+            s.commit()
+            statuses = {b.id: b.status for b in s.query(Bet).all()}
+        assert closed == 1, f"Sadece yanlis bucket (32C) kapatilmali: {closed}"
+        assert statuses[1] == "closed", "32C beti kapanmali"
+        assert statuses[2] in ("placed", "open"), "34C kazanan bucket TUTULMALI"

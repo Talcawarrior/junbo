@@ -63,6 +63,60 @@ def _existing_metar_bet(session, market_id: str) -> Optional[Bet]:
     )
 
 
+def _close_wrong_bucket_bets(session, city_code: str, target_date, winning_bucket: float) -> int:
+    """Kazanan bucket belli oldugunda, o sehrin o gunu icin kazanan bucket
+    DISINDAKI tum acik betleri canli fiyattan kapatir.
+
+    Kullanici karari 2026-08-16 (3. adim): "T-2 oncesi actigimiz bet kazanan
+    bucket'ta degilse onu kapatiyoruz". 16 Agu ornegi: 75 acik spread bet,
+    sadece 6'si kazanan bucket'ta — 69 yanlis bet settlement'a kadar acik
+    kaldi ve tam stake kaybedilecekti. Bu fonksiyon peak kilitlendiginde
+    yanlis bucket'lari canli fiyattan satip kazanci/zarari erkenden gercekler.
+
+    Sadece TUM acik betler (spread + metar) taranir; kazanan bucket'ta olanlar
+    TUTULUR. Kapatilan her bet icin close_bet_for_rotation (canli fiyattan
+    satis, portfolio kredisi) kullanilir.
+
+    Returns: kapatilan bet sayisi.
+    """
+    from executor.bet_placer import BetPlacer
+
+    if not target_date:
+        return 0
+    day = target_date.date().isoformat() if hasattr(target_date, "date") else str(target_date)[:10]
+
+    candidates = (
+        session.query(Bet, WeatherMarket)
+        .join(WeatherMarket, WeatherMarket.id == Bet.market_id)
+        .filter(
+            WeatherMarket.city_code == city_code,
+            WeatherMarket.target_date.isnot(None),
+            Bet.status.in_(("placed", "open", "active", "pending")),
+        )
+        .all()
+    )
+    closed = 0
+    placer = BetPlacer()
+    for bet, wm in candidates:
+        if wm.target_date.date().isoformat() != day:
+            continue
+        if wm.threshold is None:
+            continue
+        if round(float(wm.threshold)) == winning_bucket:
+            continue  # kazanan bucket TUTULUR
+        try:
+            live = float(wm.yes_price) if wm.yes_price else float(bet.entry_price or 0)
+        except (TypeError, ValueError):
+            continue
+        ok = placer.close_bet_for_rotation(bet, max(0.01, min(0.99, live)), session)
+        if ok:
+            closed += 1
+            logger.info("metar_peak: KAPATILDI bet#%s %s %sC (kazanan %sC)", bet.id, bet.city, wm.threshold, winning_bucket)
+    if closed:
+        logger.info("metar_peak: %s sehirde yanlis bucket betleri kapatildi (%s)", city_code, closed)
+    return closed
+
+
 def _open_metar_bet(session, market: WeatherMarket, peak_temp: float) -> Optional[Bet]:
     """Bir markete METAR-peak tek esik YES bet acar."""
     from utils.formulas import bet_shares, polymarket_fee_from_stake
@@ -203,6 +257,12 @@ def run_metar_peak_bets() -> int:
             bet = _open_metar_bet(session, m, peak)
             if bet:
                 opened += 1
+            # Kullanici karari 2026-08-16 (3. adim): peak kilitlendi, kazanan
+            # bucket belli -> o sehirdeki kazanan bucket DISINDAKI tum acik
+            # betleri KAPAT (T-2'de yanlis bucket'a acilan spread betleri dahil).
+            # Bot daha once kapatmiyordu: 16 Agu'da 75 acik bet, sadece 6'si
+            # kazanan bucket'ta, 69 yanlis bet settlement'a kadar acik kaldi.
+            _close_wrong_bucket_bets(session, m.city_code, m.target_date, bucket)
 
         session.commit()
     if opened:
