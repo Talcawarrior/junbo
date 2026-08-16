@@ -26,6 +26,13 @@ def _clean_db():
             s.query(tbl).delete()
         s.commit()
     bot_config.strategy.current_fee_rate = 0.05
+    # 2026-08-16: full suite'te diger test dosyalari (test_bot_flow, test_real_flow)
+    # spread_radius=3 / max_entry=0.99 set edip geri yuklemiyor; burada her testten
+    # once GUNCEL config'i garantile — aksi halde izole test gecip full suite'te
+    # radius=0 / max_entry=0.95 testleri patliyordu.
+    bot_config.strategy.spread_radius = 0
+    bot_config.strategy.spread_max_entry = 0.95
+    bot_config.strategy.spread_max_bets_per_day = 40
 
 
 def _day():
@@ -171,7 +178,9 @@ def test_spread_skips_snapshot_low_but_live_high():
         bot_config.strategy.spread_max_entry = 0.99
 
 
-def test_place_spread_bets_opens_within_radius():
+def test_spread_opens_single_center_leg():
+    """2026-08-16 kullanici karari: radius=0 — SADECE tam merkez esigine bet.
+    Forecast center 25 -> tek esik 25C acilir, komsulara (24,26) bet acilmaz."""
     from database.db import get_session
     from database.models import Bet
     from executor.spread_placer import place_spread_bets
@@ -181,20 +190,20 @@ def test_place_spread_bets_opens_within_radius():
         _add_portfolio(s)
         # AAA -> gercek LTAC (Ankara) bias olcumu: 0.87
         _add_calibration(s, "AAA", 0.87)
-        # forecast center = 25, radius 3 -> thresholds 22..28
+        # forecast center = 25, radius 0 -> SADECE esik 25
         _add_forecast(s, "AAA", "temperature_max", day, 25.0, datetime(2026, 8, 1, 10, 0))
         for thr in range(22, 29):
             _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.05)
-            _add_snapshot(s, "Testville", "temperature_max", day, thr, 0.05)
-        # city_code map: weather_markets city_code 'TEST' for Testville
         s.commit()
 
         res = place_spread_bets(day, session=s)
         s.commit()
 
         placed = s.query(Bet).filter(Bet.status == "placed").all()
-    assert res["placed"] >= 3
-    assert len(placed) >= 3
+        strikes = [p.strike_temp for p in placed]
+    assert res["placed"] == 1, f"radius=0 -> sadece 1 merkez esigi acilmali: {res}"
+    assert len(placed) == 1
+    assert strikes == [25.0], f"merkez esik 25C olmali: {strikes}"
 
 
 def test_spread_limit_respected():
@@ -262,13 +271,13 @@ def test_merkez_kayinca_betler_acik_kalir():
             _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.05)
             _add_snapshot(s, "Testville", "temperature_max", day, thr, 0.05)
         s.commit()
-        # ilk run: center 25 -> window 22..28, opens a few bets
+        # ilk run: center 25 -> window [25] (radius=0), 1 bet acilir
         place_spread_bets(day, session=s)
         s.commit()
         opened = s.query(Bet).filter(Bet.status == "placed").count()
-        assert opened >= 3
+        assert opened >= 1
 
-        # tahmin 28'e kaydi -> window 25..31; 22,23,24 ESCKI pencerede ama KAPANMAMALI
+        # tahmin 28'e kaydi -> yeni center 28; 25C beti KAPANMAMALI
         _add_forecast(s, "AAA", "temperature_max", day, 28.0, datetime(2026, 8, 2, 10, 0))
         s.commit()
         res = place_spread_bets(day, session=s)
@@ -431,9 +440,8 @@ def test_past_day_no_bets_opened():
 
 
 def test_open_legs_when_center_market_missing():
-    """2026-08-11 kullanici karari A: tam-7 zorunlu KALDIRILDI.
-    Merkez esigin marketi olmasa da acilabilen ayaklar acilir (kayan pencere
-    + max_entry 0.30 ile; tam-7 esigi yok)."""
+    """2026-08-16 kullanici karari: radius=0 (tek esik = merkez).
+    Merkez esigin marketi YOKSA hicbir bet acilmaz (komsu esik yok)."""
     from database.db import get_session
     from database.models import Bet
     from executor.spread_placer import place_spread_bets
@@ -443,51 +451,24 @@ def test_open_legs_when_center_market_missing():
         _add_portfolio(s, cash=1000.0)
         _add_calibration(s, "AAA", 0.87)
         _add_forecast(s, "AAA", "temperature_max", day, 25.0, datetime(2026, 8, 1, 10, 0))
-        # Merkez (25) HARI 22,23,24,26,27,28 marketleri var — merkez marketi YOK
+        # Merkez (25) YOK; sadece 22,23,24,26,27,28 var — radius=0 oldugu icin
+        # hedef sadece 25C; market yok -> acilmaz
         for thr in [22, 23, 24, 26, 27, 28]:
             _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.05)
         s.commit()
         res = place_spread_bets(day, session=s)
         s.commit()
         placed = s.query(Bet).filter(Bet.status == "placed").count()
-    assert res["placed"] >= 1, "merkez marketi yoksa bile acilabilen ayaklar acilir (tam-7 kaldirildi)"
-    assert placed >= 1
-
-
-def test_fair_value_filter_skips_overpriced_market():
-    """Kullanici karari 2026-08-12: market fiyati model probunun (fair value)
-    ALTINDA olmali — 'piyasa zaten biliyor' durumunda edge yok, bet acilmaz.
-
-    Tahmin 25C, esik 28C -> P(T>=28) dusuk (fair ~0.02-0.03). Market fiyati
-    0.50 -> market fair'dan YUKSEK -> bet ACILMAMALI.
-    """
-    from database.db import get_session
-    from database.models import Bet
-    from executor.spread_placer import place_spread_bets
-
-    day = _day()
-    with get_session() as s:
-        _add_portfolio(s, cash=1000.0)
-        _add_calibration(s, "AAA", 0.87)
-        _add_forecast(s, "AAA", "temperature_max", day, 25.0, datetime(2026, 8, 1, 10, 0))
-        # Sadece YUKSEK esikler (27, 28) — tahmin 25C icin fair ~0.02-0.15,
-        # market 0.50 fair'dan cok ustunde -> acilmamali. Dusuk esikler
-        # (22-24) fair'i yuksek oldugundan testin kapsaminda degil.
-        for thr in [27, 28]:
-            _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.50)
-        s.commit()
-        res = place_spread_bets(day, session=s)
-        s.commit()
-        placed = s.query(Bet).filter(Bet.status == "placed").count()
-    assert res["placed"] == 0, "market fiyati fair degerin ustundeyse bet acilmamali"
+    assert res["placed"] == 0, "merkez marketi yoksa (radius=0) bet acilmamali"
     assert placed == 0
 
 
-def test_fair_value_filter_opens_undervalued_market():
-    """Market fiyati model probunun ALTINDA ise (ucuz) bet AÇILIR.
+def test_spread_opens_any_price_below_max_entry():
+    """2026-08-16 kullanici karari: fair-value + 0.10-0.20 olum bolge KALKTI.
+    Fiyat ne olursa olsun 0.01-0.95 arasi ise bet AÇILIR (tek kosul fiyat araligi).
 
-    Tahmin 25C, esik 28C -> fair ~0.02-0.03. Market fiyati 0.01 -> fair'dan
-    dusuk -> bet AÇILIR (longshot, 0.10-0.20 olum bolge disinda).
+    Tahmin 25C, esik 28C: fair ~0.02-0.03 ama market 0.50 -> fair ustunde bile
+    (eski kural kapatirdi) artik AÇILIR.
     """
     from database.db import get_session
     from database.models import Bet
@@ -498,12 +479,31 @@ def test_fair_value_filter_opens_undervalued_market():
         _add_portfolio(s, cash=1000.0)
         _add_calibration(s, "AAA", 0.87)
         _add_forecast(s, "AAA", "temperature_max", day, 25.0, datetime(2026, 8, 1, 10, 0))
-        # Esik 28C: market fiyati 0.01 (fair ~0.02-0.03 altinda) -> AÇILIR
-        for thr in range(22, 29):
-            _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.01)
+        # 25C merkez: 0.50 fiyat (fair ~0.40 ustu) -> acilmali
+        _add_market(s, "Testville", "temperature_max", day, 25, yes_price=0.50)
         s.commit()
         res = place_spread_bets(day, session=s)
         s.commit()
         placed = s.query(Bet).filter(Bet.status == "placed").count()
-    assert res["placed"] >= 1, "market fiyati fair degerin altindaysa bet acilmali"
+    assert res["placed"] >= 1, "0.01-0.95 arasi fiyat fair'dan yuksek olsa bile acilmali"
+    assert placed >= 1
+
+
+def test_spread_opens_death_zone_price():
+    """0.10-0.20 olum bolge KALKTI (2026-08-16): bu fiyatlar artik AÇILIR."""
+    from database.db import get_session
+    from database.models import Bet
+    from executor.spread_placer import place_spread_bets
+
+    day = _day()
+    with get_session() as s:
+        _add_portfolio(s, cash=1000.0)
+        _add_calibration(s, "AAA", 0.87)
+        _add_forecast(s, "AAA", "temperature_max", day, 25.0, datetime(2026, 8, 1, 10, 0))
+        _add_market(s, "Testville", "temperature_max", day, 25, yes_price=0.15)
+        s.commit()
+        res = place_spread_bets(day, session=s)
+        s.commit()
+        placed = s.query(Bet).filter(Bet.status == "placed").count()
+    assert res["placed"] >= 1, "0.10-0.20 arasi fiyat (olum bolge) artik acilmali"
     assert placed >= 1

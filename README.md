@@ -148,11 +148,13 @@ python main.py bot
 **Varsayilan moddur** (`BETTING_STRATEGY=spread`). Eski edge-tabanli mod `BETTING_STRATEGY=edge` ile geri donulebilir.
 
 - Yeni **2-gun-sonrasi tarih** acildiginda (bot_loop 2-day-ahead tespiti):
-  - En son meteo tahmini etrafinda **+/- 1 dereceye** (3 esik: merkez ve komsulari) YES bet acilir.
-    (2026-08-15 kullanici karari: "3 esige indir kodla". Backtest: radius0 +$46, radius1 +$15, radius3 -$182.)
+  - En son meteo tahmininin **tam merkezine** (tek esik, radius=0) YES bet acilir.
+    (2026-08-16 kullanici karari: "her sehre meteo ne diyorsa TEK bet, tam merkez,
+    +/- 1 demedim". Backtest 2026-08-14: radius0 +$41.9, radius3 -$317.)
   - Giris fiyati = **CANLI `weather_markets.yes_price`** (5 dk'da guncellenir; bayat snapshot degil, 2026-08-11).
-  - `0 < entry < 0.30` olan esiklere, esik basina $2 (backtest en iyi config — 2026-08-11).
-    ⚠️ **2026-08-12 backtest taramasi:** 0.30 limiti kazananlarin %65'ini kesiyor (0.30 alti winrate %8.6 vs 0.30 ustu %45). Karar logu 0.99 diyor ama canli config 0.30 — tutarsiz, karar bekliyor.
+  - `0.01 < entry < 0.95` olan her fiyata bet acilir (esik basina $2, 2026-08-16
+    kullanici karari: "fiyat ne olursa olsun 0.95 ve alti"). Fair-value ve
+    0.10-0.20 olum bolge filtreleri KALDIRILDI (2026-08-16).
   - **KAYAN PENCERE KAPALI (2026-08-12):** merkez kayarsa bile acilan betler settlement'a
     kadar TUTULUR. Backtest: kaydirma her config'de zarar (shift -26 vs noshift +74).
     Sadece yeni esikler acilir, eski penceredekiler kapatilmaz.
@@ -160,7 +162,7 @@ python main.py bot
     dusuk |bias|; SICAKLIK DEGIL, 2026-08-11 kullanici karari. Bias'siz yeni sehir acilmaz).
     **Sehir secimi SADECE yeni gun acilisinda kullanilir; sehir secilmeden dusse bile
     acik betleri KAPATILMAZ (2026-08-12 kullanici karari).**
-  - Gunluk **max 350 bet** (3 gun x 12 sehir x 3 esik = 108 + marj).
+  - Gunluk **max 40 bet** (2026-08-16 kullanici karari: "ilk 40 markete ac").
 - **ERKEN GIRIS (0-13 UTC hafif probe):** Snapshot analizi ilk market acilislarinin
   04:00-12:30 UTC'ye yayildigini gosterdi. 00:00-13:00 UTC penceresinde bot her ~1 sn
   Polymarket Gamma'ya TEK hafif sorgu atar (public-search limit 5); DB'deki max acik
@@ -178,19 +180,19 @@ python main.py bot
   ~60 dk bir en yeni acik tarih icin spread betlerini tekrar dener — sonradan acilan
   esikler (orn. Ankara 32C "NEW") de yakalanir. Secilmeyen sehirlerin acik
   betleri KAPATILMAZ (2026-08-12 kullanici karari — kazanan esikler bile satiliyordu).
-- Backtest (orderbook, gercek veri 14 gun): radius1 + max_entry0.30 + bias-top12 = **+$62.61**.
-  `scripts/backtest_orderbook.py`, `scripts/backtest_3esik*.py`.
+- Backtest (orderbook, gercek veri 14 gun): radius0 + max_entry0.95 + bias-top12 = en karli
+  (2026-08-14: +$41.9; radius3 -$317). `scripts/backtest_orderbook.py`.
 - **Kalibrasyon spread'te kapatilir** (CALIB +$28k < RAW +$37k) — edge-tabanli
   stratejide degerli oldugu icin calculator'da aktif kalir.
 
 | Ayar (.env) | Varsayilan | Aciklama |
 |---|---|---|
 | `BETTING_STRATEGY` | `spread` | `edge` = eski mod |
-| `SPREAD_RADIUS` | `1` | tahmin +/- derece (3 esik: merkez +-1) |
+| `SPREAD_RADIUS` | `0` | TEK esik: tahmin merkezinin tamamina bet (2026-08-16) |
 | `SPREAD_MAX_CITIES` | `12` | tahmini en az sapan ilk N sehir (sicaklik degil) |
-| `SPREAD_MAX_ENTRY` | `0.30` | ust fiyat siniri (0.30 ve ustu acilmaz; backtest en iyi) |
+| `SPREAD_MAX_ENTRY` | `0.95` | ust fiyat siniri (0.95 ve alti her fiyata acilir, 2026-08-16) |
 | `SPREAD_STAKE_USD` | `2.0` | esik basina stake |
-| `SPREAD_MAX_BETS_PER_DAY` | `350` | gunluk bet limiti (3 gun x 12 sehir x 3 esik = 108 + marj) |
+| `SPREAD_MAX_BETS_PER_DAY` | `40` | gunluk bet limiti (2026-08-16: "ilk 40 markete ac") |
 
 ---
 
@@ -285,7 +287,7 @@ python main.py reset     # SIFIRLA (backup alir)
 ```powershell
 # FULL suite (0 failed hedefi)
 python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q
-# -> "665 passed, 6 skipped, 0 failed" (2026-08-16 durumda; tsc --noEmit 0 hata)
+# -> "663 passed, 8 skipped, 0 failed" (2026-08-16 durumda; tsc --noEmit 0 hata)
 
 # Davranis testleri (gercek DB, mock'suz — modul etkilesim bug'lari icin)
 python -m pytest tests/test_settlement_chain.py tests/test_bet_behavior.py -q

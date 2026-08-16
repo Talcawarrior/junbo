@@ -89,21 +89,6 @@ def _last_forecast_per_city_metric(session, target_day):
     return result
 
 
-def _fair_price(mean: float, std: float, threshold: float, days_ahead: int = 2) -> float:
-    """Fair YES fiyati: HIGH market P(T >= X) = 1 - CDF((X-mean)/std).
-
-    days_ahead basina 0.5C belirsizlik eklenir (min total_std=1.0) — botun
-    `utils.probability.estimate_probability` mantigiyla ayni.
-    """
-    from utils.probability import normal_cdf
-
-    import math
-
-    total_std = max(math.sqrt(std**2 + (days_ahead * 0.5) ** 2), 1.0)
-    prob = 1.0 - normal_cdf((threshold - mean) / total_std)
-    return max(0.01, min(0.99, prob))
-
-
 def _find_market(session, city_name, metric, target_day, thr):
     lo, hi = _day_range(target_day)
     return (
@@ -169,7 +154,9 @@ def _place_spread_bets_inner(session, target_day) -> dict:
     from config.settings import bot_config
 
     s = bot_config.strategy
-    radius = int(getattr(s, "spread_radius", 3) or 3)
+    # 2026-08-16: `or 3` yerine `is None` guard — radius=0 (tek esik) gecerli
+    # degerdir, falsy sayilip default'a dusmemeli.
+    radius = int(getattr(s, "spread_radius", None) if getattr(s, "spread_radius", None) is not None else 3)
     max_cities = int(getattr(s, "spread_max_cities", 15) or 15)
     max_entry = float(getattr(s, "spread_max_entry", 0.30) or 0.30)
     stake = float(getattr(s, "spread_stake_usd", 2.0) or 2.0)
@@ -296,21 +283,9 @@ def _place_spread_bets_inner(session, target_day) -> dict:
                 skipped += 1
                 continue
 
-            # FAIR-VALUE FILTRESI (2026-08-12 kullanici karari):
-            # Sadece market fiyati model olasiliginin ALTINDA (ucuz) ise gir.
-            # Backtest: filtresiz -$51 vs fair-value +$113 (0.10-0.20 kesik).
-            # Market fiyat > model probu ise "piyasa zaten biliyor" — edge yok.
-            fair = _fair_price(fmean, fstd, float(thr), days_ahead=2)
-            if entry >= fair:
-                skipped += 1
-                continue
-
-            # 0.10-0.20 OLUM BOLGE (2026-08-12 kullanici karari):
-            # Backtest: 0.10-0.20 arasi ne carpan ne winrate veriyor (-$81);
-            # 0.00-0.10 longshot'lar +$78 (nadir ama 40-200x). Bu band girilmez.
-            if 0.10 <= entry < 0.20:
-                skipped += 1
-                continue
+            # 2026-08-16 kullanici karari: fair-value ve 0.10-0.20 olum bolge
+            # filtreleri KALDIRILDI — "fiyat ne olursa olsun 0.01-0.95 arasi
+            # ilk 40 markete ac". Tek kosul fiyat araligi + gunluk limit.
             pf = session.query(Portfolio).filter(Portfolio.id == 1).first()
             if pf is None:
                 # Portfolio satiri yoksa olustur (bot lifespan disindan calisirken

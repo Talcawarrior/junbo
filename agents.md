@@ -409,7 +409,7 @@ Degisiklik oldugunda bu bolumu de guncelle.
   4b. **`spread_max_entry=0.30`.** Backtest en iyi config (kayan pencere + 0.30
      -> +$53,284). 0.30 ustu fiyatli esiklere girilmez. (Onceden 0.99 denenmis,
      kullanici "fiyat onemsiz" demisti; sonra veri 0.30'u gosterdi.)
-- **Son suite durumu:** 665 passed, 6 skipped, 0 failed.
+- **Son suite durumu:** 663 passed, 8 skipped, 0 failed.
   (Ignore: test_betting_idempotency, test_comprehensive).
 - **Test DB izole:** `tests/conftest.py` temp DB'ye yonlendirir — suite bot
   CALISIYORKEN de production DB'ye dokunmaz. Yine de guvenli tarafta kalmak icin

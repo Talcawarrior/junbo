@@ -167,12 +167,14 @@ class StrategyConfig:
     # Backtest (orderbook, gercek fiyat, empirical CDF, 99 gunluk bias):
     #   spread=0 + bias-top 12 -> +$41.86 (winrate %43.6)
     #   spread=3 (eski)       -> -$317 (winrate %11)
-    spread_radius: int = 1  # 3 ESIK: +/- 1 derece (merkez ve komsulari) — 2026-08-15 kullanici karari
+    # 2026-08-16 kullanici karari: TEK esik (radius=0, tam merkez), fiyat ne
+    # olursa olsun 0.01-0.95 arasi ilk 40 markete bet.
+    spread_radius: int = 0  # TEK ESIK: sadece tam merkez (meteo tahmini round)
     # 2026-08-14: 12 sehir (en az sapan). Backtest: bias-top 12 en karli (+$41.9).
     spread_max_cities: int = 12  # tahmini en yuksek ilk N sehir
-    spread_max_entry: float = 0.30  # ust sinir: 0.30+ fiyatli esiklere girilmez (backtest en iyi: +$53k, 2026-08-11)
+    spread_max_entry: float = 0.95  # ust sinir: 0.95 ve alti her fiyata acilir (2026-08-16)
     spread_stake_usd: float = 2.0  # esik basina stake
-    spread_max_bets_per_day: int = 350  # gunluk limit: 3 gun x 15 sehir x 7 esik = 315 + marj
+    spread_max_bets_per_day: int = 40  # gunluk limit: ilk 40 market (2026-08-16 kullanici karari)
 
     # ── Daily rotation limit: gunde max N rotasyon ───────────────────
     max_daily_rotations: int = 3  # gunde en fazla 3 rotasyon (maliyet kontrolu)
@@ -293,7 +295,6 @@ _ICAO_COORDS = {
     "EFHK": (60.3172, 24.9633),  # Helsinki
     "OEJN": (21.6796, 39.1565),  # Jeddah
     "OPKC": (24.9065, 67.1608),  # Karachi
-    "RKSI": (37.4492, 126.4510),  # Seoul Incheon (cozum istasyonu)
     "ZGSZ": (22.6393, 113.8107),  # Shenzhen
     "NZWN": (-41.3272, 174.8053),  # Wellington
     "ZHHH": (30.7838, 114.2081),  # Wuhan
