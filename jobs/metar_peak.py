@@ -25,8 +25,10 @@ logger = logging.getLogger("SCHEDULER_METAR_PEAK")
 
 # Kapanisa bu kadar saat kala hala zirve kilitlenmediyse bet acilmaz
 MIN_HOURS_BEFORE_CLOSE = 4
-# METAR stake (kullanici karari 2026-08-16: 1 USD -> 2 USD)
-METAR_STAKE = 2.0
+# METAR stake (kullanici karari 2026-08-16: 1 -> 2 -> 3 USD optimum.
+# Backtest: bias-top 40 + tek esik, $3 stake = %91.7, +$120, maxDD $3.2.
+# ROI stake'ten bagimsiz ama mutlak kazanc ve risk dengede $3 en iyi.)
+METAR_STAKE = 3.0
 # Kapanis = target_date + 12h (24:00 UTC)
 CLOSE_HOURS = 12
 # METAR-peak bet'i icin sehir secimi: bias-top N (en az sapan). Kullanici
@@ -64,7 +66,10 @@ def _open_metar_bet(session, market: WeatherMarket, peak_temp: float) -> Optiona
     from utils.formulas import bet_shares, polymarket_fee_from_stake
 
     entry = float(market.yes_price or 0)
-    max_entry = float(getattr(bot_config.strategy, "spread_max_entry", 0.50) or 0.50)
+    # METAR-peak: kazanan bucket'i biliyoruz, fiyat 0.95'e kadar girilebilir.
+    # Backtest: 12 bet %91.7, entry 0.05-0.89 (8 bet 0.30+). 0.50 siniri
+    # kazananlari kaciriyordu (0.52, 0.89). Optimum: 0.95 (2026-08-16).
+    max_entry = 0.95
     if not (0 < entry < max_entry):
         logger.info("metar_peak: %s %sC giris=%.3f >= max_entry=%.2f, atlandi",
                     market.city, market.threshold, entry, max_entry)

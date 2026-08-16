@@ -10,9 +10,9 @@ import jobs.metar_peak as mp
 
 
 class TestMetarPeakConfig:
-    def test_metar_stake_is_2_usd(self):
-        """Kullanici karari 2026-08-16: METAR bet stake 2 USD."""
-        assert mp.METAR_STAKE == 2.0
+    def test_metar_stake_is_3_usd(self):
+        """Kullanici karari 2026-08-16: METAR bet stake 3 USD (optimum)."""
+        assert mp.METAR_STAKE == 3.0
 
     def test_bias_top_40(self):
         """Kullanici karari 2026-08-16: bias-top 40 sehir."""
