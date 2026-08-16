@@ -172,8 +172,9 @@ class AsyncHttpClient:
     call sites that have not been refactored yet.
     """
 
-    def __init__(self, max_concurrent: int = MAX_CONCURRENT) -> None:
+    def __init__(self, max_concurrent: int = MAX_CONCURRENT, proxy: str | None = None) -> None:
         self.max_concurrent = max_concurrent
+        self._proxy = proxy
         self._session: aiohttp.ClientSession | None = None
         self._session_lock = threading.Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -185,9 +186,11 @@ class AsyncHttpClient:
             raise RuntimeError("aiohttp is not installed")
         with self._session_lock:
             if self._session is None or self._session.closed:
-                self._session = aiohttp.ClientSession(
-                    headers={"User-Agent": _USER_AGENT}
-                )
+                kwargs: dict = {"headers": {"User-Agent": _USER_AGENT}}
+                if self._proxy:
+                    # aiohttp proxy: http(s) ve socks icin proxy_str desteklenir
+                    kwargs["proxy"] = self._proxy
+                self._session = aiohttp.ClientSession(**kwargs)
             return self._session
 
     async def aclose(self) -> None:
@@ -225,9 +228,13 @@ class AsyncHttpClient:
         # the cross-event-loop ResourceWarning that shows up on Windows
         # when the test process exits before the pool drains.
         connector = aiohttp.TCPConnector(force_close=True)
-        session = aiohttp.ClientSession(
-            headers={"User-Agent": _USER_AGENT}, connector=connector
-        )
+        session_kwargs: dict = {
+            "headers": {"User-Agent": _USER_AGENT},
+            "connector": connector,
+        }
+        if self._proxy:
+            session_kwargs["proxy"] = self._proxy
+        session = aiohttp.ClientSession(**session_kwargs)
         try:
             tasks = [
                 asyncio.create_task(
@@ -276,7 +283,10 @@ class AsyncHttpClient:
         if host:
             _throttle(host)
         try:
-            resp = requests.get(url, params=params, timeout=_TIMEOUT_S)
+            proxies = None
+            if self._proxy:
+                proxies = {"http": self._proxy, "https": self._proxy}
+            resp = requests.get(url, params=params, timeout=_TIMEOUT_S, proxies=proxies)
         except requests.RequestException as exc:
             logger.warning("sync fetch %s failed: %s", url, exc)
             _cache_set(key, None)

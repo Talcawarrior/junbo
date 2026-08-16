@@ -197,7 +197,10 @@ class PolymarketScraper:
             for q in queries
         ]
         if not hasattr(self, "_async_client") or self._async_client is None:
-            self._async_client = AsyncHttpClient()
+            from config.settings import bot_config
+
+            proxy = bot_config.polymarket.get_proxies().get("https") if bot_config.polymarket.get_proxies() else None
+            self._async_client = AsyncHttpClient(proxy=proxy)
         results = self._async_client.fetch_many(items)
         # Each entry is the parsed JSON or None on failure; events live
         # under the "events" key. Skip failures.
