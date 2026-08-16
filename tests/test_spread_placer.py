@@ -33,6 +33,7 @@ def _clean_db():
     bot_config.strategy.spread_radius = 0
     bot_config.strategy.spread_max_entry = 0.95
     bot_config.strategy.spread_max_bets_per_day = 40
+    bot_config.strategy.spread_max_cities = 40
 
 
 def _day():

@@ -171,7 +171,8 @@ class StrategyConfig:
     # olursa olsun 0.01-0.95 arasi ilk 40 markete bet.
     spread_radius: int = 0  # TEK ESIK: sadece tam merkez (meteo tahmini round)
     # 2026-08-14: 12 sehir (en az sapan). Backtest: bias-top 12 en karli (+$41.9).
-    spread_max_cities: int = 12  # tahmini en yuksek ilk N sehir
+    # 2026-08-16: "ilk 40 markete ac" -> max_cities 40 (23 marketli sehir de degerlendirilir).
+    spread_max_cities: int = 40  # tahmini en yuksek ilk N sehir
     spread_max_entry: float = 0.95  # ust sinir: 0.95 ve alti her fiyata acilir (2026-08-16)
     spread_stake_usd: float = 2.0  # esik basina stake
     spread_max_bets_per_day: int = 40  # gunluk limit: ilk 40 market (2026-08-16 kullanici karari)
