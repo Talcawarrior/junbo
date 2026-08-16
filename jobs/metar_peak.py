@@ -17,17 +17,21 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from database.db import get_session
-from database.models import Bet, Portfolio, WeatherMarket
+from database.models import Bet, HistoricalCalibration, Portfolio, WeatherMarket
 from config.settings import bot_config
+from sqlalchemy import func
 
 logger = logging.getLogger("SCHEDULER_METAR_PEAK")
 
 # Kapanisa bu kadar saat kala hala zirve kilitlenmediyse bet acilmaz
 MIN_HOURS_BEFORE_CLOSE = 4
-# METAR stake (kullanici: 1 USD bet ac)
-METAR_STAKE = 1.0
+# METAR stake (kullanici karari 2026-08-16: 1 USD -> 2 USD)
+METAR_STAKE = 2.0
 # Kapanis = target_date + 12h (24:00 UTC)
 CLOSE_HOURS = 12
+# METAR-peak bet'i icin sehir secimi: bias-top N (en az sapan). Kullanici
+# karari 2026-08-16: "bias'ta ilk 40 sehir icin bet acalim".
+BIAS_TOP_CITIES = 40
 
 
 def _hours_until_close(market) -> float:
@@ -119,7 +123,27 @@ def run_metar_peak_bets() -> int:
     today = now.date().isoformat()
 
     with get_session() as session:
-        # Acik marketler (status=open), bugun ve gelecek gun
+        # Bias-top N sehir secimi (en az sapan) — kullanici karari 2026-08-16
+        bias_scores: dict[str, float] = {}
+        for code, b in session.query(
+            HistoricalCalibration.city_code,
+            func.abs(HistoricalCalibration.bias),
+        ).filter(HistoricalCalibration.bias.isnot(None)).all():
+            if code:
+                bias_scores[code] = bias_scores.get(code, 0.0) + float(b)
+        bias_cnt: dict[str, int] = {}
+        for (code,) in session.query(HistoricalCalibration.city_code).filter(
+            HistoricalCalibration.bias.isnot(None)
+        ).all():
+            if code:
+                bias_cnt[code] = bias_cnt.get(code, 0) + 1
+        avg_bias: dict[str, float] = {}
+        for code in bias_scores:
+            if bias_cnt.get(code, 0) > 0:
+                avg_bias[code] = bias_scores[code] / bias_cnt[code]
+        top_codes = {c for c, _ in sorted(avg_bias.items(), key=lambda kv: kv[1])[:BIAS_TOP_CITIES]}
+
+        # Acik marketler (status=open), bugun ve gelecek gun, bias-top sehirler
         markets = (
             session.query(WeatherMarket)
             .filter(
@@ -131,6 +155,7 @@ def run_metar_peak_bets() -> int:
             )
             .all()
         )
+        markets = [m for m in markets if m.city_code in top_codes]
         if not markets:
             return 0
 
