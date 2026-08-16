@@ -131,7 +131,7 @@ python main.py bot
 | `MAX_ENTRY_PRICE` | `0.99` | 0.99+ fiyata bet acilmaz |
 | `HOST` / `PORT` | `127.0.0.1` / `8093` | Sunucu |
 | `DB_PATH` | `data/bot.db` | Ana DB |
-| `POLY_PROXY` | - | SOCKS5 proxy (Turkiye ise WARP kullan) |
+| `POLY_PROXY` | `socks5h://127.0.0.1:40000` | Polymarket SOCKS5 proxy — sistem PAC'i (`polymarket.pac`) WARP'a yonlendirir; **zorunlu** (2026-08-16: proxy yoksa bot `10054` alir, market cekemez) |
 
 ---
 
@@ -285,7 +285,7 @@ python main.py reset     # SIFIRLA (backup alir)
 ```powershell
 # FULL suite (0 failed hedefi)
 python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q
-# -> "695 passed, 7 skipped, 0 failed" (2026-08-11 durumda; tsc --noEmit 0 hata)
+# -> "665 passed, 6 skipped, 0 failed" (2026-08-16 durumda; tsc --noEmit 0 hata)
 
 # Davranis testleri (gercek DB, mock'suz — modul etkilesim bug'lari icin)
 python -m pytest tests/test_settlement_chain.py tests/test_bet_behavior.py -q
@@ -334,6 +334,8 @@ Detaylar icin `GELISTIRICI_NOTLARI.md`'ya bakin (bolum 12: dogrulanmis davranis 
 - **2026-08-12 (ikinci tur):** **Top-15 kapatma KALDIRILDI** (kullanici karari: "ilk 15 bias sadece yeni gun aciliminda kullanilacak, kapatma yapilmayacak"). Sehir top-15'ten dusse bile acik betler settlement'a kadar TUTULUR — sadece yeni bet acilmaz. Bu, Istanbul 13 Agustos betlerinin tamaminin "out of top-15 selection" ile satilmasini (kazanan esikler dahil) onler. Kullanilmayan `tie_loser` (`close_losing_twin_bets`), `stale_cleanup` (`_cleanup_stale_bets`) ve tarihsel `24h_rule` mekanizmalari da silindi (kodda kapanis uretmiyorlardi). Bet loglarina `bet#ID` eklendi (izlenebilirlik).
 - **2026-08-12 (ucuncu tur):** **Backtest dogrulamasi** — `max_entry` taramasi (0.29-0.12) ve spread (3/5/7) x kaydirma (shift/noshift) kombinasyonlarinin tamaminda EN KARLI senaryo: **spread=3 + KAYDIRMASIZ (acilan bet settlement'a kadar) + tum fiyatlar = +$74.26**. `spread_max_entry=0.30` kazananlarin %65'ini kesiyor (0.30 alti winrate %8.6 vs 0.30 ustu %45) — bot'un canli config'i hala 0.30, karar logu (0.99) ile celisiyor.
 - **2026-08-14:** **METAR zirve-tespiti tek esik stratejisi.** Polymarket weather marketleri Weather Underground istasyon verisinden cozuluyor; WU ticari API ~$500/ay ama aviationweather.gov (NOAA resmi METAR, **bedava**, 30dk guncelleme) AYNI istasyon verisini verir. `scrapers/metar.py` + `jobs/metar_peak.py`: acik marketli sehirlerin METAR'ini gun icinde izler, sicaklik max'a cikip **2 kez arka arkaya dustugunde** zirve kilitlenir, o sehrin kazanan bucket'ina (round(max)) **tek esik YES** bet acar ($1 stake, order_id `metar_*`). `bot_loop.metar_loop` 30dk'da bir calisir. Kapanisa <4 saat kalan sehirler atlanir. Sermaye +1000 USD (cash $191->$1191). Manuel dogrulama: 14 Agu'da 5 bet acildi (London 25C, Dallas 37C, Toronto 26C, Mexico City 19C, Buenos Aires 10C, entry 0.010). Kullanici karari: "acik bet sehirleri listesini al, metardan takip et, dustugunu teyit edince beti yapistir, %100 onemli degil, tek esik kayip az". Suite: 636 passed.
+
+- **2026-08-16:** **Polymarket proxy + regression testleri.** Kullanici "ben polymarkete giriyorum bot nasil giremiyor?" dedi. Kok neden: sistem PAC dosyasi Polymarket'i SOCKS `127.0.0.1:40000`'a (WARP) yonlendiriyor; Python requests PAC kullanmadigindan DIRECT'ten `10054` aliyordu. `.env` `POLY_PROXY=socks5h://127.0.0.1:40000` + `AsyncHttpClient(proxy=...)` + `polymarket._fetch_raw_markets` proxy ile — bot artik 18 Agustos marketlerini goruyor (DB'de 289). **Regression testleri (`tests/test_regression_fixes.py`):** proxy (canli + tarayici fallback), CITY_ICAO_MAP 7 sehir istasyon duzeltmesi, RKSI koord, orderbook arsiv, Gamma rate limit, partial_tp migration. Suite: 665 passed.
 
 ---
 
