@@ -287,7 +287,7 @@ python main.py reset     # SIFIRLA (backup alir)
 ```powershell
 # FULL suite (0 failed hedefi)
 python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q
-# -> "663 passed, 8 skipped, 0 failed" (2026-08-16 durumda; tsc --noEmit 0 hata)
+# -> "664 passed, 7 skipped, 0 failed" (2026-08-16 durumda; tsc --noEmit 0 hata)
 
 # Davranis testleri (gercek DB, mock'suz — modul etkilesim bug'lari icin)
 python -m pytest tests/test_settlement_chain.py tests/test_bet_behavior.py -q
@@ -338,6 +338,7 @@ Detaylar icin `GELISTIRICI_NOTLARI.md`'ya bakin (bolum 12: dogrulanmis davranis 
 - **2026-08-14:** **METAR zirve-tespiti tek esik stratejisi.** Polymarket weather marketleri Weather Underground istasyon verisinden cozuluyor; WU ticari API ~$500/ay ama aviationweather.gov (NOAA resmi METAR, **bedava**, 30dk guncelleme) AYNI istasyon verisini verir. `scrapers/metar.py` + `jobs/metar_peak.py`: acik marketli sehirlerin METAR'ini gun icinde izler, sicaklik max'a cikip **2 kez arka arkaya dustugunde** zirve kilitlenir, o sehrin kazanan bucket'ina (round(max)) **tek esik YES** bet acar ($1 stake, order_id `metar_*`). `bot_loop.metar_loop` 30dk'da bir calisir. Kapanisa <4 saat kalan sehirler atlanir. Sermaye +1000 USD (cash $191->$1191). Manuel dogrulama: 14 Agu'da 5 bet acildi (London 25C, Dallas 37C, Toronto 26C, Mexico City 19C, Buenos Aires 10C, entry 0.010). Kullanici karari: "acik bet sehirleri listesini al, metardan takip et, dustugunu teyit edince beti yapistir, %100 onemli degil, tek esik kayip az". Suite: 636 passed.
 
 - **2026-08-16:** **Polymarket proxy + regression testleri.** Kullanici "ben polymarkete giriyorum bot nasil giremiyor?" dedi. Kok neden: sistem PAC dosyasi Polymarket'i SOCKS `127.0.0.1:40000`'a (WARP) yonlendiriyor; Python requests PAC kullanmadigindan DIRECT'ten `10054` aliyordu. `.env` `POLY_PROXY=socks5h://127.0.0.1:40000` + `AsyncHttpClient(proxy=...)` + `polymarket._fetch_raw_markets` proxy ile — bot artik 18 Agustos marketlerini goruyor (DB'de 289). **Regression testleri (`tests/test_regression_fixes.py`):** proxy (canli + tarayici fallback), CITY_ICAO_MAP 7 sehir istasyon duzeltmesi, RKSI koord, orderbook arsiv, Gamma rate limit, partial_tp migration. Suite: 665 passed.
+- **2026-08-16:** **METAR/Open-Meteo global env proxy sizintisi.** `config/settings.py` Polymarket SOCKS proxy'yi `os.environ` global olarak set ediyordu -> aviationweather.gov + open-meteo da proxy'den gitmeye basladi (geo-block degiller ama 20s timeout/502). 172 METAR hatasi yuzunden METAR-peak (kesin sonuc, %91.7 backtest) betleri acilamiyordu. Cozum: `requests.get(..., proxies={"http": None, "https": None, "all": None})` ile bu iki kaynak DIRECT. Suite: 664 passed.
 
 ---
 

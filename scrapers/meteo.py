@@ -173,6 +173,8 @@ class MeteoFetcher:
 
         _throttle("open-meteo.com")
         try:
+            # trust_env=False: settings global HTTP_PROXY env'i (Polymarket SOCKS)
+            # yok sayilir — open-meteo geo-block'lu degil, DIRECT gider.
             resp = requests.get(
                 bot_config.meteo.openmeteo_url,
                 params={
@@ -185,6 +187,7 @@ class MeteoFetcher:
                     "timezone": "auto",
                 },
                 timeout=15,
+                proxies={"http": None, "https": None, "all": None},
             )
             if resp.status_code == 429:
                 _RATE_LIMITED_UNTIL = _time.monotonic() + 300  # 5dk

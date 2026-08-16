@@ -132,7 +132,12 @@ def fetch_forecast_ensemble(
     }
 
     try:
-        resp = requests.get(OPEN_METEO_FORECAST_URL, params=params, timeout=timeout)
+        # 2026-08-16: settings global HTTP_PROXY env set ediyor (Polymarket SOCKS).
+        # open-meteo geo-block'lu DEGIL, proxy'den yavasliyor -> DIRECT.
+        resp = requests.get(
+            OPEN_METEO_FORECAST_URL, params=params, timeout=timeout,
+            proxies={"http": None, "https": None, "all": None},
+        )
         resp.raise_for_status()
         payload = resp.json()
     except Exception as exc:
@@ -229,7 +234,11 @@ def fetch_archive_actuals(
     }
 
     try:
-        resp = requests.get(OPEN_METEO_ARCHIVE_URL, params=params, timeout=timeout)
+        # proxy'siz DIRECT (open-meteo geo-block degil, settings global env proxy)
+        resp = requests.get(
+            OPEN_METEO_ARCHIVE_URL, params=params, timeout=timeout,
+            proxies={"http": None, "https": None, "all": None},
+        )
         resp.raise_for_status()
         payload = resp.json()
     except Exception as exc:
@@ -331,7 +340,11 @@ def fetch_historical_forecast_ensemble(
     }
 
     try:
-        resp = requests.get(OPEN_METEO_HISTORICAL_FORECAST_URL, params=params, timeout=timeout)
+        # proxy'siz DIRECT (open-meteo geo-block degil, settings global env proxy)
+        resp = requests.get(
+            OPEN_METEO_HISTORICAL_FORECAST_URL, params=params, timeout=timeout,
+            proxies={"http": None, "https": None, "all": None},
+        )
         resp.raise_for_status()
         payload = resp.json()
     except Exception as exc:

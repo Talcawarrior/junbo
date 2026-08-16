@@ -25,7 +25,7 @@ python -m pytest tests/test_accounting.py tests/test_settler_polymarket.py tests
 
 # 6) FULL suite (push oncesi)
 python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q
-# HEDEF: "663 passed, 8 skipped, 0 failed" (2026-08-16 itibari; tsc --noEmit = 0 hata)
+# HEDEF: "664 passed, 7 skipped, 0 failed" (2026-08-16 itibari; tsc --noEmit = 0 hata)
 
 # 7) Dokumantasyon senkronu (ZORUNLU, agents.md kurali)
 # README.md + GELISTIRICI_NOTLARI.md — bugfix/karar/feature commit'lenmeden once ekle/duzelt
@@ -158,6 +158,7 @@ Hangi dosya hangi kurali korur:
 | **REGRESSION FIX TESTLERI (2026-08-16)** | Duzeltilen ama testi olmayan bug'lar icin `tests/test_regression_fixes.py` eklendi: (1) proxy config + canli erisim + tarayici fallback (5691228); (2) `CITY_ICAO_MAP` 7 sehir dogru istasyon + RKSI Incheon koord (1f9313a); (3) orderbook arsiv yazimi (0bb98f1); (4) Gamma rate limit/throttle (0bb98f1); (5) `partial_tp_done` migration — model+DB'de kolon yok (28c5ba4). Suite: 638 -> 665 passed (6 skipped canli). |
 | **SPREAD TEK ESIK + 0.95 + ILK 40 (2026-08-16, kullanici duzeltmesi)** | Kullanici: "0.01-0.95 arasi ilk 40 markete ac, ben spread TEK dedim +-1 demedim". Kok nedenler: (1) `spread_placer.py:172` `int(getattr(s,"spread_radius",3) or 3)` — `0 or 3` **radius=0'i default 3'e dusuruyordu** (falsy bug), bu yuzden 18 Agu'da 8 degil 3 esikli acilacakti ama tek esik bekleniyordu; (2) fair-value filtresi (entry>=fair skip) + 0.10-0.20 olum bolge filtreleri bet sayisini kisiyordu — kullanici "fiyat ne olursa olsun 0.95 ve alti" dedi, KALDIRILDI; (3) `max_entry=0.30`/`max_bets=350` kullanici talimatina aykiridi. Cozum: `spread_radius=0`, `spread_max_entry=0.95`, `spread_max_bets_per_day=40` (.env + settings.py), fair-value/olum-bolge kaldirildi, `_fair_price` (dead) silindi, `ICAO_COORDS` duplicate RKSI temizlendi (F601). Ayrica `test_bot_flow.py`/`test_real_flow.py` `spread_radius=3` set edip geri yuklemiyordu -> full suite'te radius=0 testleri patliyordu; `test_spread_placer._clean_db` artik her test oncesi config'i sifirliyor. Test: `test_spread_placer.py` 14 (yeni: tek merkez esik, 0.50 fair-ustu acilir, 0.15 olum-bolge acilir). Suite: 665 -> 663 passed (8 skipped). |
 | **ICAO_COORDS duplicate RKSI (2026-08-16)** | `config/settings.py` `ICAO_COORDS` icinde `"RKSI"` iki kez (satir 246 ve 298, ayni deger) — ruff F601. Ikinci kopya silindi. |
+| **METAR + OPEN-METEO global env proxy sizintisi (2026-08-16)** | `config/settings.py:638-642` Polymarket SOCKS proxy'yi `os.environ["HTTP_PROXY/HTTPS_PROXY/ALL_PROXY"]` olarak GLOBAL set ediyor (ClobClient + direct calls icin). `requests` env proxy'yi otomatik okur (trust_env) -> aviationweather.gov ve open-meteo.com da SOCKS proxy'den gitmeye basladi. Bu iki site geo-block'lu DEGIL; proxy'den 20s timeout/502 -> **172 METAR hatasi, METAR-peak betleri acilamiyordu** (kullanici: "metardan sonucu almayacak miyiz, neden zarar ediyoruz"). Cozum: `scrapers/metar.py::_fetch_metar`, `scrapers/meteo.py::_fetch_open_meteo`, `data_pipeline/weather_ensemble.py` (3 fonksiyon) `requests.get(..., proxies={"http": None, "https": None, "all": None})` — "all": None env'yi tamamen kapatir, DIRECT. Test: fetch_metar_live RJTT 0.7s (once 20s timeout), open-meteo 0.7s 200. Suite: 663 -> 664 passed. |
 
 ---
 

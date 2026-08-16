@@ -61,10 +61,14 @@ def _fetch_metar(icao: str, hours: int = HISTORY_HOURS) -> list[tuple[int, float
     Returns: [(epoch, temp_c), ...] sicakliga gore artan (zaman sirali), temp yoksa [].
     """
     try:
+        # 2026-08-16: config/settings.py global olarak HTTP_PROXY/HTTPS_PROXY env
+        # set ediyor (Polymarket SOCKS). aviationweather.gov geo-block'lu DEGIL ve
+        # proxy uzerinden 20s timeout (172 hata) -> bu istek DIRECT gider.
         resp = requests.get(
             METAR_URL,
             params={"ids": icao, "format": "json", "hours": str(hours)},
             timeout=REQUEST_TIMEOUT,
+            proxies={"http": None, "https": None, "all": None},
         )
         resp.raise_for_status()
         data = resp.json()
