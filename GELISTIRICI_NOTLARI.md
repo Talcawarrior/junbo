@@ -98,6 +98,8 @@ Hangi dosya hangi kurali korur:
 
 > **METAR zirve-tespiti (2026-08-14):** `scrapers/metar.py` (aviationweather.gov NOAA, bedava) + `jobs/metar_peak.py` + `bot_loop.metar_loop` (30dk). Acik marketli sehirlerin METAR sicakligi gun icinde izlenir; max'a cikip **2 kez arka arkaya duserse** zirve kilitlenir, kazanan bucket'a (round(max)) tek esik YES bet ($1, order_id `metar_*`). Kapanisa <4 saat kalan sehirler atlanir. Not: aviationweather.gov sadece son 30 saat veri tutar — gecmis gun dogrulamasi yapilamaz, canli izleme icin tasarlandi. Sermaye +1000 USD. 14 Agu'da 5 bet acildi (entry 0.010).
 
+> **GUNCEL SPREAD CONFIG (2026-08-15 kullanici karari "3 esige indir"):** `spread_radius=1` (3 esik: merkez +-1), `spread_max_cities=12`, `spread_max_entry=0.30`, `spread_stake_usd=2.0`, `spread_max_bets_per_day=350`. Backtest (orderbook, 14 gun): radius1 + max_entry0.30 + bias-top12 = **+$62.61**; radius0 +$46, radius3 -$182. README 4b bolumu bu degerlere senkronlandi. Tarihsel kayitlardaki `spread=3`/`15 sehir`/`7 esik` ESKI konfigurasyonlardir (2026-08-10/11) — guncel durum icin README 4b + bu nota bak.
+
 **Kural:** Yeni bug bulundugunda once davranis testi yaz (sentetik + gercek DB), sonra duzelt.
 
 **ALLOWED_DEAD** guncellemesi: yeni public fonksiyon eklediginde ya caller ekle ya da `tests/test_latent_bugs.py::ALLOWED_DEAD` kumesine aciklama ile ekle (entry point ise otomatik gecer).

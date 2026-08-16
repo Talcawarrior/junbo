@@ -148,48 +148,49 @@ python main.py bot
 **Varsayilan moddur** (`BETTING_STRATEGY=spread`). Eski edge-tabanli mod `BETTING_STRATEGY=edge` ile geri donulebilir.
 
 - Yeni **2-gun-sonrasi tarih** acildiginda (bot_loop 2-day-ahead tespiti):
-  - En son meteo tahmini etrafinda **+/- 3 dereceye** (spread) YES bet acilir.
+  - En son meteo tahmini etrafinda **+/- 1 dereceye** (3 esik: merkez ve komsulari) YES bet acilir.
+    (2026-08-15 kullanici karari: "3 esige indir kodla". Backtest: radius0 +$46, radius1 +$15, radius3 -$182.)
   - Giris fiyati = **CANLI `weather_markets.yes_price`** (5 dk'da guncellenir; bayat snapshot degil, 2026-08-11).
   - `0 < entry < 0.30` olan esiklere, esik basina $2 (backtest en iyi config — 2026-08-11).
     ⚠️ **2026-08-12 backtest taramasi:** 0.30 limiti kazananlarin %65'ini kesiyor (0.30 alti winrate %8.6 vs 0.30 ustu %45). Karar logu 0.99 diyor ama canli config 0.30 — tutarsiz, karar bekliyor.
-  - **KAYAN PENCERE:** merkez kayinca (meteo tahmini guncellenir) eski pencerenin
-    disinda kalan esikler **o anki fiyattan kapatilir**, yeni pencereye giren eksik
-    esikler acilir. Tam-7 zorunlulugu YOKTUR (backtest karliligi dusurdugunden
-    kaldirildi; merkez marketi olmasa da acilabilen ayaklar acilir).
-  - Tahmini **en az sapan ilk 15 sehir** secilir (tahmini gercege en yakin tutanlar —
+  - **KAYAN PENCERE KAPALI (2026-08-12):** merkez kayarsa bile acilan betler settlement'a
+    kadar TUTULUR. Backtest: kaydirma her config'de zarar (shift -26 vs noshift +74).
+    Sadece yeni esikler acilir, eski penceredekiler kapatilmaz.
+  - Tahmini **en az sapan ilk 12 sehir** secilir (tahmini gercege en yakin tutanlar —
     dusuk |bias|; SICAKLIK DEGIL, 2026-08-11 kullanici karari. Bias'siz yeni sehir acilmaz).
-    **Top-15 sehir secimi SADECE yeni gun acilisinda kullanilir; sehir top-15'ten
-    dusse bile acik betleri KAPATILMAZ (2026-08-12 kullanici karari).**
-  - Gunluk **max 350 bet** (3 gun x 15 sehir x 7 esik = 315 + marj; 13 Agustos acilinca
-    da 15 sehir daha acilir, limite takilmaz).
+    **Sehir secimi SADECE yeni gun acilisinda kullanilir; sehir secilmeden dusse bile
+    acik betleri KAPATILMAZ (2026-08-12 kullanici karari).**
+  - Gunluk **max 350 bet** (3 gun x 12 sehir x 3 esik = 108 + marj).
 - **ERKEN GIRIS (0-13 UTC hafif probe):** Snapshot analizi ilk market acilislarinin
   04:00-12:30 UTC'ye yayildigini gosterdi. 00:00-13:00 UTC penceresinde bot her ~1 sn
   Polymarket Gamma'ya TEK hafif sorgu atar (public-search limit 5); DB'deki max acik
   tarihten ileri bir tarih gorurse HEMEN tam market cekisi + spread bet acar. Yeni
   tarih yoksa cekis yapilmaz (rate limit korunur). Pencere disinda normal 5 dk tarama.
 - **CLOB WebSocket:** Acik betlerin marketleri gercek zamanli WebSocket ile dinlenir
-  (5 dk polling yerine milisaniye fiyat akisi).
-- **Kayan pencere:** tahmin guncellendiginde (25C -> 27C) yeni merkezin +/-(radius)
-  disinda kalan acik esikler **kapatilir**, yeni penceredeki esikler acilir.
+  (5 dk polling yerine milisaniye fiyat akisi). Her fiyat olayi orderbook.db'ye
+  best_ask olarak arsivlenir (backtest icin kalici CLOB gecmisi, 2026-08-16).
+- **METAR zirve-tespiti (2026-08-14):** Acik marketli sehirlerin METAR canli istasyon
+  sicakligi (aviationweather.gov, NOAA bedava) 30dk'da bir izlenir; sicaklik max'a
+  cikip **2 kez arka arkaya dustugunde** (UTC >= 15:00 sonrasi) zirve kilitlenir, o
+  sehrin kazanan bucket'ina **tek esik YES** bet acilir ($1, order_id `metar_*`).
+  Kapanisa <4 saat kalan sehirler atlanir.
 - **Periyodik retry:** Polymarket marketleri zamana yayilarak acildigi icin bot her
   ~60 dk bir en yeni acik tarih icin spread betlerini tekrar dener — sonradan acilan
-  esikler (orn. Ankara 32C "NEW") de yakalanir. Top-15 disinda kalan sehirlerin acik
+  esikler (orn. Ankara 32C "NEW") de yakalanir. Secilmeyen sehirlerin acik
   betleri KAPATILMAZ (2026-08-12 kullanici karari — kazanan esikler bile satiliyordu).
-- Backtest (7 gun, gercek veri): spread=3, max_entry<0.30, RAW -> **+$36,814**,
-  %50.6 kazanma, 5/5 gun pozitif. `scripts/backtest_early_spread.py`.
-  **2026-08-12 taramasi:** en karlı senaryo spread=3 + KAYDIRMASIZ (acilan bet
-  settlement'a kadar) + tum fiyatlar = **+$74.26**; pencere kaydirmasi her config'de zarar.
+- Backtest (orderbook, gercek veri 14 gun): radius1 + max_entry0.30 + bias-top12 = **+$62.61**.
+  `scripts/backtest_orderbook.py`, `scripts/backtest_3esik*.py`.
 - **Kalibrasyon spread'te kapatilir** (CALIB +$28k < RAW +$37k) — edge-tabanli
   stratejide degerli oldugu icin calculator'da aktif kalir.
 
 | Ayar (.env) | Varsayilan | Aciklama |
 |---|---|---|
 | `BETTING_STRATEGY` | `spread` | `edge` = eski mod |
-| `SPREAD_RADIUS` | `3` | tahmin +/- derece |
-| `SPREAD_MAX_CITIES` | `15` | tahmini en az sapan ilk N sehir (sicaklik degil) |
+| `SPREAD_RADIUS` | `1` | tahmin +/- derece (3 esik: merkez +-1) |
+| `SPREAD_MAX_CITIES` | `12` | tahmini en az sapan ilk N sehir (sicaklik degil) |
 | `SPREAD_MAX_ENTRY` | `0.30` | ust fiyat siniri (0.30 ve ustu acilmaz; backtest en iyi) |
 | `SPREAD_STAKE_USD` | `2.0` | esik basina stake |
-| `SPREAD_MAX_BETS_PER_DAY` | `350` | gunluk bet limiti (3 gun x 15 sehir x 7 = 315 + marj) |
+| `SPREAD_MAX_BETS_PER_DAY` | `350` | gunluk bet limiti (3 gun x 12 sehir x 3 esik = 108 + marj) |
 
 ---
 
