@@ -503,6 +503,10 @@ ALLOWED_DEAD = {
     "core_bet",
     "last_ask_before_close",
     "single_bet",
+    # METAR-peak + erken-giris backtest helper'lari (2026-08-16)
+    "price_at",
+    "price_before",
+    "thr_to_market",
 }
 
 

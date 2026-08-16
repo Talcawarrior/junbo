@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
-"""Hourly orderbook depth collector for active weather markets.
+"""Orderbook depth collector for ALL active weather markets.
 
 Fetches market list from Polymarket Gamma API (with proper headers to get
-clobTokenIds), then fetches orderbook from CLOB API for each market,
-and stores depth metrics in data/orderbook.db.
+clobTokenIds), then fetches orderbook from CLOB API for each market, and
+stores depth metrics in data/orderbook.db. Detached from bot bet state —
+bu script TUM acik weather marketlerin orderbook'unu toplar (sadece betli
+olanlar degil), boylece backtest icin tam fiyat gecmisi birikir.
+
+Kullanim: python scripts/collect_orderbook.py [--loop] [--interval 900]
+  --loop       sonsuz dongu (bot entegrasyonu icin)
+  --interval   dongu araligi saniye (varsayilan 900 = 15 dk)
 
 Does NOT touch bot.db — fully independent data collection.
 """
 
+import argparse
 import logging
 import sqlite3
 import sys
@@ -18,6 +25,7 @@ from typing import Any
 
 # ── Paths ─────────────────────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 ORDERBOOK_DB = ROOT / "data" / "orderbook.db"
 LOG_DIR = ROOT / "data" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -34,9 +42,9 @@ logging.basicConfig(
 logger = logging.getLogger("collect_orderbook")
 
 # ── Constants ─────────────────────────────────────────────────────────────
-TIMEOUT = 180  # 3 minutes per HTTP request
-MAX_RETRIES = 5  # retry count on failure
-RETRY_DELAY = 60  # seconds between retries
+TIMEOUT = 60  # seconds per HTTP request
+MAX_RETRIES = 3  # retry count on failure
+RETRY_DELAY = 20  # seconds between retries
 CLOB_BASE = "https://clob.polymarket.com"
 GAMMA_BASE = "https://gamma-api.polymarket.com"
 USER_AGENT = (
@@ -46,6 +54,19 @@ HEADERS = {
     "User-Agent": USER_AGENT,
     "Accept": "application/json",
 }
+
+
+def get_proxies():
+    """Polymarket SOCKS proxy (POLY_PROXY) — geo-block bypass."""
+    try:
+        from config.settings import bot_config
+
+        return bot_config.polymarket.get_proxies()
+    except Exception:
+        return None
+
+
+PROXIES = get_proxies()
 
 
 # ── Database setup ────────────────────────────────────────────────────────
@@ -60,6 +81,7 @@ def init_orderbook_db() -> None:
             city TEXT,
             metric TEXT,
             target_date TEXT,
+            threshold REAL,
             bid_depth_usd REAL DEFAULT 0.0,
             ask_depth_usd REAL DEFAULT 0.0,
             best_bid REAL,
@@ -71,6 +93,11 @@ def init_orderbook_db() -> None:
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    # eski tabloya threshold kolonu ekle (yoksa)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(orderbook_snapshots)")]
+    if "threshold" not in cols:
+        conn.execute("ALTER TABLE orderbook_snapshots ADD COLUMN threshold REAL")
+    conn.commit()
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_orderbook_market_time
         ON orderbook_snapshots (market_id, snapshot_time)
@@ -89,92 +116,87 @@ def init_orderbook_db() -> None:
 
 
 def fetch_active_markets_from_gamma() -> list[dict[str, Any]]:
-    """Fetch active weather markets from Gamma API with clobTokenIds.
+    """Fetch ALL active weather markets from bot.db (not Gamma events).
 
-    Uses Gamma API directly (not bot.db) to get full market data including
-    clobTokenIds needed for CLOB orderbook queries.
+    NOT (2026-08-16): Gamma events?tag_slug=weather YANLIS kategoriler donuyor
+    (April 2024 temperature increase gibi kapali iklim marketleri) — sehir
+    bazli hava durumu degil. Bot.db'deki weather_markets zaten dogru sehir/
+    tarih/threshold marketlerini icerir (run_fetch_markets ile proxy fix'ten
+    beri cekiliyor). Burada DB'den acik marketler + clobTokenIds okunur.
+
+    Returns: [{"id","token_id","city","city_code","metric","target_date",
+                "threshold","question"}, ...]
     """
-    import urllib.request
-    import urllib.error
     import json
 
-    all_markets = []
-    offset = 0
-    page_size = 100
-    max_pages = 20  # safety limit
+    import sqlite3
 
-    for page in range(max_pages):
-        url = (
-            f"{GAMMA_BASE}/markets?limit={page_size}&offset={offset}"
-            f"&closed=false&active=true&order=volume&ascending=false"
-        )
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                req = urllib.request.Request(url, headers=HEADERS)
-                with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-                    batch = json.loads(resp.read().decode("utf-8"))
-                if not batch:
-                    return all_markets
-                all_markets.extend(batch)
-                logger.info("Gamma page %d: +%d markets (total %d)", page + 1, len(batch), len(all_markets))
-                if len(batch) < page_size:
-                    return all_markets
-                offset += page_size
-                time.sleep(0.25)
-                break
-            except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as exc:
-                logger.warning("Gamma fetch attempt %d/%d failed: %s", attempt, MAX_RETRIES, exc)
-                if attempt < MAX_RETRIES:
-                    time.sleep(RETRY_DELAY)
-                else:
-                    logger.error("All %d attempts failed for Gamma page %d", MAX_RETRIES, page)
-                    return all_markets
+    db = sqlite3.connect(str(ROOT / "data" / "bot.db"))
+    db.row_factory = sqlite3.Row
+    markets = []
 
-    return all_markets
-
-
-def extract_yes_token_id(market: dict) -> str | None:
-    """Extract YES token ID from Gamma market data (clobTokenIds)."""
-    clob_ids = market.get("clobTokenIds")
-    if not clob_ids:
-        return None
-    if isinstance(clob_ids, str):
-        import json
-
-        try:
-            clob_ids = json.loads(clob_ids)
-        except (json.JSONDecodeError, TypeError):
+    def _yes_token(raw_data):
+        if not raw_data:
             return None
-    if isinstance(clob_ids, list) and len(clob_ids) >= 1:
-        # tokens[0] = YES, tokens[1] = NO (Polymarket convention)
-        return str(clob_ids[0])
-    return None
+        try:
+            d = json.loads(raw_data)
+        except Exception:
+            return None
+        toks = d.get("clobTokenIds")
+        if isinstance(toks, str):
+            try:
+                toks = json.loads(toks)
+            except Exception:
+                return None
+        if isinstance(toks, list) and toks:
+            return str(toks[0])
+        return None
+
+    for r in db.execute(
+        "SELECT id, city, city_code, threshold, target_date, raw_data FROM weather_markets "
+        "WHERE status='open'"
+    ):
+        tok = _yes_token(r["raw_data"])
+        if not tok:
+            continue
+        markets.append(
+            {
+                "id": str(r["id"]),
+                "token_id": tok,
+                "city": r["city"],
+                "city_code": r["city_code"],
+                "metric": "temperature_max",
+                "threshold": r["threshold"],
+                "target_date": (str(r["target_date"]) if r["target_date"] else ""),
+                "question": "",
+            }
+        )
+    db.close()
+    logger.info("bot.db'den %d acik weather market (token'li) okundu", len(markets))
+    return markets
 
 
 def fetch_orderbook(token_id: str | None) -> dict[str, Any] | None:
-    """Fetch live orderbook from CLOB API with retry logic."""
-    import urllib.request
-    import urllib.error
-    import json
+    """Fetch live orderbook from CLOB API with retry logic + proxy.
+
+    404 = kalici (token CLOB'ta yok) — retry YOK, direkt None. Diger hatalarda
+    2 retry.
+    """
+    import requests
 
     url = f"{CLOB_BASE}/book?token_id={token_id}"
-    for attempt in range(1, MAX_RETRIES + 1):
+    max_tries = 2  # 404 icin retry yok, digerleri icin 2 deneme
+    for attempt in range(1, max_tries + 1):
         try:
-            req = urllib.request.Request(url, headers=HEADERS)
-            with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                return data
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as exc:
-            logger.warning(
-                "CLOB attempt %d/%d failed for token %s: %s",
-                attempt,
-                MAX_RETRIES,
-                token_id[:16],
-                exc,
-            )
-            if attempt < MAX_RETRIES:
-                time.sleep(RETRY_DELAY)
-    logger.error("All %d CLOB attempts failed for token %s", MAX_RETRIES, token_id[:16])
+            resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT, proxies=PROXIES)
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:
+            logger.warning("CLOB attempt %d/%d failed for token %s: %s", attempt, max_tries, token_id[:16], exc)
+            if attempt < max_tries:
+                time.sleep(3)
     return None
 
 
@@ -233,15 +255,16 @@ def save_snapshot(
     target_date: str | None,
     metrics: dict[str, float | None],
     snapshot_time: str,
+    threshold: float | None = None,
 ) -> None:
     """Insert orderbook snapshot into orderbook.db."""
     conn.execute(
         """
         INSERT INTO orderbook_snapshots
-            (market_id, token_id, city, metric, target_date,
+            (market_id, token_id, city, metric, target_date, threshold,
              bid_depth_usd, ask_depth_usd, best_bid, best_ask, spread,
              num_bid_levels, num_ask_levels, snapshot_time)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """,
         (
             market_id,
@@ -249,6 +272,7 @@ def save_snapshot(
             city,
             metric,
             target_date,
+            threshold,
             metrics["bid_depth_usd"],
             metrics["ask_depth_usd"],
             metrics["best_bid"],
@@ -261,93 +285,82 @@ def save_snapshot(
     )
 
 
-def extract_city_from_question(question: str) -> str | None:
-    """Extract city name from market question text."""
-    import re
-
-    # Common patterns: "Will the temperature in CITY..." or "CITY temperature..."
-    match = re.search(r"(?:in|at|for)\s+([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)", question)
-    if match:
-        return match.group(1)
-    return None
-
-
 def collect_once() -> int:
     """Run one collection cycle. Returns number of markets processed."""
     markets = fetch_active_markets_from_gamma()
     if not markets:
-        logger.info("No active markets found from Gamma")
+        logger.info("No open weather markets in bot.db")
         return 0
 
-    # Filter to weather markets only (temperature-related)
-    weather_markets = []
-    weather_keywords = ["temperature", "°", "fahrenheit", "celsius", "high", "low", "hot", "cold", "warm"]
-    for m in markets:
-        question = m.get("question", "").lower()
-        if any(kw in question for kw in weather_keywords):
-            token_id = extract_yes_token_id(m)
-            if token_id:
-                city = extract_city_from_question(m.get("question", ""))
-                weather_markets.append(
-                    {
-                        "id": m.get("id", ""),
-                        "token_id": token_id,
-                        "city": city,
-                        "question": m.get("question", ""),
-                    }
-                )
-
-    if not weather_markets:
-        logger.info("No weather markets with token IDs found")
-        return 0
-
-    logger.info("Found %d weather markets with token IDs, fetching orderbooks...", len(weather_markets))
+    logger.info("Found %d weather markets, fetching orderbooks...", len(markets))
     snapshot_time = datetime.now(timezone.utc).isoformat()
 
     conn = sqlite3.connect(str(ORDERBOOK_DB))
     processed = 0
     errors = 0
 
-    for market in weather_markets:
-        market_id = market["id"]
-        token_id = market["token_id"]
-        city = market.get("city")
-
-        raw = fetch_orderbook(token_id)
+    for market in markets:
+        raw = fetch_orderbook(market["token_id"])
         if raw is None:
             errors += 1
             continue
 
         metrics = parse_orderbook(raw)
-        save_snapshot(conn, market_id, token_id, city, None, None, metrics, snapshot_time)
+        save_snapshot(
+            conn,
+            market["id"],
+            market["token_id"],
+            market.get("city"),
+            market.get("metric"),
+            market.get("target_date"),
+            metrics,
+            snapshot_time,
+            threshold=market.get("threshold"),
+        )
         processed += 1
 
-        if processed <= 10 or processed % 50 == 0:
+        if processed <= 10 or processed % 200 == 0:
             logger.info(
                 "  [%d/%d] %s: bid=$%.1f ask=$%.1f spread=%.4f",
                 processed,
-                len(weather_markets),
-                city or market_id[:12],
+                len(markets),
+                (market.get("city") or market["id"][:12]),
                 metrics["bid_depth_usd"],
                 metrics["ask_depth_usd"],
                 metrics["spread"] or 0,
             )
 
-        # Small delay to be nice to the API
-        time.sleep(0.15)
+        # API'ye kibar ol
+        time.sleep(0.1)
 
     conn.commit()
     conn.close()
-    logger.info("Collection complete: %d/%d markets processed, %d errors", processed, len(weather_markets), errors)
+    logger.info("Collection complete: %d/%d markets processed, %d errors", processed, len(markets), errors)
     return processed
 
 
 def main() -> None:
-    """Main entry point."""
-    logger.info("=== Orderbook collection started ===")
+    """Main entry point. --loop ile sonsuz dongu (bot entegrasyonu)."""
+    parser = argparse.ArgumentParser(description="Collect orderbook for ALL active weather markets")
+    parser.add_argument("--loop", action="store_true", help="run forever (for bot integration)")
+    parser.add_argument("--interval", type=int, default=900, help="loop interval seconds (default 900)")
+    args = parser.parse_args()
+
+    logger.info("=== Orderbook collection started (loop=%s, interval=%ds) ===", args.loop, args.interval)
     init_orderbook_db()
-    count = collect_once()
-    logger.info("=== Done: %d markets ===", count)
+
+    if not args.loop:
+        count = collect_once()
+        logger.info("=== Done: %d markets ===", count)
+        return
+
+    while True:
+        try:
+            count = collect_once()
+            logger.info("=== Cycle done: %d markets, next in %ds ===", count, args.interval)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Cycle error: %s", exc)
+        time.sleep(args.interval)
 
 
 if __name__ == "__main__":

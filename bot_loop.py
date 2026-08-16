@@ -704,16 +704,22 @@ def _archive_clob_price(wm, price: float) -> None:
         ob_path = os.path.join(_repo_root, "data", "orderbook.db")
         conn = sqlite3.connect(ob_path, timeout=5)
         try:
+            # threshold kolonu varsa ekle (eski tablolar icin)
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(orderbook_snapshots)")]
+            if "threshold" not in cols:
+                conn.execute("ALTER TABLE orderbook_snapshots ADD COLUMN threshold REAL")
+                conn.commit()
             conn.execute(
                 "INSERT INTO orderbook_snapshots "
-                "(market_id, token_id, city, metric, target_date, best_ask, snapshot_time, created_at) "
-                "VALUES (?,?,?,?,?,?,?, datetime('now'))",
+                "(market_id, token_id, city, metric, target_date, threshold, best_ask, snapshot_time, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?, datetime('now'))",
                 (
                     str(wm.id),
                     "0",
                     getattr(wm, "city", None),
                     getattr(wm, "metric", None),
                     getattr(wm, "target_date", None),
+                    getattr(wm, "threshold", None),
                     float(price),
                     datetime.now(timezone.utc).isoformat(),
                 ),
@@ -726,14 +732,14 @@ def _archive_clob_price(wm, price: float) -> None:
 
 
 async def clob_stream_loop(state):
-    """Polymarket CLOB WebSocket — acik betlerin marketlerini gercek zamanli dinler.
+    """Polymarket CLOB WebSocket — TUM acik weather marketleri gercek zamanli dinler.
 
     Kullanici karari 2026-08-11: "millet milisaniyelerle islem yapiyor" — polling
-    (5 dk) yerine WebSocket ile fiyat degisimlerini ANINDA almak icin. Acik
-    betlerin YES token'larina abone olur; fiyat olayi gelince ilgili
-    WeatherMarket.yes_price guncellenir (polling'e gerek kalmaz).
-
-    Yeni bet acildikca asset listesi yenilenir; kapali betler cikarilir.
+    (5 dk) yerine WebSocket ile fiyat degisimlerini ANINDA almak icin.
+    2026-08-16 kullanici karari: sadece acik betli degil, TUM acik weather
+    marketlerin orderbook'u dinlenir + arsivlenir (backtest icin tam fiyat
+    gecmisi). Fiyat olayi gelince WeatherMarket.yes_price guncellenir ve
+    orderbook.db'ye best_ask arsivlenir.
     """
     from scrapers.clob_stream import CLOBMarketStream
 
@@ -741,9 +747,8 @@ async def clob_stream_loop(state):
         with get_session() as s:
             rows = (
                 s.query(WeatherMarket.id)
+                .filter(WeatherMarket.status == "open")
                 .filter(WeatherMarket.id.isnot(None))
-                .join(Bet, Bet.market_id == WeatherMarket.id)
-                .filter(Bet.status.in_(OPEN_BET_STATUSES))
                 .distinct()
                 .all()
             )
