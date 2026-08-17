@@ -31,6 +31,7 @@ References:
 from __future__ import annotations
 
 import logging
+import ssl
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -38,10 +39,30 @@ from datetime import datetime, timezone
 
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
 
 UTC = timezone.utc
 
 logger = logging.getLogger("WEATHER_ENSEMBLE")
+
+# ---------------------------------------------------------------------------
+# TLS: Windows sistem sertifika deposu ile dogrula (Avast Web/Mail Shield gibi
+# on-makine interceptorsinin kokunu certifi bilmez -> CERTIFICATE_VERIFY_FAILED
+# 2026-08-18 canli tespit). create_default_context() Windows'ta sistem root
+# store'unu da yukler; boylece TLS dogrulama ACIK kalir ama makine kokune
+# guvenir. requests `verify=` parametresi SSLContext almaz (urllib3 _path_exists
+# TypeError), bu yuzden adapter uzerinden ssl_context verilir.
+_SYSTEM_TLS = ssl.create_default_context()
+
+
+class _SystemStoreAdapter(HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):
+        kwargs["ssl_context"] = _SYSTEM_TLS
+        return super().init_poolmanager(*args, **kwargs)
+
+
+_SESSION = requests.Session()
+_SESSION.mount("https://", _SystemStoreAdapter())
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -134,8 +155,10 @@ def fetch_forecast_ensemble(
     try:
         # 2026-08-16: settings global HTTP_PROXY env set ediyor (Polymarket SOCKS).
         # open-meteo geo-block'lu DEGIL, proxy'den yavasliyor -> DIRECT.
-        resp = requests.get(
-            OPEN_METEO_FORECAST_URL, params=params, timeout=timeout,
+        resp = _SESSION.get(
+            OPEN_METEO_FORECAST_URL,
+            params=params,
+            timeout=timeout,
             proxies={"http": None, "https": None, "all": None},
         )
         resp.raise_for_status()
@@ -235,8 +258,10 @@ def fetch_archive_actuals(
 
     try:
         # proxy'siz DIRECT (open-meteo geo-block degil, settings global env proxy)
-        resp = requests.get(
-            OPEN_METEO_ARCHIVE_URL, params=params, timeout=timeout,
+        resp = _SESSION.get(
+            OPEN_METEO_ARCHIVE_URL,
+            params=params,
+            timeout=timeout,
             proxies={"http": None, "https": None, "all": None},
         )
         resp.raise_for_status()
@@ -341,8 +366,10 @@ def fetch_historical_forecast_ensemble(
 
     try:
         # proxy'siz DIRECT (open-meteo geo-block degil, settings global env proxy)
-        resp = requests.get(
-            OPEN_METEO_HISTORICAL_FORECAST_URL, params=params, timeout=timeout,
+        resp = _SESSION.get(
+            OPEN_METEO_HISTORICAL_FORECAST_URL,
+            params=params,
+            timeout=timeout,
             proxies={"http": None, "https": None, "all": None},
         )
         resp.raise_for_status()
@@ -479,7 +506,7 @@ def fetch_nws_forecast(
 
     headers = {"User-Agent": user_agent, "Accept": "application/geo+json"}
     try:
-        r = requests.get(
+        r = _SESSION.get(
             f"{NWS_API_BASE}/points/{latitude:.4f},{longitude:.4f}",
             headers=headers,
             timeout=timeout,
@@ -496,7 +523,7 @@ def fetch_nws_forecast(
         forecast_url = props.get("forecast")
         if not forecast_url:
             return pd.DataFrame()
-        r2 = requests.get(forecast_url, headers=headers, timeout=timeout)
+        r2 = _SESSION.get(forecast_url, headers=headers, timeout=timeout)
         if r2.status_code != 200:
             return pd.DataFrame()
         periods = r2.json().get("properties", {}).get("periods", [])

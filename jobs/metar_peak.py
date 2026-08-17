@@ -247,6 +247,16 @@ def run_metar_peak_bets() -> int:
                 WeatherMarket.city_code.isnot(None),
                 WeatherMarket.city_code != "",
                 WeatherMarket.latitude != 0,
+                # BUGFIX 2026-08-18 (kullanici "tam bucket a aciyoruz"): peak
+                # mantigi EN YUKSEK sicaklik TAM bucket (RANGE) marketi icindir.
+                #   - temperature_min marketine round(peak) ile bet acilamaz
+                #     (canli 6 bet 0.01 entry, 5 lost -$11.55 — London/Paris/
+                #     Shanghai/Hong Kong/Seoul/Tokyo lowest marketleri).
+                #   - HIGH/LOW (or-above/or-below) marketleri TAM BUCKET DEGIL:
+                #     canli 5 bet (3 HIGH + 2 LOW) hepsi 0.01 entry, 4 lost.
+                # Sadece RANGE + temperature_max marketlerine bet acilir.
+                WeatherMarket.metric == "temperature_max",
+                WeatherMarket.market_type == "RANGE",
             )
             .all()
         )

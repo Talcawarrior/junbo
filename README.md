@@ -178,7 +178,22 @@ python main.py bot
   ($3, order_id `metar_*`, bias-top 40 sehir, `MIN_ENTRY=0.10`). 2026-08-17:
   canli 30 bet NET -$32.84 — 24 longshot (entry 0.01-0.03) -$39.90 kaybetti,
   entry>=0.10 6 bet +$7.06; MIN_ENTRY=0.10 ile 0.01-0.03'ler elendi.
+  **2026-08-18 (kullanici "tam bucket a aciyoruz"): peak mantigi SADECE
+  `metric=temperature_max` + `market_type=RANGE` (tam bucket) marketlerine bet
+  acar.** Canli 11 yanlis bet (6 temperature_min + 5 HIGH/LOW, hepsi 0.01 entry)
+  o yuzden acilmisti; or-above/or-below marketleri tam bucket kazananli degildir.
   Kapanisa <2 saat kalan sehirler atlanir.
+- **METAR vs Polymarket cozum uyusmasi (2026-08-18, `scripts/test_metar_vs_settlement.py`):**
+  Polymarket weather marketleri Weather Underground istasyon verisinden cozulur; WU zaten
+  NOAA/NWS METAR verisini yayinlar (ayni istasyon, ayni deger). Test: round(METAR max) ==
+  kazanan bucket uyusmasi **%74 (70/95)**; Open-Meteo Archive actual (bias hesabinin
+  temeli!) sadece **%30 (55/184)**. Buna gore bias sehir secimi, market cozumunden FARKLI
+  bir dogruluga karsi kalibre ediliyor — spread kayiplarinin olasi kaynagi.
+- **Open-Meteo TLS (2026-08-18):** Avast Web/Mail Shield on-makine SSL intercept'i
+  `requests`+certifi'yi CERTIFICATE_VERIFY_FAILED'e dusuruyordu (archive/forecast fetch'leri
+  bos donuyordu). `data_pipeline/weather_ensemble.py` artik Windows sistem sertifika deposuyla
+  dogruluyor (`ssl.create_default_context()` + `_SystemStoreAdapter`) — TLS ACIK kalir, Avast
+  kokune guvenir. `scripts/collect_actuals.py` zaten CERT_NONE idi, actuals toplama kesintisiz.
 - **Periyodik retry:** Polymarket marketleri zamana yayilarak acildigi icin bot her
   ~60 dk bir en yeni acik tarih icin spread betlerini tekrar dener — sonradan acilan
   esikler (orn. Ankara 32C "NEW") de yakalanir. Secilmeyen sehirlerin acik
