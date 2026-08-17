@@ -156,7 +156,8 @@ def _place_spread_bets_inner(session, target_day) -> dict:
     s = bot_config.strategy
     # 2026-08-16: `or 3` yerine `is None` guard — radius=0 (tek esik) gecerli
     # degerdir, falsy sayilip default'a dusmemeli.
-    radius = int(getattr(s, "spread_radius", None) if getattr(s, "spread_radius", None) is not None else 3)
+    _radius = getattr(s, "spread_radius", None)
+    radius = int(_radius) if _radius is not None else 3
     max_cities = int(getattr(s, "spread_max_cities", 15) or 15)
     max_entry = float(getattr(s, "spread_max_entry", 0.30) or 0.30)
     stake = float(getattr(s, "spread_stake_usd", 2.0) or 2.0)

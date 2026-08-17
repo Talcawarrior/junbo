@@ -10,6 +10,7 @@ Strateji (kullanici 2026-08-14):
 
 Kullanim: bot_loop.metar_loop her 30dk'da bir run_metar_peak_bets cagirir.
 """
+
 from __future__ import annotations
 
 import logging
@@ -30,6 +31,12 @@ logger = logging.getLogger("SCHEDULER_METAR_PEAK")
 # 2026-08-16: kullanici "peak YEREL saatte olunca gir" dedi -> erken giris.
 # 4 saat -> 2 saat (kapanisa cok yakin olanlar riski; peak kilitlenince girilir)
 MIN_HOURS_BEFORE_CLOSE = 2
+# 2026-08-17 MIN_ENTRY: canli METAR-peak betleri analizi (30 bet, NET -$32.84):
+#   entry < 0.10  -> 24 bet, NET -$39.90 (0.01-0.03 longshot'lar TAMAMEN kayip)
+#   entry >= 0.10 ->  6 bet, NET +$7.06 (+$5.62 Toronto 0.150, +$1.30 BA 0.685, +$0.14 Taipei 0.945)
+# Piyasa bir bucket'i 0.01'e fiyatliyorsa kazanma sansi ~%1 demektir; METAR
+# tespiti yanlis. Sadece piyasanin da gercek sans verdigi bucket'a bet acilir.
+MIN_ENTRY = 0.10
 # METAR stake (kullanici karari 2026-08-16: 1 -> 2 -> 3 USD optimum.
 # Backtest: bias-top 40 + tek esik, $3 stake = %91.7, +$120, maxDD $3.2.
 # ROI stake'ten bagimsiz ama mutlak kazanc ve risk dengede $3 en iyi.)
@@ -114,7 +121,13 @@ def _close_wrong_bucket_bets(session, city_code: str, target_date, winning_bucke
         ok = placer.close_bet_for_rotation(bet, max(0.01, min(0.99, live)), session)
         if ok:
             closed += 1
-            logger.info("metar_peak: KAPATILDI bet#%s %s %sC (kazanan %sC)", bet.id, bet.city, wm.threshold, winning_bucket)
+            logger.info(
+                "metar_peak: KAPATILDI bet#%s %s %sC (kazanan %sC)",
+                bet.id,
+                bet.city,
+                wm.threshold,
+                winning_bucket,
+            )
     if closed:
         logger.info("metar_peak: %s sehirde yanlis bucket betleri kapatildi (%s)", city_code, closed)
     return closed
@@ -129,17 +142,25 @@ def _open_metar_bet(session, market: WeatherMarket, peak_temp: float) -> Optiona
     # Backtest: 12 bet %91.7, entry 0.05-0.89 (8 bet 0.30+). 0.50 siniri
     # kazananlari kaciriyordu (0.52, 0.89). Optimum: 0.95 (2026-08-16).
     max_entry = 0.95
-    if not (0 < entry < max_entry):
-        logger.info("metar_peak: %s %sC giris=%.3f >= max_entry=%.2f, atlandi",
-                    market.city, market.threshold, entry, max_entry)
+    # 2026-08-17 MIN_ENTRY: 0.01-0.03 longshot'lari elemek icin. Canli veride
+    # entry<0.10 24 bet -$39.90 kaybetti (piyasa o bucket'e ~%1 sans veriyor
+    # = METAR tespiti yanlis). entry>=0.10 6 bet +$7.06 kazandi.
+    if not (MIN_ENTRY <= entry < max_entry):
+        logger.info(
+            "metar_peak: %s %sC giris=%.3f [MIN_ENTRY=%.2f, max_entry=%.2f], atlandi",
+            market.city,
+            market.threshold,
+            entry,
+            MIN_ENTRY,
+            max_entry,
+        )
         return None
 
     pf = session.query(Portfolio).filter(Portfolio.id == 1).first()
     cash = float(pf.cash_balance) if pf else 0.0
     use_stake = min(METAR_STAKE, max(0.0, cash))
     if use_stake <= 0:
-        logger.warning("metar_peak: %s %sC nakit yetersiz (cash=%.2f)",
-                       market.city, market.threshold, cash)
+        logger.warning("metar_peak: %s %sC nakit yetersiz (cash=%.2f)", market.city, market.threshold, cash)
         return None
 
     fill_price = max(0.01, min(0.99, round(entry, 4)))
@@ -173,8 +194,14 @@ def _open_metar_bet(session, market: WeatherMarket, peak_temp: float) -> Optiona
         covered_fraction=0.0,
     )
     session.add(bet)
-    logger.info("metar_peak: BET acildi %s %sC peak=%.1f giris=%.3f stake=%.2f",
-                market.city, market.threshold, peak_temp, fill_price, use_stake)
+    logger.info(
+        "metar_peak: BET acildi %s %sC peak=%.1f giris=%.3f stake=%.2f",
+        market.city,
+        market.threshold,
+        peak_temp,
+        fill_price,
+        use_stake,
+    )
     return bet
 
 
@@ -189,16 +216,20 @@ def run_metar_peak_bets() -> int:
     with get_session() as session:
         # Bias-top N sehir secimi (en az sapan) — kullanici karari 2026-08-16
         bias_scores: dict[str, float] = {}
-        for code, b in session.query(
-            HistoricalCalibration.city_code,
-            func.abs(HistoricalCalibration.bias),
-        ).filter(HistoricalCalibration.bias.isnot(None)).all():
+        for code, b in (
+            session.query(
+                HistoricalCalibration.city_code,
+                func.abs(HistoricalCalibration.bias),
+            )
+            .filter(HistoricalCalibration.bias.isnot(None))
+            .all()
+        ):
             if code:
                 bias_scores[code] = bias_scores.get(code, 0.0) + float(b)
         bias_cnt: dict[str, int] = {}
-        for (code,) in session.query(HistoricalCalibration.city_code).filter(
-            HistoricalCalibration.bias.isnot(None)
-        ).all():
+        for (code,) in (
+            session.query(HistoricalCalibration.city_code).filter(HistoricalCalibration.bias.isnot(None)).all()
+        ):
             if code:
                 bias_cnt[code] = bias_cnt.get(code, 0) + 1
         avg_bias: dict[str, float] = {}
@@ -244,14 +275,14 @@ def run_metar_peak_bets() -> int:
             candidates.append((m, day, utc_offset))
 
         # Ilk olarak sadece benzersiz (city_code, day) icin METAR cek (cache'li)
-        unique = {}
+        unique: dict[tuple[str, str], tuple[WeatherMarket, str, float]] = {}
         for m, day, off in candidates:
             unique.setdefault((m.city_code, day), (m, day, off))
 
         from scrapers.metar import fetch_metar_day, archive_metar_observations
 
         def _fetch_one(item):
-            m, day, off = item
+            m, day, _ = item
             try:
                 rows = fetch_metar_day(m.city_code, day)
                 archive_metar_observations(m.city_code, m.city or "", rows)

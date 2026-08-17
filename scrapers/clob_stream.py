@@ -31,9 +31,13 @@ def _proxy_url() -> str | None:
     try:
         from config.settings import bot_config
 
-        url = bot_config.polymarket.get_proxies().get("https")
+        # 2026-08-17 BUGFIX: get_proxies() proxy_url bosken None doner -
+        # None.get() AttributeError uretiyordu (try/except yutuyordu, sessizce
+        # proxy'siz kaliniyordu). None-guard eklendi.
+        proxies = bot_config.polymarket.get_proxies() or {}
+        url = proxies.get("https")
         if url and url.startswith("socks5h://"):
-            return "socks5://" + url[len("socks5h://"):]
+            return "socks5://" + url[len("socks5h://") :]
         return url
     except Exception:
         return None
@@ -79,9 +83,7 @@ class CLOBMarketStream:
 
     async def _run_connection(self, stop: asyncio.Event) -> None:
         owns_session = self.session is None
-        session = self.session or aiohttp.ClientSession(
-            connector=_make_connector() if _proxy_url() else None
-        )
+        session = self.session or aiohttp.ClientSession(connector=_make_connector() if _proxy_url() else None)
         try:
             async with session.ws_connect(MARKET_WS_URL, heartbeat=None) as ws:
                 await ws.send_json({"assets_ids": self.asset_ids, "type": "market", "custom_feature_enabled": True})
@@ -133,9 +135,7 @@ class CLOBUserStream(CLOBMarketStream):
 
     async def _run_connection(self, stop: asyncio.Event) -> None:
         owns_session = self.session is None
-        session = self.session or aiohttp.ClientSession(
-            connector=_make_connector() if _proxy_url() else None
-        )
+        session = self.session or aiohttp.ClientSession(connector=_make_connector() if _proxy_url() else None)
         try:
             async with session.ws_connect(USER_WS_URL, heartbeat=None) as ws:
                 await ws.send_json({"auth": self.auth, "markets": self.markets, "type": "user"})

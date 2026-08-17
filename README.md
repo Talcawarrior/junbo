@@ -158,11 +158,11 @@ python main.py bot
   - **KAYAN PENCERE KAPALI (2026-08-12):** merkez kayarsa bile acilan betler settlement'a
     kadar TUTULUR. Backtest: kaydirma her config'de zarar (shift -26 vs noshift +74).
     Sadece yeni esikler acilir, eski penceredekiler kapatilmaz.
-  - Tahmini **en az sapan ilk 12 sehir** secilir (tahmini gercege en yakin tutanlar —
+  - Tahmini **en az sapan ilk 15 sehir** secilir (tahmini gercege en yakin tutanlar —
     dusuk |bias|; SICAKLIK DEGIL, 2026-08-11 kullanici karari. Bias'siz yeni sehir acilmaz).
     **Sehir secimi SADECE yeni gun acilisinda kullanilir; sehir secilmeden dusse bile
     acik betleri KAPATILMAZ (2026-08-12 kullanici karari).**
-  - Gunluk **max 40 bet** (2026-08-16 kullanici karari: "ilk 40 markete ac").
+  - Gunluk **max 120 bet** (2026-08-16 kullanici karari: "Toplam 120").
 - **ERKEN GIRIS (0-13 UTC hafif probe):** Snapshot analizi ilk market acilislarinin
   04:00-12:30 UTC'ye yayildigini gosterdi. 00:00-13:00 UTC penceresinde bot her ~1 sn
   Polymarket Gamma'ya TEK hafif sorgu atar (public-search limit 5); DB'deki max acik
@@ -173,15 +173,19 @@ python main.py bot
   best_ask olarak arsivlenir (backtest icin kalici CLOB gecmisi, 2026-08-16).
 - **METAR zirve-tespiti (2026-08-14):** Acik marketli sehirlerin METAR canli istasyon
   sicakligi (aviationweather.gov, NOAA bedava) 30dk'da bir izlenir; sicaklik max'a
-  cikip **2 kez arka arkaya dustugunde** (UTC >= 15:00 sonrasi) zirve kilitlenir, o
-  sehrin kazanan bucket'ina **tek esik YES** bet acilir ($1, order_id `metar_*`).
-  Kapanisa <4 saat kalan sehirler atlanir.
+  cikip **2 kez arka arkaya dustugunde** (YEREL saat >= 13:00, utc_offset=lon/15)
+  zirve kilitlenir, o sehrin kazanan bucket'ina **tek esik YES** bet acilir
+  ($3, order_id `metar_*`, bias-top 40 sehir, `MIN_ENTRY=0.10`). 2026-08-17:
+  canli 30 bet NET -$32.84 — 24 longshot (entry 0.01-0.03) -$39.90 kaybetti,
+  entry>=0.10 6 bet +$7.06; MIN_ENTRY=0.10 ile 0.01-0.03'ler elendi.
+  Kapanisa <2 saat kalan sehirler atlanir.
 - **Periyodik retry:** Polymarket marketleri zamana yayilarak acildigi icin bot her
   ~60 dk bir en yeni acik tarih icin spread betlerini tekrar dener — sonradan acilan
   esikler (orn. Ankara 32C "NEW") de yakalanir. Secilmeyen sehirlerin acik
   betleri KAPATILMAZ (2026-08-12 kullanici karari — kazanan esikler bile satiliyordu).
-- Backtest (orderbook, gercek veri 14 gun): radius0 + max_entry0.95 + bias-top12 = en karli
-  (2026-08-14: +$41.9; radius3 -$317). `scripts/backtest_orderbook.py`.
+- Backtest (orderbook, gercek veri): radius0 + max_entry0.95 + bias-top15 = en karli
+  (guvenli pencere 05-16 Agu +$28.67, %34.6 winrate; radius1+bias40 -$200.60 EN KOTU,
+  2026-08-17). `scripts/backtest_orderbook.py`.
 - **Kalibrasyon spread'te kapatilir** (CALIB +$28k < RAW +$37k) — edge-tabanli
   stratejide degerli oldugu icin calculator'da aktif kalir.
 
@@ -189,10 +193,10 @@ python main.py bot
 |---|---|---|
 | `BETTING_STRATEGY` | `spread` | `edge` = eski mod |
 | `SPREAD_RADIUS` | `0` | TEK esik: tahmin merkezinin tamamina bet (2026-08-16) |
-| `SPREAD_MAX_CITIES` | `12` | tahmini en az sapan ilk N sehir (sicaklik degil) |
+| `SPREAD_MAX_CITIES` | `15` | tahmini en az sapan ilk N sehir (sicaklik degil) |
 | `SPREAD_MAX_ENTRY` | `0.95` | ust fiyat siniri (0.95 ve alti her fiyata acilir, 2026-08-16) |
 | `SPREAD_STAKE_USD` | `2.0` | esik basina stake |
-| `SPREAD_MAX_BETS_PER_DAY` | `40` | gunluk bet limiti (2026-08-16: "ilk 40 markete ac") |
+| `SPREAD_MAX_BETS_PER_DAY` | `120` | gunluk bet limiti (2026-08-16: "Toplam 120") |
 
 ---
 
@@ -344,6 +348,7 @@ Detaylar icin `GELISTIRICI_NOTLARI.md`'ya bakin (bolum 12: dogrulanmis davranis 
 - **2026-08-16:** **METAR-peak yanlis bucket betlerini kapatma (3. adim).** Kullanici: "T-2 oncesi actigimiz bet kazanan bucket'ta degilse onu kapatiyoruz. 2 gun onceden meteoya gore bet ac, her sehirin yerel saatinde max olunca tekrar gir, tutmuyorsa kapat." Sorun: bot iki baglantisiz strateji calistiriyordu — spread (T-2'de acar, ASLA kapatmaz) ve metar-peak (peak'te EK bet acar, yanlislari kapatmaz). 16 Agu'da 75 acik bet, sadece 6'si kazanan bucket'ta — 69 yanlis bet settlement'a kadar acik kaldi. Cozum: `jobs/metar_peak.py::_close_wrong_bucket_bets` — peak kilitlendiginde o sehrin kazanan bucket DISINDAKI tum acik betleri canli fiyattan kapatir (close_bet_for_rotation ile, portfolio kredisi). Suite: 668 passed.
 - **2026-08-16:** **3 ESIK (radius=1) + peak'te komsu satisi.** Kullanici fikri: "3'lü eşik açarsak, peak yaklaşırken komsu esikler de yukselir. Gercek esik bizim esiklerimizden biriyse, diger 2 komsuyu HEMEN satarsak (millet uyanmadan) onlardan da para kazaniriz." Cozum: `spread_radius` 0 -> 1 (merkez±1, T-2'de 3 esige dusukten gir); peak gunu kilitlenince kazanan bucket TUTULUR, komsular `_close_wrong_bucket_bets` ile canli fiyattan satilir. Yarinki orderbook verisiyle dogrulanacak (YAPILACAKLAR.md). Suite: 667 passed.
 - **2026-08-17:** **METAR paralel fetch + CLOB REST yedegi + gunluk limit 120.** (1) `run_metar_peak_bets` 40 sehri TEK TEK cekiyordu -> 60s `_FETCH_TIMEOUT`'a dusup "METAR poll timed out" oluyor, peak'ler kaciyordu. Cozum: `ThreadPoolExecutor` (8 worker) ile paralel METAR fetch — 40 sehir ~35s'de biter. (2) CLOB WebSocket proxy'den gidemiyor (WARP SOCKS WS desteklemiyor -> `General SOCKS server failure`; direct -> geo-block). Cozum: `clob_stream_loop` WS 3 kez fail edince `_clob_rest_poll_once` (REST GET /book, proxy ile) yedigine gecer — fiyat verisi toplanmaya devam eder. (3) `spread_max_bets_per_day` 40 -> 120 (kullanici: "Toplam 120") — 40 iken 17+18 Agu dolu, 19 Agu'ya hiç sira kalmıyordu. Suite: 667 passed.
+- **2026-08-17:** **KARAR: radius=0 (tek esik) + bias-top 15 + METAR MIN_ENTRY=0.10.** Canli METAR-peak analizi (30 bet NET **-$32.84**): 24 longshot (entry 0.01-0.03) **-$39.90** kaybetti, entry>=0.10 6 bet **+$7.06** kazandi -> `MIN_ENTRY=0.10` eklendi (piyasa bucket'i 0.01'e fiyatliyorsa ~%1 sans = METAR tespiti yanlis). Safe-window orderbook backtest (05-16 Agu): guncel radius=1+bias40 MATRISIN EN KOTUSU (**-$200.60**); radius=0+bias15 en iyi (**+$28.67**, %34.6 winrate) -> .env'de `SPREAD_RADIUS=0`, `SPREAD_MAX_CITIES=15`. Komsu-satisi KENDINI KURTARMIYOR (canli 421 kapanis NET **-$184.92**, guvenli pencere 349 bet -$159.07; HOLD -$473 vs SELL -$134) — sadece hasar kontrolu, zarari ~$340 kurtariyor. SESSION_OZET'teki METAR "+$139 / ROI %165" CLAIRVOYANT (look-ahead + dead code), GERCEK DEGIL. Gercekci: `scripts/backtest_metar_peak_realistic.py`. CLOB REST poll paralel (16 worker) — sequential ~1900 market en kotu ~8 saat yerine dakikalar. Suite: 660 passed.
 
 ---
 

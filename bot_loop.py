@@ -12,7 +12,7 @@ import os
 from datetime import date, datetime, timezone, timedelta
 
 from database.db import get_session
-from database.models import OPEN_BET_STATUSES, Bet, WeatherMarket
+from database.models import WeatherMarket
 
 _verify_ui: object | None = None
 _verify_poly: object | None = None
@@ -698,8 +698,7 @@ def _clob_rest_poll_once() -> None:
     uzerinden toplanir; bot fiyatlari zaten run_fetch_markets (Gamma) ile
     5dk'da bir guncelliyor. Bu yedek SADECE orderbook gecmisini besler.
     """
-    import sqlite3
-    from datetime import datetime, timezone as _tz
+    from concurrent.futures import ThreadPoolExecutor
 
     import requests
 
@@ -711,8 +710,13 @@ def _clob_rest_poll_once() -> None:
             markets = s.query(WeatherMarket).filter(WeatherMarket.status == "open").all()
         if not markets:
             return
-        saved = 0
-        for m in markets:
+        # 2026-08-17 HIZ FIXI: ~1900 market SEQUENTIAL 15s timeout -> en kotu
+        # ~8 saat (poll 300s'de bir calisiyor, blok ediyordu). ThreadPoolExecutor
+        # ile paralel fetch (requests thread-safe), arsiv ana thread'de yapilir
+        # (orderbook.db delete-journal, paralel yazar kilit cikarir).
+        _MAX_WORKERS = 16
+
+        def _fetch(m):
             try:
                 tok = None
                 if m.raw_data:
@@ -725,23 +729,29 @@ def _clob_rest_poll_once() -> None:
                     if isinstance(toks, list) and toks:
                         tok = str(toks[0])
                 if not tok:
-                    continue
+                    return None
                 r = requests.get(
                     f"https://clob.polymarket.com/book?token_id={tok}",
                     timeout=15,
                     proxies=proxies,
                 )
                 if r.status_code != 200:
-                    continue
+                    return None
                 book = r.json()
                 asks = [x for x in book.get("asks", []) if float(x.get("price", 0)) > 0]
                 if not asks:
-                    continue
-                best_ask = float(min(asks, key=lambda x: float(x["price"]))["price"])
-                _archive_clob_price(m, best_ask)
-                saved += 1
+                    return None
+                return float(min(asks, key=lambda x: float(x["price"]))["price"])
             except Exception:
-                continue
+                return None
+
+        saved = 0
+        with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as ex:
+            for m, ask in zip(markets, ex.map(_fetch, markets)):
+                if ask is None:
+                    continue
+                _archive_clob_price(m, ask)
+                saved += 1
         if saved:
             logger.info("CLOB REST poll: %d market fiyati arsivlendi", saved)
     except Exception as exc:  # noqa: BLE001

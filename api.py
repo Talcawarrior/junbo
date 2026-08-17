@@ -496,8 +496,13 @@ def get_status():
 
 
 @app.get("/api/markets")
-def get_markets():
-    """Get all future active weather markets AND missed signals (rejected bets)."""
+def get_markets(limit: int = 200):
+    """Get future active weather markets AND recent missed signals (rejected bets).
+
+    2026-08-17: 15k missed-signal + 1900 open market = 4.7MB JSON -> 12-20s /
+    timeout ('baglaniyor'da kalma). Artik limitli: varsayilan 200, ?limit=N ile
+    buyutulebilir. Dashboard hizi icin 200 yeterli.
+    """
     from datetime import timedelta
 
     from database.models import Analysis, Bet, WeatherForecast, WeatherMarket
@@ -507,14 +512,15 @@ def get_markets():
     try:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        # 1. Fetch missed signals (should_bet=True but no active bet)
-        # These are the "164 - 8 = 156" signals
+        # 1. Missed signals — SADECE son `limit` kadari (dashboard icin)
+        # 15k satirin tamami serialized edilince 4.7MB / timeout oluyordu.
         missed_signals = (
             db.query(Analysis, WeatherMarket)
             .join(WeatherMarket, Analysis.market_id == WeatherMarket.id)
             .filter(Analysis.should_bet.is_(True))
             .filter(~Analysis.market_id.in_(db.query(Bet.market_id).filter(Bet.status.in_(OPEN_BET_STATUSES))))
             .order_by(Analysis.analyzed_at.desc())
+            .limit(limit)
             .all()
         )
 
@@ -550,6 +556,7 @@ def get_markets():
                 WeatherMarket.status == "open",
                 ~WeatherMarket.id.in_(existing_ids) if existing_ids else True,
             )
+            .limit(limit)
             .all()
         )
 
@@ -577,7 +584,7 @@ def get_markets():
             model_prob = current_price
             m_forecasts = forecast_map.get(m.id, [])
             if m_forecasts:
-                latest_vals = [f.predicted_value for f in m_forecasts]
+                latest_vals = [float(f.predicted_value) for f in m_forecasts]
                 days_ahead = max((m.target_date.date() - now.date()).days, 1)
                 model_prob = calc.estimate_probability(latest_vals, float(m.threshold), days_ahead)
 

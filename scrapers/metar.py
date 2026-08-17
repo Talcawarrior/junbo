@@ -68,7 +68,7 @@ def _fetch_metar(icao: str, hours: int = HISTORY_HOURS) -> list[tuple[int, float
             METAR_URL,
             params={"ids": icao, "format": "json", "hours": str(hours)},
             timeout=REQUEST_TIMEOUT,
-            proxies={"http": None, "https": None, "all": None},
+            proxies={"http": None, "https": None, "all": None},  # type: ignore[dict-item]
         )
         resp.raise_for_status()
         data = resp.json()
@@ -118,7 +118,9 @@ def fetch_metar_day(icao: str, day: str) -> list[tuple[int, float]]:
     return day_rows
 
 
-def detect_peak(day_rows: list[tuple[int, float]], min_local_hour: int = 13, utc_offset_hours: float = 0.0) -> tuple[Optional[float], bool]:
+def detect_peak(
+    day_rows: list[tuple[int, float]], min_local_hour: int = 13, utc_offset_hours: float = 0.0
+) -> tuple[Optional[float], bool]:
     """Gun icinde kumulatif max'i takip eder, zirve KILITLI mi doner.
 
     Kural (kullanici 2026-08-14): sicaklik max'a cikar, sonra DUSER. Zirve
