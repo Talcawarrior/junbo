@@ -118,10 +118,13 @@ def _run_calibration_backfill(now: datetime | None = None) -> dict:
     """Backfill historical_calibrations from local forecast + actual data.
 
     Uses the same local join as ``scripts/backfill_calibration.py``: per-model
-    ``weather_forecasts`` rows matched against ``actuals.db`` Archive
-    temperatures, keyed by (city_code, date, metric, model) via INSERT OR
-    REPLACE. No external API calls. Then refreshes the in-process calibration
-    engine's bias map so forecasts are corrected from the next scan onward.
+    ``weather_forecasts`` rows matched against actual temperatures, keyed by
+    (city_code, date, metric, model) via INSERT OR REPLACE. No external API
+    calls. Actual kaynagi ``--source metar`` (2026-08-18 kullanici karari):
+    Polymarket WU (NOAA METAR) verisiyle cozer; round(METAR max) == kazanan
+    bucket %74 vs Open-Meteo Archive %30 — bias referansi METAR istasyonudur.
+    Then refreshes the in-process calibration engine's bias map so forecasts
+    are corrected from the next scan onward.
     """
     now = now or datetime.now(UTC)
     today = now.strftime("%Y-%m-%d")
@@ -137,7 +140,7 @@ def _run_calibration_backfill(now: datetime | None = None) -> dict:
         )
         logger.info("Daily calibration: backfilling historical_calibrations")
         proc = subprocess.run(
-            [sys.executable, script, "--apply"],
+            [sys.executable, script, "--source", "metar", "--apply"],
             capture_output=True,
             text=True,
             timeout=600,

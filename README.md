@@ -188,7 +188,13 @@ python main.py bot
   NOAA/NWS METAR verisini yayinlar (ayni istasyon, ayni deger). Test: round(METAR max) ==
   kazanan bucket uyusmasi **%74 (70/95)**; Open-Meteo Archive actual (bias hesabinin
   temeli!) sadece **%30 (55/184)**. Buna gore bias sehir secimi, market cozumunden FARKLI
-  bir dogruluga karsi kalibre ediliyor — spread kayiplarinin olasi kaynagi.
+  bir dogruluga karsi kalibre ediliyordu — spread kayiplarinin olasi kaynagi.
+  **COZUM (2026-08-18):** bias kalibrasyonu artik METAR/WU istasyonuna karsi yapilir —
+  `scripts/backfill_calibration.py --source metar --apply` (METAR kapsamayan satirlari
+  tablodan temizler). Tablo METAR uyumlu yeniden kuruldu: **1280 satir, 0 duplicate,
+  0/1080 actual-vs-METAR uyusmazligi, 48 sehir, 8 model.** Gunde bir `evolution_job`
+  `--source metar` ile tazeler. Tahmin modelleri sorunlu DEGIL (ecmwf_ifs025 METAR'a en
+  yakin, avg|bias|=0.97C) — yanlis olan bias REFERANSI idi; artik referans = cozum kaynagi.
 - **Open-Meteo TLS (2026-08-18):** Avast Web/Mail Shield on-makine SSL intercept'i
   `requests`+certifi'yi CERTIFICATE_VERIFY_FAILED'e dusuruyordu (archive/forecast fetch'leri
   bos donuyordu). `data_pipeline/weather_ensemble.py` artik Windows sistem sertifika deposuyla
