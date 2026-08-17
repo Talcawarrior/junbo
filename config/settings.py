@@ -177,7 +177,7 @@ class StrategyConfig:
     spread_max_cities: int = 40  # tahmini en yuksek ilk N sehir
     spread_max_entry: float = 0.95  # ust sinir: 0.95 ve alti her fiyata acilir (2026-08-16)
     spread_stake_usd: float = 2.0  # esik basina stake
-    spread_max_bets_per_day: int = 40  # gunluk limit: ilk 40 market (2026-08-16 kullanici karari)
+    spread_max_bets_per_day: int = 120  # gunluk limit: 3 gun x 40 (2026-08-17 kullanici karari: "Toplam 120")
 
     # ── Daily rotation limit: gunde max N rotasyon ───────────────────
     max_daily_rotations: int = 3  # gunde en fazla 3 rotasyon (maliyet kontrolu)

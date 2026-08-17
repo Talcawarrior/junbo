@@ -689,6 +689,65 @@ async def _run_daily_maintenance() -> None:
         logger.error("Scheduled backup failed: %s", e)
 
 
+def _clob_rest_poll_once() -> None:
+    """CLOB REST yedegi: WebSocket ulasilamayinca acik marketlerin fiyatlarini
+    REST GET /book ile ceker ve orderbook.db'ye arsivler.
+
+    2026-08-17: ws-subscriptions-clob geo-block + WARP SOCKS WS desteklemiyor
+    -> WS akisi kullanilamaz. Fiyat bilgisi REST /book (proxy ile calisir)
+    uzerinden toplanir; bot fiyatlari zaten run_fetch_markets (Gamma) ile
+    5dk'da bir guncelliyor. Bu yedek SADECE orderbook gecmisini besler.
+    """
+    import sqlite3
+    from datetime import datetime, timezone as _tz
+
+    import requests
+
+    from config.settings import bot_config
+
+    proxies = bot_config.polymarket.get_proxies()
+    try:
+        with get_session() as s:
+            markets = s.query(WeatherMarket).filter(WeatherMarket.status == "open").all()
+        if not markets:
+            return
+        saved = 0
+        for m in markets:
+            try:
+                tok = None
+                if m.raw_data:
+                    import json as _json
+
+                    d = _json.loads(m.raw_data)
+                    toks = d.get("clobTokenIds")
+                    if isinstance(toks, str):
+                        toks = _json.loads(toks)
+                    if isinstance(toks, list) and toks:
+                        tok = str(toks[0])
+                if not tok:
+                    continue
+                r = requests.get(
+                    f"https://clob.polymarket.com/book?token_id={tok}",
+                    timeout=15,
+                    proxies=proxies,
+                )
+                if r.status_code != 200:
+                    continue
+                book = r.json()
+                asks = [x for x in book.get("asks", []) if float(x.get("price", 0)) > 0]
+                if not asks:
+                    continue
+                best_ask = float(min(asks, key=lambda x: float(x["price"]))["price"])
+                _archive_clob_price(m, best_ask)
+                saved += 1
+            except Exception:
+                continue
+        if saved:
+            logger.info("CLOB REST poll: %d market fiyati arsivlendi", saved)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("CLOB REST poll hatasi: %s", exc)
+
+
 def _archive_clob_price(wm, price: float) -> None:
     """CLOB fiyat olayini orderbook.db'ye kalici arsivler (backtest icin).
 
@@ -776,6 +835,7 @@ async def clob_stream_loop(state):
             logger.warning("CLOB event isleme hatasi: %s", e)
 
     logger.info("CLOB stream loop basladi")
+    ws_fail_streak = 0
     while state.is_running:
         try:
             assets = _asset_ids()
@@ -783,11 +843,21 @@ async def clob_stream_loop(state):
                 logger.info("CLOB stream: acik bet yok, 60 sn bekliyorum")
                 await asyncio.sleep(60)
                 continue
+            # WS proxy ile baglanamiyorsa (SOCKS WARP WS desteklemiyor) REST
+            # polling yedigine dus. 2026-08-17: ws-subscriptions geo-block +
+            # WARP WS -> 'General SOCKS server failure'. Fiyat REST'ten gelir.
+            if ws_fail_streak >= 3:
+                logger.info("CLOB stream: WS ulasilamadi (streak=%d), REST polling yedigine gecildi", ws_fail_streak)
+                await asyncio.to_thread(_clob_rest_poll_once)
+                await asyncio.sleep(300)  # 5 dk
+                continue
             stream = CLOBMarketStream(assets, _on_event)
             await stream.run(stop=asyncio.Event(), max_retries=None)
+            ws_fail_streak = 0
         except asyncio.CancelledError:
             logger.info("CLOB stream loop cancelled")
             break
         except Exception as e:  # noqa: BLE001
-            logger.error("CLOB stream loop error: %s — retry 30sn", e)
+            ws_fail_streak += 1
+            logger.error("CLOB stream loop error (%d): %s — retry 30sn", ws_fail_streak, e)
             await asyncio.sleep(30)

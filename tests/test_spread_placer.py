@@ -32,7 +32,7 @@ def _clean_db():
     # radius testleri patliyordu.
     bot_config.strategy.spread_radius = 1
     bot_config.strategy.spread_max_entry = 0.95
-    bot_config.strategy.spread_max_bets_per_day = 40
+    bot_config.strategy.spread_max_bets_per_day = 120
     bot_config.strategy.spread_max_cities = 40
 
 

@@ -21,6 +21,9 @@ from database.models import Bet, HistoricalCalibration, Portfolio, WeatherMarket
 from config.settings import bot_config
 from sqlalchemy import func
 
+# bot_loop._FETCH_TIMEOUT ile ayni deger — circular import onlemek icin burada
+_FETCH_TIMEOUT = 60
+
 logger = logging.getLogger("SCHEDULER_METAR_PEAK")
 
 # Kapanisa bu kadar saat kala hala zirve kilitlenmediyse bet acilmaz.
@@ -221,33 +224,54 @@ def run_metar_peak_bets() -> int:
             return 0
 
         # Sehir -> market gruplama (her sehir icin en iyi bucket adayini sec)
-        # Bu dongude her ACIK market icin METAR zirvesi kontrol edilir.
+        # METAR fetch'leri PARALEL cekilir — 40 sehir tek tek cekilirse
+        # 60s _FETCH_TIMEOUT'a dusup "METAR poll timed out" oluyor, peak'ler
+        # kaciyor (2026-08-17 bugfix). ThreadPoolExecutor ile ~3-5s'de biter.
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        candidates = []
         for m in markets:
-            # kapanisa yeterli zaman var mi
             if _hours_until_close(m) < MIN_HOURS_BEFORE_CLOSE:
                 continue
-            # zaten metar bet'i var mi
             if _existing_metar_bet(session, str(m.id)):
                 continue
-            # METAR gun verisi
             day = m.target_date.date().isoformat() if m.target_date else today
-            try:
-                day_rows = fetch_metar_day(m.city_code, day)
-                # Arsivle (gecmis backtest icin kalici METAR verisi)
-                from scrapers.metar import archive_metar_observations
-
-                archive_metar_observations(m.city_code, m.city or "", day_rows)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("metar_peak: METAR fetch fail %s: %s", m.city_code, exc)
-                continue
-            # Kullanici karari 2026-08-16: "sehirin YEREL saatine gore gir,
-            # benim saatimle degil". Boylamdan kaba UTC offset (lon/15).
-            # Ornek: Wellington 03:00 UTC max yapiyor (yerel 15:00) -> offset +12.
             utc_offset = 0.0
             try:
                 utc_offset = round(float(m.longitude) / 15.0)
             except (TypeError, ValueError):
                 utc_offset = 0.0
+            candidates.append((m, day, utc_offset))
+
+        # Ilk olarak sadece benzersiz (city_code, day) icin METAR cek (cache'li)
+        unique = {}
+        for m, day, off in candidates:
+            unique.setdefault((m.city_code, day), (m, day, off))
+
+        from scrapers.metar import fetch_metar_day, archive_metar_observations
+
+        def _fetch_one(item):
+            m, day, off = item
+            try:
+                rows = fetch_metar_day(m.city_code, day)
+                archive_metar_observations(m.city_code, m.city or "", rows)
+                return m.city_code, day, rows
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("metar_peak: METAR fetch fail %s: %s", m.city_code, exc)
+                return m.city_code, day, None
+
+        metar_rows = {}
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            futs = {ex.submit(_fetch_one, item): item for item in unique.values()}
+            for fut in as_completed(futs, timeout=_FETCH_TIMEOUT or 60):
+                code, day, rows = fut.result()
+                metar_rows[(code, day)] = rows
+
+        # Paralele cekilen verilerle peak kontrolu + bet ac
+        for m, day, utc_offset in candidates:
+            day_rows = metar_rows.get((m.city_code, day)) or []
+            if not day_rows:
+                continue
             peak, confirmed = detect_peak(day_rows, utc_offset_hours=utc_offset)
             if not confirmed or peak is None:
                 continue  # zirve henuz kilitlenmedi
