@@ -1245,6 +1245,24 @@ async def stop_bot(_key: str = Depends(verify_api_key)):
         return {"status": "stopped"}
 
 
+@app.post("/api/restart")
+async def restart_bot(_key: str = Depends(verify_api_key)):
+    """Kod guncelleme restart'i — islem kasitli olarak exit(1) ile cikar.
+
+    Windows servis yoneticisinin (SCM) JunboBot failure-recovery ayari
+    (RESTART 5s/10s/30s, `sc qfailure JunboBot`) sayesinde surec beklenmedik
+    cikista OTOMATIK yeniden baslatilir ve diskteki GUNCEL kod yuklenir.
+    /api/stop tek basina yetersiz: sadece loop'lari durdurur, ayni surec
+    eski kodla yasamaya devam eder. Non-admin shell LocalSystem servisini
+    dogrudan restart edemedigi icin (2026-08-18 kullanici: "onaysiz yap")
+    onaysiz restart yolu bu endpoint'tir. SQLite WAL crash-safe'dir.
+    """
+    logger.warning("RESTART endpoint tetiklendi - surec exit(1) ile cikiyor, SCM yeniden baslatacak")
+    import os as _os
+
+    _os._exit(1)
+
+
 @app.post("/api/reset")
 async def reset_bot(_key: str = Depends(verify_api_key)):
     """Reset the bot state and clear in-flight DB rows WITHOUT auto-restart."""

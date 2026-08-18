@@ -409,6 +409,7 @@ ALLOWED_DEAD = {
     "watchdog_loop",
     "start_bot",
     "stop_bot",
+    "restart_bot",
     # Bot loop internal
     "price_poller_loop",
     "scan_and_bet_loop",
