@@ -59,21 +59,31 @@ def _fetch_metar(icao: str, hours: int = HISTORY_HOURS) -> list[tuple[int, float
     """aviationweather.gov'dan istasyonun son N saatlik METAR gozlemlerini ceker.
 
     Returns: [(epoch, temp_c), ...] sicakliga gore artan (zaman sirali), temp yoksa [].
+
+    2026-08-18: 76 "Read timed out" gunluk hata — tek deneme yetersizdi; 3
+    deneme + backoff eklendi (timeout'lar gecici, retry ile kurtariliyor).
     """
-    try:
-        # 2026-08-16: config/settings.py global olarak HTTP_PROXY/HTTPS_PROXY env
-        # set ediyor (Polymarket SOCKS). aviationweather.gov geo-block'lu DEGIL ve
-        # proxy uzerinden 20s timeout (172 hata) -> bu istek DIRECT gider.
-        resp = requests.get(
-            METAR_URL,
-            params={"ids": icao, "format": "json", "hours": str(hours)},
-            timeout=REQUEST_TIMEOUT,
-            proxies={"http": None, "https": None, "all": None},  # type: ignore[dict-item]
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("METAR fetch fail %s: %s", icao, exc)
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            # 2026-08-16: config/settings.py global olarak HTTP_PROXY/HTTPS_PROXY env
+            # set ediyor (Polymarket SOCKS). aviationweather.gov geo-block'lu DEGIL ve
+            # proxy uzerinden 20s timeout (172 hata) -> bu istek DIRECT gider.
+            resp = requests.get(
+                METAR_URL,
+                params={"ids": icao, "format": "json", "hours": str(hours)},
+                timeout=REQUEST_TIMEOUT,
+                proxies={"http": None, "https": None, "all": None},  # type: ignore[dict-item]
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            break
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if attempt < 2:
+                time.sleep(1.5 * (attempt + 1))
+    else:
+        logger.warning("METAR fetch fail %s (3 deneme): %s", icao, last_exc)
         return None
     rows = []
     for m in data:
