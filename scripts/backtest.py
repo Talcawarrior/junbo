@@ -981,6 +981,23 @@ def cmd_metar_peak_live(args) -> int:
         if code and c:
             code_name.setdefault(code, c)
 
+    # --bias-top N: en az sapan N sehir (botun canli sehir secimi ile ayni
+    # tablodan). NOT: skorlar TUM gecmisten hesaplanir (bot canlida da aynisini
+    # yapar; look-ahead kullanici istegiyle bilincli olarak simule edilir).
+    keep_bias: set[str] | None = None
+    if args.bias_top and args.bias_top > 0:
+        bs: dict[str, float] = {}
+        bc: dict[str, int] = {}
+        for code, bias in db.execute("SELECT city_code, bias FROM historical_calibrations WHERE bias IS NOT NULL"):
+            cn = code_name.get(code)
+            if not cn:
+                continue
+            bs[cn] = bs.get(cn, 0) + abs(float(bias))
+            bc[cn] = bc.get(cn, 0) + 1
+        cb = {c: bs[c] / bc[c] for c in bs if bc[c] > 0}
+        ordered_bias = [c for c, _ in sorted(cb.items(), key=lambda kv: kv[1])]
+        keep_bias = {c for c in ordered_bias[: args.bias_top]}
+
     # market: (code, day, thr) -> (mid, target_ts, outcome, market_type)
     # SADECE temperature_max (peak mantigi max bucket'i icindir).
     market: dict[tuple[str, str, int], tuple[str, float | None, bool | None, str]] = {}
@@ -1050,6 +1067,9 @@ def cmd_metar_peak_live(args) -> int:
     for (code, day), rows in day_rows.items():
         if day not in days_set:
             continue
+        city = code_name.get(code)
+        if city and keep_bias is not None and city not in keep_bias:
+            continue  # bias-top N disinda kalan sehir
         rows.sort(key=lambda x: x[0])
         utc_off = city_utc_offset(code, day, lon.get(code))
         pk, lock_epoch = peak_lock(rows, utc_off)
@@ -1984,6 +2004,7 @@ def _build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--stake", type=float, default=3.0)
     pl.add_argument("--slippage", type=float, default=0.01, help="ask ustune eklenen fiyat kaymasi")
     pl.add_argument("--min-entry", type=float, default=0.10, help="MIN_ENTRY (0 = filtre yok)")
+    pl.add_argument("--bias-top", type=int, default=0, help="en az sapan N sehir (0 = tum sehirler)")
     pl.set_defaults(func=lambda a: cmd_metar_peak_live(a))
 
     w = sub.add_parser("walk_forward", help="walk-forward (look-ahead'siz) model dogrulama")
