@@ -190,6 +190,21 @@ def _open_metar_bet(session, market: WeatherMarket, peak_temp: float) -> Optiona
         logger.warning("metar_peak: %s %sC nakit yetersiz (cash=%.2f)", market.city, market.threshold, cash)
         return None
 
+    # 2026-08-19 DERINLIK SINIRI (kullanici: "orderbook'a bakip ne kadar
+    # acabilirsin demen gerekir"): CLOB ask derinliginin %30'undan fazlasini
+    # tek emirde almaya calismayiz — fiyati ittirir. CLOB erisilemezse sinir
+    # uygulanmaz (eski davranis korunur).
+    try:
+        from utils.clob_live import extract_yes_token_id, max_stake_by_depth
+
+        tok = extract_yes_token_id(getattr(market, "raw_data", None))
+        if tok:
+            depth_limit = max_stake_by_depth(tok, entry)
+            if depth_limit is not None:
+                use_stake = min(use_stake, depth_limit)
+    except Exception:  # noqa: BLE001 — derinlik siniri asla beti engellemez
+        pass
+
     fill_price = max(0.01, min(0.99, round(entry, 4)))
     shares = bet_shares(use_stake, fill_price)
     fee_rate = bot_config.strategy.current_fee_rate

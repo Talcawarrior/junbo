@@ -58,6 +58,15 @@ def _fetch_live_yes_quote(token_id: str, timeout: float = 5.0) -> tuple[float | 
         from scrapers.clob import CLOBClient
 
         client = CLOBClient(timeout=timeout)
+        # 2026-08-19: proxy (geo-block) — max_stake_by_depth ile ayni kural.
+        try:
+            from config.settings import bot_config
+
+            proxies = bot_config.polymarket.get_proxies()
+            if proxies:
+                client.session.proxies = proxies
+        except Exception:  # noqa: BLE001
+            pass
         book = client.get_orderbook(token_id)
         return book.best_ask, book.best_bid
     except Exception as exc:  # network / parse / HTTP errors
@@ -88,3 +97,37 @@ def live_quote_for_market(raw_data: str | None, timeout: float = 5.0) -> tuple[s
         return None, None, None
     ask, bid = _fetch_live_yes_quote(token_id, timeout=timeout)
     return token_id, ask, bid
+
+
+def max_stake_by_depth(token_id: str, entry_price: float, fill_pct: float = 0.30, timeout: float = 5.0) -> float | None:
+    """O marketin ask tarafindan, entry'nin %5 ustune kadar olan kademelerin
+    toplam USD derinligi x fill_pct = fiyati fazla itmeden alinabilecek max stake.
+
+    2026-08-19 kullanici: "sistem 2000 usd bet ac diyebilir ama orderbook'a
+    bakip hayir burada 1500 acmalisin demen gerekir." Bet acanlar bunu
+    cagirip use_stake'i sinirlar. fill_pct=0.30: defterin %30'undan fazlasini
+    tek emirde almak market maker'lari gorup fiyati cektirir (guvenli oran).
+
+    None = CLOB erisilemez (sinyal yok, sinir uygulanmaz — eski davranis).
+    """
+    try:
+        from scrapers.clob import CLOBClient
+
+        client = CLOBClient(timeout=timeout)
+        # 2026-08-19: Polymarket CLOB geo-block'lu — bot proxy'siz 10054 alir
+        # (canli dogrulamada goruldu). Proxy'yi session'a uygula.
+        try:
+            from config.settings import bot_config
+
+            proxies = bot_config.polymarket.get_proxies()
+            if proxies:
+                client.session.proxies = proxies
+        except Exception:  # noqa: BLE001 — proxy yoksa direct dene
+            pass
+        book = client.get_orderbook(token_id)
+        cap_price = entry_price * 1.05
+        depth = sum(lvl.price * lvl.size for lvl in book.asks if lvl.price <= cap_price)
+        return depth * fill_pct
+    except Exception as exc:  # network / parse / HTTP errors
+        logger.warning("CLOB depth failed for token %s: %s", token_id, exc)
+        return None
