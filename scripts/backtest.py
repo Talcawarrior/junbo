@@ -1180,7 +1180,10 @@ def cmd_metar_peak_live(args) -> int:
         print(f"  pencere: {min(days_all)} .. {max(days_all)}  (min-entry={min_entry:.2f}, max-entry={MAX_ENTRY})")
     print()
 
-    print(f"  {'gun':10s} {'bet':>4s} {'kazandi':>8s} {'win%':>6s} {'stake$':>8s} {'fee+gas$':>9s} {'NET$':>9s}")
+    print(
+        f"  {'gun':10s} {'bet':>4s} {'kazandi':>8s} {'win%':>6s} {'stake$':>8s} "
+        f"{'fee+gas$':>9s} {'NET$':>9s} {'ROI%':>8s}"
+    )
     tot_stake = tot_cost = tot_pnl = tot_ideal = 0.0
     n_all = w_all = 0
     for day in sorted({b["day"] for b in bets}):
@@ -1196,7 +1199,10 @@ def cmd_metar_peak_live(args) -> int:
             else -cost_of(b["stake"], b["entry"])
             for b in dbets
         )
-        print(f"  {day:10s} {n:>4d} {w:>8d} %{w / n * 100:>5.1f} ${stk:>7.2f} ${fees:>8.2f} ${pnl:>+8.2f}")
+        roi = pnl / stk * 100 if stk > 0 else 0.0
+        print(
+            f"  {day:10s} {n:>4d} {w:>8d} %{w / n * 100:>5.1f} ${stk:>7.2f} ${fees:>8.2f} ${pnl:>+8.2f} %{roi:>+7.1f}"
+        )
         tot_stake += stk
         tot_cost += fees
         tot_pnl += pnl
@@ -1204,9 +1210,10 @@ def cmd_metar_peak_live(args) -> int:
         n_all += n
         w_all += w
     if n_all:
+        roi_all = tot_pnl / tot_stake * 100 if tot_stake > 0 else 0.0
         print(
             f"  {'TOPLAM':10s} {n_all:>4d} {w_all:>8d} %{w_all / n_all * 100:>5.1f} "
-            f"${tot_stake:>7.2f} ${tot_cost:>8.2f} ${tot_pnl:>+8.2f}"
+            f"${tot_stake:>7.2f} ${tot_cost:>8.2f} ${tot_pnl:>+8.2f} %{roi_all:>+7.1f}"
         )
         print()
         print(f"  yatirilan stake       : ${tot_stake:.2f}")
