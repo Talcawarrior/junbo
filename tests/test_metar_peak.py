@@ -36,21 +36,32 @@ class TestDetectPeakMorningBug:
         peak, confirmed = detect_peak(rows)
         assert confirmed is False, f"sabah dususu zirve sayilmamali: peak={peak}"
 
-    def test_ogleden_sonra_2_dusus_kilitler(self):
-        """UTC 15:00 sonrasi 2 ardısık dusus zirveyi kilitler."""
+    def test_ogleden_sonra_1_dusus_kilitler(self):
+        """2026-08-18 kullanici: 1 dusus YETERLI — 31'den sonra 30 gelirse
+        zirve 31 kilitlenir, ikinci dusus beklenmez (erken giris)."""
         from scrapers.metar import detect_peak
 
-        # 15:00 30, 16:00 31 (max), 17:00 30, 18:00 29 -> 31 kilitlenmeli
-        rows = _rows_at([(13, 28.0), (14, 30.0), (15, 31.0), (16, 30.0), (17, 29.0)])
+        # 15:00 31, 16:00 30 -> 31 kilitlenmeli (1 dusus)
+        rows = _rows_at([(13, 28.0), (14, 30.0), (15, 31.0), (16, 30.0)])
         peak, confirmed = detect_peak(rows)
         assert confirmed is True
         assert peak == 31.0
 
-    def test_saat_esigi_oncesi_kilitlenmez(self):
-        """Yerel 13:00 oncesi (sabah) 2 dusus olsa bile kilitlenmez."""
+    def test_esitlik_dusus_sayilmaz_sonraki_dusus_kilitler(self):
+        """20 21 22 22 21 ornegi: 22'den sonra 22 (esit) dusus degil,
+        sonraki 21 dususu 22'yi kilitler (kullanici ornegi 2026-08-18)."""
         from scrapers.metar import detect_peak
 
-        # 06:00 30, 07:00 29, 08:00 28 -> 2 dusus ama yerel saat < 13 -> kilitlenmez
+        rows = _rows_at([(13, 20.0), (14, 21.0), (15, 22.0), (16, 22.0), (17, 21.0)])
+        peak, confirmed = detect_peak(rows)
+        assert confirmed is True
+        assert peak == 22.0
+
+    def test_saat_esigi_oncesi_kilitlenmez(self):
+        """Yerel 13:00 oncesi (sabah) dususler zirve sayilmaz."""
+        from scrapers.metar import detect_peak
+
+        # 06:00 30, 07:00 29 -> dusus var ama yerel saat < 13 -> kilitlenmez
         rows = _rows_at([(6, 30.0), (7, 29.0), (8, 28.0)])
         peak, confirmed = detect_peak(rows)
         assert confirmed is False

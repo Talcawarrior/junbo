@@ -377,46 +377,34 @@ def run_metar_peak_bets() -> int:
                 metar_rows[(code, day)] = rows
 
         # Paralele cekilen verilerle peak kontrolu + bet ac
-        closed_cities: set[tuple[str, str]] = set()
+        last_closed: dict[tuple[str, str], int] = {}
         for m, day, utc_offset in candidates:
             day_rows = metar_rows.get((m.city_code, day)) or []
             if not day_rows:
                 continue
             peak, confirmed = detect_peak(day_rows, utc_offset_hours=utc_offset)
             if not confirmed or peak is None:
-                continue  # zirve henuz kilitlenmedi
-            # 2026-08-18 kullanici: "ya koy" — kilitli zirve ASILDI ise eski
-            # bucket betleri YANLIS demektir. Milan 18 Agu canli ornegi: kilit
-            # 31C'de verildi, sonra 32C geldi; eski kod yeni zirvenin 2 dusus
-            # ile kilitlenmesini beklerken 31C fiyati 0.0005'e coktu (bet 1452
-            # -$3). Yeni kural: cur_max > kilitli peak ise 2 dusus BEKLEMEDEN
-            # eski bucket betleri DERHAL kapatilir (yeni cummax kazanan sayilir).
+                continue  # zirve henuz kilitlenmedi (1 dusus kurali, 2026-08-18)
+            # 2026-08-18 kullanici: "20 21 22 22 21 diyorsa ikinci 21 ve altini
+            # bekleme 22 ye bet ac, daha sonra 23 e cikarsa 22 yi kapa 23 e ac."
+            # Zirve ASILDIYSA (cur_max > kilitli peak) eski bucket betleri
+            # yanlis: DERHAL kapat VE yeni zirvenin bucket'ina TEKRAR bet ac.
+            # Zincir (22->23->24) her dongude calisir: kazanan bucket
+            # degistiginde kapatma yeniden cagrilir (last_closed guard).
             cur_max = max(t for _, t in day_rows)
-            if cur_max > peak:
-                if (m.city_code, day) not in closed_cities:
-                    _close_wrong_bucket_bets(session, m.city_code, m.target_date, float(cur_max))
-                    closed_cities.add((m.city_code, day))
-                continue  # kilit bozuldu: eski bucket'a yeni bet acilmaz
-            # 2026-08-18 audit fix (C2): round() banker's yerine half-up.
-            bucket = int(peak + 0.5) if peak >= 0 else int(peak - 0.5)
+            winner_val = float(cur_max) if cur_max > peak else peak
+            winner_bucket = int(winner_val + 0.5) if winner_val >= 0 else int(winner_val - 0.5)
+            if last_closed.get((m.city_code, day)) != winner_bucket:
+                _close_wrong_bucket_bets(session, m.city_code, m.target_date, winner_bucket)
+                last_closed[(m.city_code, day)] = winner_bucket
             # half-up (2026-08-18 audit): US sehirlerinde esikler float C'dir
             # (F'den donusturulur) — int() truncate yanlis bucket uretir;
             # Austin 35.9C marketi bucket 36'ya karsilik gelir.
-            if int(float(m.threshold) + 0.5) != bucket:
+            if int(float(m.threshold) + 0.5) != winner_bucket:
                 continue  # bu market kazanan bucket degil
-            bet = _open_metar_bet(session, m, peak)
+            bet = _open_metar_bet(session, m, winner_val)
             if bet:
                 opened += 1
-            # Kullanici karari 2026-08-16 (3. adim): peak kilitlendi, kazanan
-            # bucket belli -> o sehirdeki kazanan bucket DISINDAKI tum acik
-            # betleri KAPAT (T-2'de yanlis bucket'a acilan spread betleri dahil).
-            # Bot daha once kapatmiyordu: 16 Agu'da 75 acik bet, sadece 6'si
-            # kazanan bucket'ta, 69 yanlis bet settlement'a kadar acik kaldi.
-            # 2026-08-18: kapatma artik kazanan-bucket marketi OLMASA da
-            # cagrilir (sehir-gun basina bir kez, closed_cities).
-            if (m.city_code, day) not in closed_cities:
-                _close_wrong_bucket_bets(session, m.city_code, m.target_date, bucket)
-                closed_cities.add((m.city_code, day))
 
         session.commit()
     if opened:

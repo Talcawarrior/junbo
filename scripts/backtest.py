@@ -94,28 +94,22 @@ def first_ask_below(series, max_entry) -> float | None:
 
 def peak_lock(rows: list[tuple[float, float]], utc_off: float, min_hour: int = 13) -> tuple[float | None, float | None]:
     """KILITLI METAR peak + kilitlenme epoch'u — scrapers/metar.py detect_peak
-    ile BIREBIRE ayni kural: yerel saat >= 13 olduktan sonra cummax'in ardindan
-    2 ardısık dusus -> peak teyit. (peak_temp, lock_epoch) ya da (None, None).
+    ile BIREBIRE ayni kural. 2026-08-18 kullanici: 1 dusus YETERLI (20 21 22
+    22 21 -> 22 kilitlenir, ikinci dusus beklenmez); zirve asilirsa kapat +
+    yeni zirveye ac (aktar). (peak_temp, lock_epoch) ya da (None, None).
     """
     if len(rows) < 3:
         return (None, None)
     cummax = rows[0][1]
-    drop_count = 0
     for epoch, cur in rows[1:]:
         local_dt = datetime.fromtimestamp(epoch + utc_off * 3600, tz=timezone.utc)
         if local_dt.hour < min_hour:
             cummax = max(cummax, cur)
-            drop_count = 0
             continue
         if cur > cummax:
             cummax = cur
-            drop_count = 0
         elif cur < cummax:
-            drop_count += 1
-            if drop_count >= 2:
-                return (cummax, epoch)
-        else:
-            drop_count = 0
+            return (cummax, epoch)
     return (None, None)
 
 
@@ -512,6 +506,54 @@ def cmd_gunluk(args) -> int:
                 "exit_ask": bk_ask if exit_tip == "sold_broken_lock" else None,
             }
         )
+        # 2026-08-18 kullanici aktar: kilit bozulduysa (bk) eski bet satildi;
+        # yeni zirvenin bucket'ina DUSUS BEKLEMEDEN yeniden bet acilir
+        # ("23 e ciktiginda 1 adet dusmesini beklemeyecek hemen acacak").
+        if bk is not None and exit_tip == "sold_broken_lock":
+            B2 = int(bk[1] + 0.5) if bk[1] >= 0 else int(bk[1] - 0.5)
+            m2 = market.get((code, day, B2))
+            if m2 is not None and m2[3] == "RANGE" and m2[1] is not None and m2[2] is not None:
+                mid2, tgt2, out2, _ = m2
+                if tgt2 is not None and tgt2 - bk[0] >= MIN_HOURS_BEFORE_CLOSE * 3600:
+                    seri2 = price_series.get(mid2)
+                    if seri2:
+                        fs2 = first_seen.get(mid2)
+                        if fs2 is not None:
+                            seri2 = [pt for pt in seri2 if pt[0] >= fs2]
+                    e2 = ask_at_or_after(seri2, bk[0]) if seri2 else None
+                    if e2 is not None and PEAK_MIN_ENTRY <= e2 < MAX_ENTRY:
+                        shares2 = stake / e2
+                        cost2 = cost_of(stake, e2)
+                        bk2 = peak_break(day_rows.get((code, day), []), bk[1], bk[0])
+                        if bk2 is not None:
+                            b2ask = ask_at_or_after(seri2, bk2[0])
+                            if b2ask is not None and 0 < b2ask <= 1:
+                                exit2 = "sold_broken_lock"
+                                pnl2 = (b2ask - e2) * shares2 - stake * FEE_RATE * (1.0 - b2ask) - GAS
+                                won2 = b2ask > e2
+                            else:
+                                exit2 = "hold_settlement"
+                                won2 = out2
+                                pnl2 = (stake / e2 - cost2) if out2 else -cost2
+                        else:
+                            exit2 = "hold_settlement"
+                            won2 = out2
+                            pnl2 = (stake / e2 - cost2) if out2 else -cost2
+                        peak.append(
+                            {
+                                "day": day,
+                                "city": code_name.get(code, code),
+                                "code": code,
+                                "bucket": B2,
+                                "mid": mid2,
+                                "entry": e2,
+                                "stake": stake,
+                                "pnl": pnl2,
+                                "won": won2,
+                                "exit": exit2,
+                                "exit_ask": b2ask if exit2 == "sold_broken_lock" else None,
+                            }
+                        )
 
     # ---- GERCEK-FILL duzeltmesi (2026-08-18) ----
     # Sim ideal ilk-ask fiyatindan girer; botun ayni markette GERCEKTEN
@@ -1253,10 +1295,11 @@ def cmd_metar_peak_live(args) -> int:
                 "per": per,  # gas haric dolar basina net (kelly icin)
             }
         )
-        # 2026-08-18 kullanici: "sonraki yuksek olursa nasil olsa bunu kapar,
-        # yeni peak e acar" — neighbor modunda kilit bozulduysa bk aninda
-        # yeni bucket'a (veya komsusuna) TEKRAR bet acilir (zincir 1 adim).
-        if bk is not None and neighbor != "none" and not is_min and not is_high:
+        # 2026-08-18 kullanici: "23 e ciktiginda 1 adet dusmesini beklemeyecek
+        # hemen acacak, cunku 21 den 23 e cikti" — kilit bozulduysa bk aninda
+        # eski bet KAPATILIR (yukarida) VE yeni zirvenin bucket'ina TEKRAR bet
+        # acilir (dusus beklenmeden, bk degeri kazanan sayilir; zincir 1 adim).
+        if bk is not None and not is_min and not is_high:
             B2 = int(bk[1] + 0.5)
             m2, _ = _pick_mkt(code, day, B2)
             if m2 is not None:

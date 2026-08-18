@@ -97,13 +97,13 @@ class TestMetarPeakMarketTypeFilter:
 
 
 class TestMetarPeakBrokenLock:
-    """2026-08-18 kullanici: "ya koy" — kilitli peak asilirsa (cur_max >
-    kilitli peak) yanlis bucket betleri 2 dusus beklenmeden kapatilir.
-    Milan 18 Agu: kilit 31C, sonra 32C geldi; eski kod beklerken 31C fiyati
-    0.0005'e coktu ve bet -$3 kaybetti.
+    """2026-08-18 kullanici: "23 e ciktiginda 1 adet dusmesini beklemeyecek
+    hemen acacak, cunku 21 den 23 e cikti" — kilitli peak ASILIRSA (cur_max >
+    kilitli peak) eski bucket betleri kapatilir VE yeni zirvenin bucket'ina
+    dusus beklenmeden bet acilir. Milan 18 Agu: kilit 31C, sonra 32C geldi.
     """
 
-    def test_kilit_asilinca_kapatma_cagrilir_bet_acilmaz(self, market_factory):
+    def test_kilit_asilinca_kapat_ve_yeni_peake_ac(self, market_factory):
         from unittest.mock import patch
 
         now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -121,13 +121,26 @@ class TestMetarPeakBrokenLock:
             threshold=24.0,
             target_date=tgt,
         )
+        m_25 = market_factory(
+            city="Milan",
+            city_code="LIMC",
+            metric="temperature_max",
+            market_type="RANGE",
+            threshold=25.0,
+            target_date=tgt,
+        )
         closed_calls: list[float] = []
+        bet_calls: list[float] = []
+
+        def _fake_bet(_session, market, peak):
+            bet_calls.append(float(market.threshold))
+            return None
 
         with (
             patch("scrapers.metar.fetch_metar_day", return_value=rows),
             patch("scrapers.metar.detect_peak", return_value=(24.0, True)),
             patch("scrapers.metar.archive_metar_observations", return_value=0),
-            patch.object(mp, "_open_metar_bet", return_value=None) as fake_bet,
+            patch.object(mp, "_open_metar_bet", side_effect=_fake_bet),
             patch.object(
                 mp,
                 "_close_wrong_bucket_bets",
@@ -140,6 +153,9 @@ class TestMetarPeakBrokenLock:
         # (diger testlerden kalan sehir marketleri de ayni mock'u gorur;
         # onlar icin de kapatma 25.0 ile cagrilir — hepsi ayni kural)
         assert closed_calls and all(c == 25.0 for c in closed_calls)
-        # eski kilitli bucket'a (24) yeni bet ACILMAZ
-        fake_bet.assert_not_called()
+        # ESKI kilitli bucket'a (24) bet YOK; YENI zirveye (25) dusus
+        # beklenmeden bet acilir
+        assert 25.0 in bet_calls
+        assert 24.0 not in bet_calls
         assert m_24 is not None
+        assert m_25 is not None

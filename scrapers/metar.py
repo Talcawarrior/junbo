@@ -231,8 +231,6 @@ def detect_peak(
     if len(day_rows) < 3:
         return (day_rows[-1][1] if day_rows else None, False)
     cummax = day_rows[0][1]
-    drop_count = 0
-    confirmed_max = None
     for i in range(1, len(day_rows)):
         epoch, cur = day_rows[i]
         # Yerel saat: UTC epoch + sehir offset
@@ -240,20 +238,17 @@ def detect_peak(
         # Saat esigi: sabah/gece dususu zirve sayilmaz (yerel gunduz max olusur)
         if local_dt.hour < min_local_hour:
             cummax = max(cummax, cur)
-            drop_count = 0
             continue
         if cur > cummax:
             cummax = cur
-            drop_count = 0
         elif cur < cummax:
-            drop_count += 1
-            if drop_count >= 2:
-                confirmed_max = cummax
-                break
+            # 2026-08-18 kullanici karari: 1 dusus YETERLI — 20 21 22 22 21
+            # orneginde 22'yi kilitler, ikinci dusus beklenmez. Erken giris:
+            # fiyat daha 0.99'a oturmadan girilir; zirve asilirsa kapat +
+            # yeni zirveye ac (jobs/metar_peak.py aktar mantigi).
+            return cummax, True
         else:  # esit -> dusus sayilmaz
-            drop_count = 0
-    if confirmed_max is not None:
-        return confirmed_max, True
+            pass
     return cummax, False
 
 
