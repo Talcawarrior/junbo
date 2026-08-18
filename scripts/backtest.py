@@ -1081,13 +1081,15 @@ def cmd_metar_peak_live(args) -> int:
     # --metric max (varsayilan): temperature_max; min: temperature_min
     # (2026-08-18 kullanici: "low temperature da acmiyoruz, ona bakalim").
     is_min = getattr(args, "metric", "max") == "min"
+    is_high = getattr(args, "market_type", "range") == "high"
     m_metric = "temperature_min" if is_min else "temperature_max"
+    m_mtype = "HIGH" if is_high else "RANGE"
     market: dict[tuple[str, str, int], tuple[str, float | None, bool | None, str]] = {}
     for r in db.execute(
         "SELECT id, city_code, threshold, target_date, raw_data, market_type FROM weather_markets "
         "WHERE threshold IS NOT NULL AND target_date IS NOT NULL AND raw_data IS NOT NULL "
-        "AND metric = ?",
-        (m_metric,),
+        "AND metric = ? AND market_type = ?",
+        (m_metric, m_mtype),
     ):
         code, thr, day = r[1], r[2], str(r[3])[:10]
         if not code:
@@ -1165,11 +1167,21 @@ def cmd_metar_peak_live(args) -> int:
             continue  # zirve/dip henuz kilitlenmemis -> bet yok
         B = int(pk + 0.5) if pk >= 0 else int(pk - 0.5)  # half-up (C2)
         m = market.get((code, day, B))
+        if is_high and m is None:
+            # HIGH: "max >= esik" YES — kilitli peak'in ALTINDAKI esikler de
+            # KESIN kazanir (gercek max >= kilitli cummax >= esik). O esikte
+            # market yoksa asagi dogru tara (en yuksek uygun esik = en ucuz).
+            for thr_cand in range(B - 1, B - 8, -1):
+                cand = market.get((code, day, thr_cand))
+                if cand is not None:
+                    m = cand
+                    B = thr_cand
+                    break
         if m is None:
             continue
         mid, tgt, outcome, mtype = m
-        if mtype != "RANGE":
-            continue  # canli bot kurali: tam bucket yalnizca RANGE
+        if mtype != m_mtype:
+            continue  # canli bot kurali: tam bucket yalnizca RANGE (HIGH deneyi haric)
         if tgt is None or outcome is None:
             continue
         # Kapanisa <2 sa kala kilitlendi -> bet acilmaz (canli bot kurali).
@@ -1186,7 +1198,9 @@ def cmd_metar_peak_live(args) -> int:
             continue  # kaydirilmis fiyatla alinamaz
         # 2026-08-18 canli kural: kilitli deger ASILDIYSA (max: ustune,
         # min: altina) bet asilma aninda kapatilir (Milan senaryosu).
-        bk = (trough_break if is_min else peak_break)(rows, pk, lock_epoch)
+        # HIGH haric: HIGH'da YES = "max >= esik" — kilit bozulmasi (max
+        # daha da yukselmesi) kazanma sansini ARTIRIR, kapatma yok, tutulur.
+        bk = None if is_high else (trough_break if is_min else peak_break)(rows, pk, lock_epoch)
         if bk is not None:
             bk_ask = ask_at_or_after(seri, bk[0])
             if bk_ask is not None and 0 < bk_ask <= 1:
@@ -2150,6 +2164,12 @@ def _build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--bias-top", type=int, default=0, help="en az sapan N sehir (0 = tum sehirler)")
     pl.add_argument(
         "--metric", default="max", choices=["max", "min"], help="max=zirve (varsayilan), min=dip (low temp)"
+    )
+    pl.add_argument(
+        "--market-type",
+        default="range",
+        choices=["range", "high"],
+        help="range=tam bucket (varsayilan), high=or-above (max >= esik, kapatma yok)",
     )
     pl.add_argument(
         "--min-lock-hour", type=int, default=6, help="min kilidi icin yerel saat esigi (dip gundogumu sonrasi)"
