@@ -1435,6 +1435,11 @@ def cmd_metar_peak_live(args) -> int:
                 day_pnl = 0.0
                 for b in dbets:
                     st = bankroll * ratio
+                    # 2026-08-19 gercekci sinir: orderbook ask_depth p10 ~$2,121
+                    # (bet penceresi); fiyati sallamamak icin bet basina cap.
+                    cap = getattr(args, "max_bet_stake", 0.0)
+                    if cap > 0 and st > cap:
+                        st = cap
                     pnl_c = st * b["per"] - GAS
                     day_stake += st
                     day_pnl += pnl_c
@@ -2343,6 +2348,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="flat=$3 sabit, kelly=fiyata gore, compound=kazanci bankroll'e ekle",
     )
     pl.add_argument("--bankroll", type=float, default=100.0, help="compound baslangic bankroll'u (USD)")
+    pl.add_argument(
+        "--max-bet-stake", type=float, default=0.0, help="bet basina max stake (orderbook derinlik; 0=sinirsiz)"
+    )
     pl.set_defaults(func=lambda a: cmd_metar_peak_live(a))
 
     w = sub.add_parser("walk_forward", help="walk-forward (look-ahead'siz) model dogrulama")
