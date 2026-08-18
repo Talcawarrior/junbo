@@ -255,6 +255,8 @@ ALLOWED_DEAD = {
     "ask_at_or_after",
     "cost_of",
     "peak_break",
+    "trough_lock",
+    "trough_break",
     "fetch_history",
     "first_ask_below",
     "peak_lock",

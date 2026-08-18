@@ -134,6 +134,45 @@ def peak_break(rows: list[tuple[float, float]], locked_peak: float, after_epoch:
     return None
 
 
+def trough_lock(
+    rows: list[tuple[float, float]], utc_off: float, min_hour: int = 6
+) -> tuple[float | None, float | None]:  # noqa: E501
+    """KILITLI METAR dip (gunun EN DUSUK sicakligi) — max kuralinin simetrigi:
+    yerel saat >= min_hour (gundogumu sonrasi) 2 ardisik YUKSELIS -> dip teyit.
+    (2026-08-18 kullanici: "low temperature da acmiyoruz, ona bakalim".)
+    """
+    if len(rows) < 3:
+        return (None, None)
+    cummin = rows[0][1]
+    rise_count = 0
+    for epoch, cur in rows[1:]:
+        local_dt = datetime.fromtimestamp(epoch + utc_off * 3600, tz=timezone.utc)
+        if local_dt.hour < min_hour:
+            cummin = min(cummin, cur)
+            rise_count = 0
+            continue
+        if cur < cummin:
+            cummin = cur
+            rise_count = 0
+        elif cur > cummin:
+            rise_count += 1
+            if rise_count >= 2:
+                return (cummin, epoch)
+        else:
+            rise_count = 0
+    return (None, None)
+
+
+def trough_break(rows: list[tuple[float, float]], locked_min: float, after_epoch: float) -> tuple[float, float] | None:
+    """Kilitli dip'in ALTINA inen ilk gozlem (kilit bozulma ani, min icin)."""
+    for epoch, temp in rows:
+        if epoch <= after_epoch:
+            continue
+        if temp < locked_min:
+            return (float(epoch), float(temp))
+    return None
+
+
 def cost_of(stake: float, entry: float) -> float:
     fee = stake * FEE_RATE * (1.0 - entry)
     return stake + fee + GAS
@@ -1039,12 +1078,16 @@ def cmd_metar_peak_live(args) -> int:
         keep_bias = {c for c in ordered_bias[: args.bias_top]}
 
     # market: (code, day, thr) -> (mid, target_ts, outcome, market_type)
-    # SADECE temperature_max (peak mantigi max bucket'i icindir).
+    # --metric max (varsayilan): temperature_max; min: temperature_min
+    # (2026-08-18 kullanici: "low temperature da acmiyoruz, ona bakalim").
+    is_min = getattr(args, "metric", "max") == "min"
+    m_metric = "temperature_min" if is_min else "temperature_max"
     market: dict[tuple[str, str, int], tuple[str, float | None, bool | None, str]] = {}
     for r in db.execute(
         "SELECT id, city_code, threshold, target_date, raw_data, market_type FROM weather_markets "
         "WHERE threshold IS NOT NULL AND target_date IS NOT NULL AND raw_data IS NOT NULL "
-        "AND metric = 'temperature_max'"
+        "AND metric = ?",
+        (m_metric,),
     ):
         code, thr, day = r[1], r[2], str(r[3])[:10]
         if not code:
@@ -1112,9 +1155,14 @@ def cmd_metar_peak_live(args) -> int:
             continue  # bias-top N disinda kalan sehir
         rows.sort(key=lambda x: x[0])
         utc_off = city_utc_offset(code, day, lon.get(code))
-        pk, lock_epoch = peak_lock(rows, utc_off)
+        # max: zirve kilidi (yerel 13:00+ + 2 dusus); min: dip kilidi
+        # (yerel 06:00+ + 2 yukselis) — 2026-08-18 low-temperature deneyi.
+        if is_min:
+            pk, lock_epoch = trough_lock(rows, utc_off, getattr(args, "min_lock_hour", 6))
+        else:
+            pk, lock_epoch = peak_lock(rows, utc_off)
         if pk is None or lock_epoch is None:
-            continue  # zirve henuz kilitlenmemis -> bet yok
+            continue  # zirve/dip henuz kilitlenmemis -> bet yok
         B = int(pk + 0.5) if pk >= 0 else int(pk - 0.5)  # half-up (C2)
         m = market.get((code, day, B))
         if m is None:
@@ -1136,23 +1184,29 @@ def cmd_metar_peak_live(args) -> int:
         entry_eff = entry + slippage
         if entry_eff >= 1.0:
             continue  # kaydirilmis fiyatla alinamaz
-        # 2026-08-18 canli kural: kilitli peak ASILDIYSA bet asilma aninda
-        # kapatilir (Milan senaryosu); asilma yoksa settlement.
-        bk = peak_break(rows, pk, lock_epoch)
+        # 2026-08-18 canli kural: kilitli deger ASILDIYSA (max: ustune,
+        # min: altina) bet asilma aninda kapatilir (Milan senaryosu).
+        bk = (trough_break if is_min else peak_break)(rows, pk, lock_epoch)
         if bk is not None:
             bk_ask = ask_at_or_after(seri, bk[0])
             if bk_ask is not None and 0 < bk_ask <= 1:
-                shares = stake / entry_eff
-                pnl = (bk_ask - entry_eff) * shares - stake * FEE_RATE * (1.0 - bk_ask) - GAS
+                per = (bk_ask - entry_eff) / entry_eff - FEE_RATE * (1.0 - bk_ask)
                 won = bk_ask > entry_eff
             else:
-                cost = cost_of(stake, entry_eff)
+                per = (
+                    (1.0 / entry_eff - 1.0 - FEE_RATE * (1.0 - entry_eff))
+                    if outcome
+                    else (-1.0 - FEE_RATE * (1.0 - entry_eff))
+                )
                 won = outcome
-                pnl = (stake / entry_eff - cost) if won else -cost
         else:
-            cost = cost_of(stake, entry_eff)
+            per = (
+                (1.0 / entry_eff - 1.0 - FEE_RATE * (1.0 - entry_eff))
+                if outcome
+                else (-1.0 - FEE_RATE * (1.0 - entry_eff))
+            )
             won = outcome
-            pnl = (stake / entry_eff - cost) if won else -cost
+        pnl = stake * per - GAS
         bets.append(
             {
                 "day": day,
@@ -1165,6 +1219,7 @@ def cmd_metar_peak_live(args) -> int:
                 "stake": stake,
                 "pnl": pnl,
                 "won": won,
+                "per": per,  # gas haric dolar basina net (kelly icin)
             }
         )
 
@@ -1220,6 +1275,33 @@ def cmd_metar_peak_live(args) -> int:
         print(f"  fee + gas toplami     : ${tot_cost:.2f}")
         print(f"  NET (slippage dahil)  : ${tot_pnl:+.2f}")
         print(f"  [slippage etkisi]     : slippage'siz NET ${tot_ideal:+.2f}  ->  fark ${tot_ideal - tot_pnl:+.2f}")
+        # ---- KELLY varyasyonu (2026-08-18 kullanici: "stake kelly tarzi") ----
+        # f = p - (1-p)*entry/(1-entry); p = ayni fiyat araliginin ampirik
+        # winrate'i. Ortalama stake flat baz'a esit kalacak sekilde olceklenir
+        # (ayni sermaye, farkli dagilim); stake [0.5, 10] arasina klipslenir.
+        if getattr(args, "stake_mode", "flat") == "kelly":
+            edges = [0.10, 0.25, 0.45, 0.70, 0.95]
+            for b in bets:
+                e = b["entry_eff"]
+                lo = max((lo for lo in edges if lo <= e), default=0.10)
+                hi = min((hi for hi in edges if hi > e), default=0.95)
+                same = [x for x in bets if lo <= x["entry_eff"] < hi]
+                p = (sum(1 for x in same if x["won"]) / len(same)) if same else 0.5
+                f = max(0.0, p - (1.0 - p) * e / (1.0 - e))
+                b["kelly_f"] = f
+            fmean = sum(b["kelly_f"] for b in bets) / len(bets) if bets else 0.0
+            if fmean > 0:
+                for b in bets:
+                    st_k = stake * b["kelly_f"] / fmean
+                    b["kelly_stake"] = max(0.5, min(10.0, st_k))
+                    b["pnl_kelly"] = b["kelly_stake"] * b["per"] - GAS
+            stk_k = sum(b.get("kelly_stake", 0.0) for b in bets)
+            pnl_k = sum(b.get("pnl_kelly", 0.0) for b in bets)
+            roi_k = pnl_k / stk_k * 100 if stk_k > 0 else 0.0
+            print(
+                f"  [KELLY stake       ] : stake=${stk_k:.2f} (flat ${tot_stake:.2f})  "
+                f"NET=${pnl_k:+.2f}  ROI %{roi_k:+.1f}"
+            )
     else:
         print("  bet yok (veri eksik ya da hicbir peak kilitlenmemis)")
     return 0
@@ -2066,6 +2148,15 @@ def _build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--slippage", type=float, default=0.01, help="ask ustune eklenen fiyat kaymasi")
     pl.add_argument("--min-entry", type=float, default=0.10, help="MIN_ENTRY (0 = filtre yok)")
     pl.add_argument("--bias-top", type=int, default=0, help="en az sapan N sehir (0 = tum sehirler)")
+    pl.add_argument(
+        "--metric", default="max", choices=["max", "min"], help="max=zirve (varsayilan), min=dip (low temp)"
+    )
+    pl.add_argument(
+        "--min-lock-hour", type=int, default=6, help="min kilidi icin yerel saat esigi (dip gundogumu sonrasi)"
+    )
+    pl.add_argument(
+        "--stake-mode", default="flat", choices=["flat", "kelly"], help="flat=$3 sabit, kelly=fiyata gore olcekli"
+    )
     pl.set_defaults(func=lambda a: cmd_metar_peak_live(a))
 
     w = sub.add_parser("walk_forward", help="walk-forward (look-ahead'siz) model dogrulama")
