@@ -1166,17 +1166,32 @@ def cmd_metar_peak_live(args) -> int:
         if pk is None or lock_epoch is None:
             continue  # zirve/dip henuz kilitlenmemis -> bet yok
         B = int(pk + 0.5) if pk >= 0 else int(pk - 0.5)  # half-up (C2)
-        m = market.get((code, day, B))
-        if is_high and m is None:
-            # HIGH: "max >= esik" YES — kilitli peak'in ALTINDAKI esikler de
-            # KESIN kazanir (gercek max >= kilitli cummax >= esik). O esikte
-            # market yoksa asagi dogru tara (en yuksek uygun esik = en ucuz).
-            for thr_cand in range(B - 1, B - 8, -1):
+        neighbor = getattr(args, "neighbor", "none")
+
+        def _pick_mkt(code: str, day: str, bk: int):
+            """Kilitli bucket marketi; yoksa komsu esige iner/cikar.
+
+            HIGH: alt esikler kesin kazanir (max >= kilitli >= esik).
+            RANGE --neighbor lower/upper (2026-08-18 kullanici: "peakden ilk
+            dusuk sicaklik aldigimizda bet acalim"): bucket marketi yoksa
+            en yakin alt/ust esige bet acilir.
+            """
+            m = market.get((code, day, bk))
+            if m is not None:
+                return m, bk
+            if is_high or neighbor == "lower":
+                rng = range(bk - 1, bk - 8, -1)
+            elif neighbor == "upper":
+                rng = range(bk + 1, bk + 8)
+            else:
+                return None, bk
+            for thr_cand in rng:
                 cand = market.get((code, day, thr_cand))
                 if cand is not None:
-                    m = cand
-                    B = thr_cand
-                    break
+                    return cand, thr_cand
+            return None, bk
+
+        m, B = _pick_mkt(code, day, B)
         if m is None:
             continue
         mid, tgt, outcome, mtype = m
@@ -1236,6 +1251,56 @@ def cmd_metar_peak_live(args) -> int:
                 "per": per,  # gas haric dolar basina net (kelly icin)
             }
         )
+        # 2026-08-18 kullanici: "sonraki yuksek olursa nasil olsa bunu kapar,
+        # yeni peak e acar" — neighbor modunda kilit bozulduysa bk aninda
+        # yeni bucket'a (veya komsusuna) TEKRAR bet acilir (zincir 1 adim).
+        if bk is not None and neighbor != "none" and not is_min and not is_high:
+            B2 = int(bk[1] + 0.5)
+            m2, _ = _pick_mkt(code, day, B2)
+            if m2 is not None:
+                mid2, tgt2, out2, _mt2 = m2
+                if tgt2 is not None and out2 is not None and tgt2 - bk[0] >= MIN_HOURS_BEFORE_CLOSE * 3600:
+                    seri2 = ask_series.get(mid2)
+                    if seri2:
+                        e2 = ask_at_or_after(seri2, bk[0])
+                        if e2 is not None and min_entry <= e2 < MAX_ENTRY:
+                            e2eff = e2 + slippage
+                            if e2eff < 1.0:
+                                bk2 = peak_break(rows, bk[1], bk[0])
+                                if bk2 is not None:
+                                    b2ask = ask_at_or_after(seri2, bk2[0])
+                                    if b2ask is not None and 0 < b2ask <= 1:
+                                        per2 = (b2ask - e2eff) / e2eff - FEE_RATE * (1.0 - b2ask)
+                                        won2 = b2ask > e2eff
+                                    else:
+                                        per2 = (
+                                            (1.0 / e2eff - 1.0 - FEE_RATE * (1.0 - e2eff))
+                                            if out2
+                                            else (-1.0 - FEE_RATE * (1.0 - e2eff))
+                                        )
+                                        won2 = out2
+                                else:
+                                    per2 = (
+                                        (1.0 / e2eff - 1.0 - FEE_RATE * (1.0 - e2eff))
+                                        if out2
+                                        else (-1.0 - FEE_RATE * (1.0 - e2eff))
+                                    )
+                                    won2 = out2
+                                bets.append(
+                                    {
+                                        "day": day,
+                                        "city": code_name.get(code, code),
+                                        "code": code,
+                                        "bucket": B2,
+                                        "peak": bk[1],
+                                        "entry": e2,
+                                        "entry_eff": e2eff,
+                                        "stake": stake,
+                                        "pnl": stake * per2 - GAS,
+                                        "won": won2,
+                                        "per": per2,
+                                    }
+                                )
 
     print("=== METAR-PEAK BACKTEST (sadece orderbook + METAR; forecast/bias YOK) ===")
     print(
@@ -2170,6 +2235,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default="range",
         choices=["range", "high"],
         help="range=tam bucket (varsayilan), high=or-above (max >= esik, kapatma yok)",
+    )
+    pl.add_argument(
+        "--neighbor",
+        default="none",
+        choices=["none", "lower", "upper"],
+        help="bucket marketi yoksa komsu esige bet (kilit bozulursa yeni peak'e aktar)",
     )
     pl.add_argument(
         "--min-lock-hour", type=int, default=6, help="min kilidi icin yerel saat esigi (dip gundogumu sonrasi)"
