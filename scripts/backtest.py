@@ -198,28 +198,44 @@ def cmd_gunluk(args) -> int:
             metar_peak_[(code, day)] = (float(pk_), lock_epoch)
 
     # tahminler: (code, day) -> model -> predicted_value (max)
-    # Bot (spread_placer.py) EN SON fetched_at batch'ini kullanir
-    # (func.max(fetched_at) per city+metric), sonra o batch'teki TUM modellerin
-    # ortalamasi. Eski batch gecmiste kalmis tahmini kullanmaz — backtest de
-    # aynisini yapar (ilk satir degil, en guncel fetch).
+    # GERCEKCI KAYNAK (2026-08-18 duzeltme): bot.db weather_forecasts yalnizca
+    # son ~5 gunun fetch'lerini tutar (retention); 05-13 Aug hedefli satirlar
+    # "14-Aug'da backfill edilmis" damgasiyla durur. O veriyi gunluk backtest'te
+    # kullanmak LOOK-AHEAD'di — bot o batch'i o gun goremezdi. Gercek gunluk
+    # fetch arsivi backtest.db'de (02-18 Aug, her gun ayri batch). Bot
+    # (spread_placer.py) karar aninda func.max(fetched_at) batch'ini kullanir;
+    # backtest de aynisini yapar AMA yalnizca kapanis ONCESI fetch edilmis
+    # batch'lerden (kapanis = target_date + 12h, look-ahead yok).
     fc: dict[tuple[str, str], dict[str, float]] = defaultdict(dict)
-    latest_fetch: dict[tuple[str, str], str] = {}
-    raw_fc: list[tuple[str, str, str, str, float]] = []
-    for code, tdate, src, f_at, pv in db.execute(
-        "SELECT city, target_date, source, fetched_at, predicted_value FROM weather_forecasts "
-        "WHERE predicted_value IS NOT NULL AND metric LIKE '%max%'"
-    ):
-        day = str(tdate)[:10]
-        if day not in days or not code or f_at is None:
-            continue
-        key = (code, day)
-        f_at_s = str(f_at)
-        if key not in latest_fetch or f_at_s > latest_fetch[key]:
-            latest_fetch[key] = f_at_s
-        raw_fc.append((code, day, src, f_at_s, float(pv)))
-    for code, day, src, f_at_s, pv in raw_fc:
-        if f_at_s == latest_fetch.get((code, day)):
-            fc[(code, day)].setdefault(src, pv)
+    if os.path.exists(WF_BACKTEST_DB):
+        fc_db = sqlite3.connect(WF_BACKTEST_DB, timeout=30)
+
+        def _settle_ts(d: str) -> float:
+            # market kapanisi ~ target_date(23:59:59) + 12h (PEAK_CLOSE_HOURS=12)
+            t = ts(f"{d} 23:59:59")
+            return (t + 12 * 3600) if t is not None else 0.0
+
+        usable: list[tuple[str, str, str, str, float]] = []
+        for code, tdate, src, f_at, pv in fc_db.execute(
+            "SELECT city, target_date, source, fetched_at, predicted_value FROM weather_forecasts "
+            "WHERE predicted_value IS NOT NULL AND metric LIKE '%max%'"
+        ):
+            day = str(tdate)[:10]
+            if day not in days or not code or f_at is None:
+                continue
+            t = ts(f_at)
+            if t is None or t > _settle_ts(day):
+                continue  # kapanis sonrasi fetch = look-ahead, kullanilamaz
+            usable.append((code, day, src, str(f_at), float(pv)))
+        latest_batch: dict[tuple[str, str], str] = {}
+        for code, day, src, f_at_s, pv in usable:
+            key = (code, day)
+            if key not in latest_batch or f_at_s > latest_batch[key]:
+                latest_batch[key] = f_at_s
+        for code, day, src, f_at_s, pv in usable:
+            if f_at_s == latest_batch.get((code, day)):
+                fc[(code, day)].setdefault(src, pv)
+        fc_db.close()
 
     # Botun marketi ilk ne zaman gorebilecegi (scan oncesi bet yok).
     first_seen: dict[str, float] = {}
@@ -280,6 +296,13 @@ def cmd_gunluk(args) -> int:
                 pass
     for k in price_series:
         price_series[k].sort(key=lambda x: x[0])
+
+    # GERCEK-FILL icin: botun markette GERCEKTEN doldurdugu entry'ler
+    # (ideal ilk-ask yerine gercek fill ile kiyaslama icin).
+    real_entries: dict[str, list[float]] = defaultdict(list)
+    for mid, entry, status in db.execute("SELECT market_id, entry_price, status FROM bets WHERE entry_price > 0"):
+        if status in ("won", "lost", "closed", "closed_early"):
+            real_entries[str(mid)].append(float(entry))
 
     db.close()
 
@@ -350,11 +373,13 @@ def cmd_gunluk(args) -> int:
                 "city": city,
                 "code": code,
                 "bucket": center,
+                "mid": mid,
                 "entry": entry,
                 "stake": stake,
                 "pnl": pnl,
                 "won": won,
                 "exit": exit_tip,
+                "exit_ask": pk_ask if exit_tip == "sold_peak" else None,
             }
         )
 
@@ -397,13 +422,52 @@ def cmd_gunluk(args) -> int:
                 "city": code_name.get(code, code),
                 "code": code,
                 "bucket": B,
+                "mid": mid,
                 "entry": entry,
                 "stake": stake,
                 "pnl": pnl,
                 "won": won,
                 "exit": "hold_settlement",
+                "exit_ask": None,
             }
         )
+
+    # ---- GERCEK-FILL duzeltmesi (2026-08-18) ----
+    # Sim ideal ilk-ask fiyatindan girer; botun ayni markette GERCEKTEN
+    # doldurdugu entry'ler varsa onlarla degistirilir. Gercek entry >= MAX_ENTRY
+    # ise o fiyattan bet acilamazdi -> bet DUSURULUR (ideal-ask artefakti).
+    def _real_pnl(b: dict, entry: float) -> float:
+        if b["exit"].startswith("hold_settlement"):
+            return (b["stake"] / entry - cost_of(b["stake"], entry)) if b["won"] else -cost_of(b["stake"], entry)
+        ea = b["exit_ask"]  # sold_peak
+        return (ea - entry) * (b["stake"] / entry) - b["stake"] * FEE_RATE * (1.0 - ea) - GAS
+
+    if args.real_entry:
+        n_real_fill = 0
+        n_dropped = 0
+        for b in spread + peak:
+            rs = real_entries.get(b["mid"])
+            if not rs:
+                continue
+            real_e = sum(rs) / len(rs)
+            # config sinirlari GERCEK fill'e de uygulanir: bugunku config
+            # (spread 0<e<0.95, peak MIN_ENTRY<=e<0.95) disinda kalan bir fill
+            # bugunku stratejiyle acilamazdi -> bet dusurulur. Aksi halde eski
+            # config'in longshot'lari (0.01) kazanan markette sahte PnL uretir.
+            if b in peak:
+                ok = PEAK_MIN_ENTRY <= real_e < MAX_ENTRY
+            else:
+                ok = 0 < real_e < MAX_ENTRY
+            if not ok:
+                b["drop"] = True
+                n_dropped += 1
+                continue
+            b["entry"] = real_e
+            b["pnl"] = _real_pnl(b, real_e)
+            b["fill"] = "real"
+            n_real_fill += 1
+        if args.detail or args.real_entry:
+            print(f"  [GERCEK-FILL] eslesen bet={n_real_fill}  dusurulen(gercek entry>=max)={n_dropped}")
 
     # ---- rapor ----
     print("=== GUN GUN BACKTEST (botun 2026-08-18 su anki modu, gercek orderbook + gercek cozum) ===")
@@ -418,7 +482,8 @@ def cmd_gunluk(args) -> int:
     print(f"  fee=%{FEE_RATE * 100:.0f} gas=${GAS:.2f}  |  gunler: {', '.join(days)}")
     print()
 
-    for leg_name, bets in (("SPREAD", spread), ("METAR-PEAK", peak)):
+    clean = {name: [b for b in bets if not b.get("drop")] for name, bets in (("SPREAD", spread), ("METAR-PEAK", peak))}
+    for leg_name, bets in clean.items():
         for day in days:
             db_ = [b for b in bets if b["day"] == day]
             if not db_:
@@ -456,7 +521,7 @@ def cmd_gunluk(args) -> int:
             )
         print()
 
-    comb = spread + peak
+    comb = [b for b in spread + peak if not b.get("drop")]
     pnl = sum(b["pnl"] for b in comb)
     staked = sum(b["stake"] for b in comb)
     won = sum(1 for b in comb if b["won"])
@@ -464,6 +529,15 @@ def cmd_gunluk(args) -> int:
         f"  [BIRLESIK    ] bet={len(comb):>3} kazandi={won:>3} winrate=%{won / len(comb) * 100:>5.1f} "
         f"yatirilan=${staked:>7.2f} NET=${pnl:>+8.2f} ROI=%{pnl / staked * 100:>+7.1f}"
     )
+    if args.real_entry:
+        n_ideal = sum(1 for b in comb if not b.get("fill") == "real")
+        n_real = sum(1 for b in comb if b.get("fill") == "real")
+        pnl_ideal = sum(b["pnl"] for b in comb if not b.get("fill") == "real")
+        pnl_real = sum(b["pnl"] for b in comb if b.get("fill") == "real")
+        print(
+            f"  [GERCEK-FILL ] ideal-entry bet={n_ideal:>3} NET=${pnl_ideal:>+8.2f}"
+            f"  | gercek-entry bet={n_real:>3} NET=${pnl_real:>+8.2f}"
+        )
 
     if spread:
         ex = defaultdict(int)
@@ -1593,6 +1667,11 @@ def _build_parser() -> argparse.ArgumentParser:
     g = sub.add_parser("gunluk", help="gun gun gercekci backtest (botun su anki modu)")
     g.add_argument("--days", default="2026-08-16,2026-08-17", help="virgullu target gunler")
     g.add_argument("--detail", action="store_true", help="bet-bazli detay tablosu")
+    g.add_argument(
+        "--real-entry",
+        action="store_true",
+        help="sim giris fiyati yerine botun ayni marketteki GERCEK fill'lerini kullan",
+    )
     g.set_defaults(func=lambda a: cmd_gunluk(a))
 
     o = sub.add_parser("orderbook", help="orderbook tabanli gercekci backtest (ham vs kalibre)")
