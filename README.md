@@ -188,7 +188,7 @@ python main.py bot
   DB yes_price CLOB canli ask ile %15'ten fazla sapiyorsa bet reddedilir
   (CLOB hataliysa bet asla engellenmez); saat dilimi `round(lon/15)` nominal yerine
   `scrapers.metar.city_utc_offset()` (zoneinfo + DST: China +8, Seoul +9, London BST +1).
-- **METAR vs Polymarket cozum uyusmasi (2026-08-18, `scripts/test_metar_vs_settlement.py`):**
+- **METAR vs Polymarket cozum uyusmasi (2026-08-18, `scripts/backtest.py metar_vs_settlement`):**
   Polymarket weather marketleri Weather Underground istasyon verisinden cozulur; WU zaten
   NOAA/NWS METAR verisini yayinlar (ayni istasyon, ayni deger). Test: round(METAR max) ==
   kazanan bucket uyusmasi **%74 (70/95)**; Open-Meteo Archive actual (bias hesabinin
@@ -211,7 +211,7 @@ python main.py bot
   betleri KAPATILMAZ (2026-08-12 kullanici karari — kazanan esikler bile satiliyordu).
 - Backtest (orderbook, gercek veri): radius0 + max_entry0.95 + bias-top15 = en karli
   (guvenli pencere 05-16 Agu +$28.67, %34.6 winrate; radius1+bias40 -$200.60 EN KOTU,
-  2026-08-17). `scripts/backtest_orderbook.py`.
+  2026-08-17). `scripts/backtest.py orderbook`.
 - **Kalibrasyon spread'te kapatilir** (CALIB +$28k < RAW +$37k) — edge-tabanli
   stratejide degerli oldugu icin calculator'da aktif kalir.
 

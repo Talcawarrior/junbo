@@ -1,5 +1,11 @@
 line-length = 120
 
+# backtest_archive/: 2026-08-18 konsolidasyonunda scripts/ altindan tasinan
+# 22 eski backtest script'i. Bilincli olarak lint kapsami disindadir (scripts/
+# gibi standalone/arsiv dosyalar; orijinalleri hic lint'lenmemisti). Guncel
+# backtest arac: scripts/backtest.py (subkomutlu, lint-temiz).
+exclude = ["backtest_archive"]
+
 [lint]
 select = ["F", "E", "W"]
 ignore = []

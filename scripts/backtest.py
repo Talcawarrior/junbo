@@ -1,0 +1,1643 @@
+#!/usr/bin/env python3
+"""TEK backtest komut dosyasi (2026-08-18 konsolidasyon).
+
+Onceden scripts/ altinda 20+ ayri backtest_*.py vardi. Aktif kullanilan 5
+backtest tek dosyada birlestirildi; tum eski varyantlar backtest_archive/
+altina tasindi. Arsiv envanteri ve gerekcesi: `backtest_archive/README.md`.
+
+Subkomutlar:
+  gunluk               - gun gun gercekci backtest (botun SU ANKI modu)
+  orderbook            - orderbook tabanli gercekci backtest (ham vs kalibre)
+  metar_peak           - METAR-peak gercekci backtest (actual vs clairvoyant)
+  metar_vs_settlement  - METAR bucket vs GERCEK Polymarket kapanisi dogrulama
+  walk_forward         - walk-forward (look-ahead'siz) model dogrulama
+
+Kullanim:
+  python scripts/backtest.py gunluk --days 2026-08-16,2026-08-17 [--detail]
+  python scripts/backtest.py orderbook [--spread 3] [--bias-top 15] [--fill first_ask]
+  python scripts/backtest.py metar_peak [--hours-before 6] [--stake 3.0]
+  python scripts/backtest.py metar_vs_settlement [--min-day 2026-08-13] [--max-day 2026-08-17]
+  python scripts/backtest.py walk_forward
+"""
+
+from __future__ import annotations
+
+import argparse
+import math
+import os
+import sqlite3
+import sys
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from utils.market_outcome import parse_resolved_outcome  # noqa: E402
+from utils.probability import normal_cdf, estimate_probability_empirical  # noqa: E402
+from scrapers.metar import city_utc_offset  # noqa: E402  (M3: gercek saat dilimi)
+
+BOT_DB = os.path.join(_REPO_ROOT, "data", "bot.db")
+OB_DB = os.path.join(_REPO_ROOT, "data", "orderbook.db")
+BP_DB = os.path.join(_REPO_ROOT, "data", "backtest_prices.db")
+
+# Tum gercekci backtestlerde ortak maliyet modeli (ayni degerler).
+FEE_RATE = 0.05
+GAS = 0.10
+MAX_ENTRY = 0.95
+
+
+def ts(s) -> float | None:
+    """DB zaman damgasini epoch'a cevir (basarisizsa None)."""
+    s = str(s).replace("T", " ").replace("+00:00", "").strip()
+    try:
+        return datetime.fromisoformat(s).timestamp()
+    except Exception:
+        return None
+
+
+# =====================================================================
+# 1) GUNLUK — botun su anki modu (spread radius=0 + METAR-peak) gun gun
+# =====================================================================
+# Kaynak: scripts/backtest_gunluk.py (merge edildi, tasindi -> backtest_archive/)
+
+SPREAD_STAKE = 2.0
+PEAK_STAKE = 3.0
+PEAK_MIN_ENTRY = 0.10
+BIAS_TOP = 15  # spread_max_cities (spread_placer.py)
+BIAS_TOP_PEAK = 40  # BIAS_TOP_CITIES (jobs/metar_peak.py)
+MIN_HOURS_BEFORE_CLOSE = 2.0  # jobs/metar_peak.py
+CLOSE_WINDOW_SEC = 6 * 3600  # peak zamanina en yakin ask icin arama penceresi
+
+
+def ask_at_or_after(series, t, window_sec=CLOSE_WINDOW_SEC) -> float | None:
+    """t zamanindan itibaren, window icindeki ilk ask (bot anlik girer)."""
+    for s, a in series:
+        if s < t:
+            continue
+        if s - t > window_sec:
+            break
+        return a
+    return None
+
+
+def first_ask_below(series, max_entry) -> float | None:
+    """Botun ilk giris ani: fiyat < max_entry oldugu ilk snapshot ask'i."""
+    for _t, a in series:
+        if 0 < a < max_entry:
+            return a
+    return None
+
+
+def peak_lock(rows: list[tuple[float, float]], utc_off: float, min_hour: int = 13) -> tuple[float | None, float | None]:
+    """KILITLI METAR peak + kilitlenme epoch'u — scrapers/metar.py detect_peak
+    ile BIREBIRE ayni kural: yerel saat >= 13 olduktan sonra cummax'in ardindan
+    2 ardısık dusus -> peak teyit. (peak_temp, lock_epoch) ya da (None, None).
+    """
+    if len(rows) < 3:
+        return (None, None)
+    cummax = rows[0][1]
+    drop_count = 0
+    for epoch, cur in rows[1:]:
+        local_dt = datetime.fromtimestamp(epoch + utc_off * 3600, tz=timezone.utc)
+        if local_dt.hour < min_hour:
+            cummax = max(cummax, cur)
+            drop_count = 0
+            continue
+        if cur > cummax:
+            cummax = cur
+            drop_count = 0
+        elif cur < cummax:
+            drop_count += 1
+            if drop_count >= 2:
+                return (cummax, epoch)
+        else:
+            drop_count = 0
+    return (None, None)
+
+
+def cost_of(stake: float, entry: float) -> float:
+    fee = stake * FEE_RATE * (1.0 - entry)
+    return stake + fee + GAS
+
+
+def cmd_gunluk(args) -> int:
+    days = [d.strip() for d in args.days.split(",") if d.strip()]
+
+    db = sqlite3.connect(BOT_DB, timeout=30)
+    db.execute("PRAGMA busy_timeout=30000")
+
+    # city_code -> city
+    code_name: dict[str, str] = {}
+    for c, code in db.execute(
+        "SELECT DISTINCT city, city_code FROM weather_markets WHERE city_code IS NOT NULL AND city_code != ''"
+    ):
+        if code and c:
+            code_name.setdefault(code, c)
+
+    # bias-top sehirler (en az sapan |bias|, METAR-aligned). SPREAD bias-top
+    # 15 (spread_max_cities), METAR-PEAK bias-top 40 (BIAS_TOP_CITIES).
+    bs, bc = {}, {}
+    for code, bias in db.execute("SELECT city_code, bias FROM historical_calibrations WHERE bias IS NOT NULL"):
+        cn = code_name.get(code)
+        if not cn:
+            continue
+        bs[cn] = bs.get(cn, 0) + abs(float(bias))
+        bc[cn] = bc.get(cn, 0) + 1
+    cb = {c: bs[c] / bc[c] for c in bs if bc[c] > 0}
+    ordered = [c for c, _ in sorted(cb.items(), key=lambda kv: kv[1])]
+    keep = {c for c in ordered[:BIAS_TOP]}
+    keep_peak = {c for c in ordered[:BIAS_TOP_PEAK]}
+
+    # market: (code, day, thr) -> (mid, target_ts, outcome, market_type)
+    # SADECE temperature_max (spread + metar-peak max bucket'ina bet acar);
+    # min marketleri ayni threshold'ta eslesip yanlis bet uretmesin diye filtrelenir.
+    market: dict[tuple[str, str, float], tuple[str, float | None, bool | None, str]] = {}
+    for r in db.execute(
+        "SELECT id, city_code, threshold, target_date, raw_data, market_type FROM weather_markets "
+        "WHERE threshold IS NOT NULL AND target_date IS NOT NULL AND raw_data IS NOT NULL "
+        "AND metric = 'temperature_max'"
+    ):
+        code, thr, day = r[1], r[2], str(r[3])[:10]
+        if thr is None or not code or day not in days:
+            continue
+        o = parse_resolved_outcome(r[4])
+        t = ts(r[3])
+        market[(code, day, float(thr))] = (str(r[0]), t, o, r[5])
+
+    # METAR KILITLI peak (look-ahead YOK): bot final max'i bilmez, `detect_peak`
+    # (yerel saat >= 13 + 2 ardısık dusus) kilitlediginde girer. Final max ile
+    # giris yapmak gecen gunun sonucunu "bilirdi" — yanlis yuksek winrate uretir.
+    lon: dict[str, float] = {}
+    for code, lg in db.execute(
+        "SELECT DISTINCT city_code, longitude FROM weather_markets "
+        "WHERE city_code IS NOT NULL AND longitude IS NOT NULL"
+    ):
+        try:
+            lon.setdefault(code, float(lg))
+        except (TypeError, ValueError):
+            pass
+    day_rows: dict[tuple[str, str], list[tuple[float, float]]] = defaultdict(list)
+    for code, tmax, obs in db.execute(
+        "SELECT city_code, temp_c, obs_time FROM metar_observations WHERE temp_c IS NOT NULL AND obs_time IS NOT NULL"
+    ):
+        day = str(obs)[:10]
+        t = ts(obs)
+        if code and day in days and t is not None:
+            day_rows[(code, day)].append((t, float(tmax)))
+    metar_peak_: dict[tuple[str, str], tuple[float, float]] = {}
+    for (code, day), rows in day_rows.items():
+        rows.sort(key=lambda x: x[0])
+        # 2026-08-18 audit fix (M3): gercek saat dilimi (zoneinfo + DST) —
+        # round(lon/15) China/Seoul/London icin 1 saat yanlis veriyordu.
+        utc_off = city_utc_offset(code, day, lon.get(code))
+        pk_, lock_epoch = peak_lock(rows, utc_off)
+        if pk_ is not None and lock_epoch is not None:
+            metar_peak_[(code, day)] = (float(pk_), lock_epoch)
+
+    # tahminler: (code, day) -> model -> predicted_value (max)
+    # Bot (spread_placer.py) EN SON fetched_at batch'ini kullanir
+    # (func.max(fetched_at) per city+metric), sonra o batch'teki TUM modellerin
+    # ortalamasi. Eski batch gecmiste kalmis tahmini kullanmaz — backtest de
+    # aynisini yapar (ilk satir degil, en guncel fetch).
+    fc: dict[tuple[str, str], dict[str, float]] = defaultdict(dict)
+    latest_fetch: dict[tuple[str, str], str] = {}
+    raw_fc: list[tuple[str, str, str, str, float]] = []
+    for code, tdate, src, f_at, pv in db.execute(
+        "SELECT city, target_date, source, fetched_at, predicted_value FROM weather_forecasts "
+        "WHERE predicted_value IS NOT NULL AND metric LIKE '%max%'"
+    ):
+        day = str(tdate)[:10]
+        if day not in days or not code or f_at is None:
+            continue
+        key = (code, day)
+        f_at_s = str(f_at)
+        if key not in latest_fetch or f_at_s > latest_fetch[key]:
+            latest_fetch[key] = f_at_s
+        raw_fc.append((code, day, src, f_at_s, float(pv)))
+    for code, day, src, f_at_s, pv in raw_fc:
+        if f_at_s == latest_fetch.get((code, day)):
+            fc[(code, day)].setdefault(src, pv)
+
+    # Botun marketi ilk ne zaman gorebilecegi (scan oncesi bet yok).
+    first_seen: dict[str, float] = {}
+    for mid, fs in db.execute("SELECT id, first_seen FROM weather_markets WHERE first_seen IS NOT NULL"):
+        t = ts(fs)
+        if t is not None:
+            first_seen[str(mid)] = t
+
+    # Gercek fiyat serisi: CLOB prices-history (Polymarket'in kendi islem/quote
+    # gecmisi, en yetkili kaynak) + orderbook best_ask (botun 5dk okumalari).
+    # market_snapshots.yes_price KULLANILMAZ: market fonde olmadan once botun
+    # yes_price okumasi 0'a yakin artefakt uretiyor (Seoul 27C: snapshot 0.015,
+    # gercek CLOB fiyati 0.19) — boyle bir fiyattan emir dolmaz, giris sahte
+    # WIN/PnL uretir. Giris fiyati her zaman GERCEK piyasa fiyatidir.
+    price_series: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    ob = sqlite3.connect(OB_DB, timeout=30)
+    ob.execute("PRAGMA busy_timeout=30000")
+    try:
+        ob_rows = list(
+            ob.execute("SELECT market_id, best_ask, snapshot_time FROM orderbook_snapshots WHERE best_ask IS NOT NULL")
+        )
+    except sqlite3.OperationalError:
+        import shutil
+        import tempfile
+
+        snap = os.path.join(tempfile.gettempdir(), "ob_gunluk.db")
+        shutil.copy2(OB_DB, snap)
+        ob.close()
+        ob = sqlite3.connect(snap)
+        ob_rows = list(
+            ob.execute("SELECT market_id, best_ask, snapshot_time FROM orderbook_snapshots WHERE best_ask IS NOT NULL")
+        )
+    for mid, ask, st in ob_rows:
+        t = ts(st)
+        if t is None:
+            continue
+        try:
+            a = float(ask)
+            if 0 < a <= 1:
+                price_series[str(mid)].append((t, a))
+        except (TypeError, ValueError):
+            pass
+    ob.close()
+
+    # CLOB prices-history (backfill_price_history.py): marketin TUM fiyat
+    # gecmisi — ANA kaynak. orderbook onu tamamlar (CLOB bos ama bot okumus).
+    if os.path.exists(BP_DB):
+        bp = sqlite3.connect(BP_DB, timeout=30)
+        try:
+            bp_rows = list(bp.execute("SELECT market_id, ts, price FROM price_history WHERE price > 0 AND price <= 1"))
+        except sqlite3.OperationalError:
+            bp_rows = []
+        bp.close()
+        for mid, t, p in bp_rows:
+            try:
+                price_series[str(mid)].append((float(t), float(p)))
+            except (TypeError, ValueError):
+                pass
+    for k in price_series:
+        price_series[k].sort(key=lambda x: x[0])
+
+    db.close()
+
+    # ---- simülasyon ----
+    spread: list[dict] = []
+    peak: list[dict] = []
+
+    for (code, day), models in fc.items():
+        city = code_name.get(code)
+        if not city or city not in keep or len(models) < 2:
+            continue
+        vals = list(models.values())
+        # 2026-08-18 audit fix (C2): banker's round() yerine half-up (bot ile ayni)
+        center = int(sum(vals) / len(vals) + 0.5)
+        m = market.get((code, day, float(center)))
+        if m is None:
+            continue
+        mid, tgt, outcome, _ = m
+        seri = price_series.get(mid)
+        if not seri:
+            continue
+        # bot marketi first_seen'den once goremez -> o oncesi fiyat noktalari
+        # giris icin kullanilamaz (market acilmis ama bot kesfetmemis).
+        fs = first_seen.get(mid)
+        if fs is not None:
+            seri = [pt for pt in seri if pt[0] >= fs]
+        if not seri:
+            continue
+        # veri penceresi: ilk snapshot settlement sonrasi ise canli bet penceresi
+        # gozlemlenememis -> giris fiyati yaniltici (0.001 cozum-sonrasi artefakti)
+        if tgt is None or seri[0][0] >= tgt:
+            continue
+        entry = first_ask_below(seri, MAX_ENTRY)
+        if entry is None:
+            continue
+        stake = SPREAD_STAKE
+        cost = cost_of(stake, entry)
+        shares = stake / entry
+
+        pk = metar_peak_.get((code, day))
+        exit_tip = "hold_settlement"
+        pnl = 0.0
+        won = None
+        if pk is not None:
+            p_bucket, pk_t = pk
+            P = int(p_bucket + 0.5)  # audit C2: half-up
+            if P != center:
+                # yanlis bucket: peak aninda canli fiyattan satilir
+                pk_ask = ask_at_or_after(seri, pk_t) if pk_t else None
+                if pk_ask is not None and 0 < pk_ask <= 1:
+                    exit_tip = "sold_peak"
+                    # kapanis maliyeti: satis tarafinda fee = stake*0.05*(1-ask) + gas
+                    pnl = (pk_ask - entry) * shares - stake * FEE_RATE * (1.0 - pk_ask) - GAS
+                    won = pk_ask > entry
+                else:
+                    exit_tip = "hold_settlement_nopk_ask"
+        if exit_tip == "hold_settlement" or exit_tip == "hold_settlement_nopk_ask":
+            if outcome is None:
+                continue  # cozum yok -> bet sonuclanamaz
+            exit_tip = "hold_settlement"
+            won = outcome
+            pnl = (stake / entry - cost) if outcome else -cost
+        if won is None:
+            continue
+        spread.append(
+            {
+                "day": day,
+                "city": city,
+                "code": code,
+                "bucket": center,
+                "entry": entry,
+                "stake": stake,
+                "pnl": pnl,
+                "won": won,
+                "exit": exit_tip,
+            }
+        )
+
+    # METAR-PEAK legi: bias-top 40, KILITLI peak bucket'i, SADECE RANGE
+    for (code, day), (peak_temp, lock_epoch) in metar_peak_.items():
+        if day not in days:
+            continue
+        city = code_name.get(code)
+        if not city or city not in keep_peak:
+            continue
+        B = int(peak_temp + 0.5)  # audit C2: half-up
+        m = market.get((code, day, float(B)))
+        # 2026-08-18 kullanici karari: peak bet'i SADECE RANGE marketlerine
+        if m is None or m[3] != "RANGE":
+            continue
+        mid, tgt, outcome, _ = m
+        # MIN_HOURS_BEFORE_CLOSE=2: kapanisa <2sa kala peak kilitlenirse bet yok
+        if tgt is None or tgt - lock_epoch < MIN_HOURS_BEFORE_CLOSE * 3600:
+            continue
+        seri = price_series.get(mid)
+        if not seri:
+            continue
+        fs = first_seen.get(mid)
+        if fs is not None:
+            seri = [pt for pt in seri if pt[0] >= fs]
+        if not seri:
+            continue
+        entry = ask_at_or_after(seri, lock_epoch)
+        if entry is None or not (PEAK_MIN_ENTRY <= entry < MAX_ENTRY):
+            continue
+        if outcome is None:
+            continue
+        stake = PEAK_STAKE
+        cost = cost_of(stake, entry)
+        won = outcome
+        pnl = (stake / entry - cost) if won else -cost
+        peak.append(
+            {
+                "day": day,
+                "city": code_name.get(code, code),
+                "code": code,
+                "bucket": B,
+                "entry": entry,
+                "stake": stake,
+                "pnl": pnl,
+                "won": won,
+                "exit": "hold_settlement",
+            }
+        )
+
+    # ---- rapor ----
+    print("=== GUN GUN BACKTEST (botun 2026-08-18 su anki modu, gercek orderbook + gercek cozum) ===")
+    print(
+        f"  SPREAD: bias-top {BIAS_TOP}, radius=0 (tek esik), stake=${SPREAD_STAKE:.0f}, "
+        f"max_entry={MAX_ENTRY}, fair-filter YOK; kapanis: METAR-peak yanlis bucket satisi + settlement"
+    )
+    print(
+        f"  METAR-PEAK: bias-top {BIAS_TOP_PEAK}, stake=${PEAK_STAKE:.0f}, MIN_ENTRY={PEAK_MIN_ENTRY}, "
+        f"bucket=round(KILITLI METAR peak), kapanisa<{MIN_HOURS_BEFORE_CLOSE:.0f}sa YOK"
+    )
+    print(f"  fee=%{FEE_RATE * 100:.0f} gas=${GAS:.2f}  |  gunler: {', '.join(days)}")
+    print()
+
+    for leg_name, bets in (("SPREAD", spread), ("METAR-PEAK", peak)):
+        for day in days:
+            db_ = [b for b in bets if b["day"] == day]
+            if not db_:
+                print(f"  [{leg_name:<10}] {day}: bet yok")
+                continue
+            n = len(db_)
+            won = sum(1 for b in db_ if b["won"])
+            pnl = sum(b["pnl"] for b in db_)
+            staked = sum(b["stake"] for b in db_)
+            fees = sum(b["stake"] * FEE_RATE * (1.0 - b["entry"]) for b in db_) + n * GAS
+            print(
+                f"  [{leg_name:<10}] {day}: bet={n:>3} kazandi={won:>3} "
+                f"winrate=%{won / n * 100:>5.1f}  yatirilan=${staked:>7.2f}+fees ${fees:>6.2f} "
+                f"NET=${pnl:>+8.2f} ROI=%{pnl / staked * 100:>+7.1f}"
+            )
+        n_all = len(bets)
+        if n_all:
+            won = sum(1 for b in bets if b["won"])
+            pnl = sum(b["pnl"] for b in bets)
+            staked = sum(b["stake"] for b in bets)
+            print(
+                f"  [{leg_name:<10}] TOPLAM:  bet={n_all:>3} kazandi={won:>3} "
+                f"winrate=%{won / n_all * 100:>5.1f}  yatirilan=${staked:>7.2f} "
+                f"NET=${pnl:>+8.2f} ROI=%{pnl / staked * 100:>+7.1f}"
+            )
+        print()
+
+    if args.detail:
+        print("--- bet detay ---")
+        for b in sorted(spread + peak, key=lambda x: (x["day"], x["city"])):
+            print(
+                f"  {b['day']} {b['city']:<14} {'S' if b in spread else 'P'} "
+                f"bucket={b['bucket']:<3} entry={b['entry']:.3f} "
+                f"{'WIN' if b['won'] else 'LOSS':<4} pnl=${b['pnl']:+.2f} exit={b['exit']}"
+            )
+        print()
+
+    comb = spread + peak
+    pnl = sum(b["pnl"] for b in comb)
+    staked = sum(b["stake"] for b in comb)
+    won = sum(1 for b in comb if b["won"])
+    print(
+        f"  [BIRLESIK    ] bet={len(comb):>3} kazandi={won:>3} winrate=%{won / len(comb) * 100:>5.1f} "
+        f"yatirilan=${staked:>7.2f} NET=${pnl:>+8.2f} ROI=%{pnl / staked * 100:>+7.1f}"
+    )
+
+    if spread:
+        ex = defaultdict(int)
+        for b in spread:
+            ex[b["exit"]] += 1
+        print("  spread kapanis dagilimi:", dict(ex))
+    return 0
+
+
+# =====================================================================
+# 2) ORDERBOOK — orderbook best_ask ile ham vs kalibreli fair-value
+# =====================================================================
+# Kaynak: scripts/backtest_orderbook.py (merge edildi, tasindi -> backtest_archive/)
+# C1 bulgusu: 'ilk snapshot fiyati' gercek fill'den %103 sapiyor. Bu modul
+# orderbook.db'deki GERCEK best_ask serisini kullanir: bet acilis fiyati =
+# marketin en erken goruldugu andaki best_ask (veya median/vwap), settlement =
+# GERCEK Polymarket outcome, maliyet = stake + fee + gas.
+
+OB_STAKE = 2.0
+
+
+def cmd_orderbook(args) -> int:
+    db = sqlite3.connect(BOT_DB)
+    cur = db.cursor()
+
+    # city_code -> city
+    code_name = {}
+    for c, code in cur.execute(
+        "SELECT DISTINCT city, city_code FROM weather_markets WHERE city_code IS NOT NULL AND city_code != ''"
+    ):
+        if code and c:
+            code_name.setdefault(code, c)
+
+    # bias-top N (en az sapan)
+    bs, bc = {}, {}
+    for code, bias in cur.execute("SELECT city_code, bias FROM historical_calibrations WHERE bias IS NOT NULL"):
+        cn = code_name.get(code)
+        if not cn:
+            continue
+        bs[cn] = bs.get(cn, 0) + abs(float(bias))
+        bc[cn] = bc.get(cn, 0) + 1
+    cb = {c: bs[c] / bc[c] for c in bs if bc[c] > 0}
+    keep = {c for c, _ in sorted(cb.items(), key=lambda kv: kv[1])[: args.bias_top]}
+
+    # market -> (city, thr, target_date, metric)
+    markets = {}
+    for r in cur.execute(
+        "SELECT id, city, city_code, threshold, target_date, metric, raw_data, status "
+        "FROM weather_markets WHERE threshold IS NOT NULL AND target_date IS NOT NULL"
+    ):
+        mid, city, code, thr, tdate, metric, raw, status = r
+        if "max" not in (metric or ""):
+            continue
+        markets[str(mid)] = {
+            "city": city,
+            "code": code,
+            "thr": float(thr),
+            "day": str(tdate)[:10],
+            "metric": metric,
+            "raw": raw,
+            "status": status,
+        }
+
+    # GERCEK outcome: market -> YES kazandi mi
+    outcome = {}
+    for mid, m in markets.items():
+        o = parse_resolved_outcome(m["raw"]) if m["raw"] else None
+        if o is not None:
+            outcome[mid] = o
+
+    # orderbook ask serisi: market -> [(t, best_ask)]
+    ob = sqlite3.connect(OB_DB)
+    oc = ob.cursor()
+    ask_series = defaultdict(list)
+    for mid, ask, st in oc.execute(
+        "SELECT market_id, best_ask, snapshot_time FROM orderbook_snapshots WHERE best_ask IS NOT NULL"
+    ):
+        t = ts(st)
+        if t is None:
+            continue
+        try:
+            a = float(ask)
+            if 0 < a <= 1:
+                ask_series[str(mid)].append((t, a))
+        except (TypeError, ValueError):
+            pass
+    ob.close()
+    for k in ask_series:
+        ask_series[k].sort(key=lambda x: x[0])
+
+    # tahminler: (code, day) -> {model: predicted_value} (son cekim)
+    fc = {}
+    for code, tdate, src, pv in cur.execute(
+        "SELECT city, target_date, source, predicted_value FROM weather_forecasts "
+        "WHERE predicted_value IS NOT NULL AND metric LIKE '%max%'"
+    ):
+        day = str(tdate)[:10]
+        if day < args.min_date:
+            continue
+        fc.setdefault((code, day), {})
+        fc[(code, day)].setdefault(src, float(pv))
+
+    # C2/C3 seffaflik: eksik veri kontrolu (sessiz bos sonuc YERINE acik rapor)
+    n_ob = len(ask_series)
+    n_markets = len(markets)
+    n_fc = len(fc)
+    n_out = len(outcome)
+    n_overlap = sum(1 for mid in markets if mid in ask_series and mid in outcome)
+    print(
+        f"[veri kontrol] orderbook_market={n_ob}, eslesen_market={n_markets}, "
+        f"forecast_sehir_gun={n_fc}, cozumlenmis_market={n_out}, "
+        f"orderbook+outcome ortusme={n_overlap}"
+    )
+    if n_overlap == 0:
+        print("HATA: orderbook ile outcome arasinda eslesme YOK — backtest gecersiz.")
+        return 1
+    if n_overlap < 100:
+        print(f"UYARI: cok az eslesme ({n_overlap}) — sonuc guvenilmez olabilir.")
+
+    # kalibrasyon: (code, model) -> bias (tum gecmis, walk-forward yerine statik-onceki)
+    cal = defaultdict(dict)
+    for code, model, b in cur.execute(
+        "SELECT city_code, model, AVG(bias) FROM historical_calibrations "
+        "WHERE bias IS NOT NULL GROUP BY city_code, model"
+    ):
+        cal[code][model] = float(b)
+    db.close()
+
+    # ---------------- simulasyon ----------------
+    def run(mode):
+        pnl = 0.0
+        total = won = 0
+        peak = 0.0
+        max_dd = 0.0
+        for (code, day), models in fc.items():
+            city = code_name.get(code)
+            if not city or city not in keep or len(models) < 2:
+                continue
+            vals = list(models.values())
+            mean = sum(vals) / len(vals)
+            std = (max(vals) - min(vals)) / 2.0
+            center = round(mean)
+            for thr in range(center - args.spread, center + args.spread + 1):
+                # bu esigin marketini bul (orderbook'ta gorulen)
+                found = None
+                for mid, m in markets.items():
+                    if (
+                        m["city"] == city
+                        and m["thr"] == float(thr)
+                        and m["day"] == day
+                        and mid in ask_series
+                        and mid in outcome
+                    ):
+                        found = mid
+                        break
+                if found is None:
+                    continue
+                o = outcome[found]
+                # acilis fiyati: first_ask / median_ask / vwap (ilk 20 snapshot)
+                seri = ask_series[found]
+                if args.fill == "first_ask":
+                    entry = seri[0][1]
+                elif args.fill == "median_ask":
+                    asks = [a for _, a in seri[:20]]
+                    entry = sorted(asks)[len(asks) // 2]
+                else:  # vwap: zaman agirlikli ortalama (ilk 20 snapshot)
+                    pts = seri[:20]
+                    wsum = 0.0
+                    vsum = 0.0
+                    for i, (t, a) in enumerate(pts):
+                        w = 1.0 if i == 0 else (t - pts[i - 1][0])
+                        vsum += a * w
+                        wsum += w
+                    entry = vsum / wsum if wsum > 0 else pts[0][1]
+                if not (0 < entry < args.max_entry):
+                    continue
+                # fair value (kalibrasyonlu veya ham)
+                if mode == "ham":
+                    fmean = mean
+                else:
+                    kvals = [p - cal.get(code, {}).get(m, 0.0) for m, p in models.items()]
+                    fmean = sum(kvals) / len(kvals)
+                tsd = max(math.sqrt(std**2 + 1.0), 1.0)
+                if args.fair == "empirical":
+                    fair = estimate_probability_empirical(fmean, float(thr), "HIGH", "temperature_max", lag_hours=48)
+                else:
+                    fair = max(0.01, min(0.99, 1.0 - normal_cdf((thr - fmean) / tsd)))
+                if entry >= fair - args.gap:
+                    continue
+                fee = OB_STAKE * FEE_RATE * (1.0 - entry)
+                cost = OB_STAKE + fee + GAS
+                gain = (OB_STAKE / entry) - cost if o else -cost
+                pnl += gain
+                total += 1
+                if o:
+                    won += 1
+                if pnl > peak:
+                    peak = pnl
+                dd = peak - pnl
+                if dd > max_dd:
+                    max_dd = dd
+        return pnl, total, won, max_dd
+
+    # C2: seffaflik — veri donemi ve kapsam
+    db2 = sqlite3.connect(OB_DB)
+    ob_range = db2.execute("SELECT MIN(snapshot_time), MAX(snapshot_time) FROM orderbook_snapshots").fetchone()
+    ob_markets = db2.execute("SELECT COUNT(DISTINCT market_id) FROM orderbook_snapshots").fetchone()[0]
+    db2.close()
+    resolved = sum(1 for v in outcome.values() if v is not None)
+    unresolved = len(markets) - resolved
+    print(
+        f"=== ORDERBOOK BACKTEST (fill={args.fill}, spread={args.spread}, "
+        f"max_entry={args.max_entry}, gap={args.gap}, bias-top={args.bias_top}) ==="
+    )
+    print(
+        f"  veri donemi: {str(ob_range[0])[:16]} .. {str(ob_range[1])[:16]} | "
+        f"orderbook market={ob_markets}, eslesen market={len(markets)}, "
+        f"cozumlenmis={resolved}, cozumlenmemis={unresolved}"
+    )
+    print(f"  fill varsayimi: {args.fill} (first_ask=market ilk goruldugu an, median_ask=ilk 20 snapshot medyani)")
+    print(f"  fee={FEE_RATE} gas=${GAS} stake=${OB_STAKE}")
+    for mode in ["ham", "kal"]:
+        pnl, n, w, mdd = run(mode)
+        print(
+            f"  {mode.upper():<6} bet={n:>4} won={w:>3} winrate={w / max(n, 1) * 100:>5.1f}% "
+            f"PnL=${pnl:>9.2f} max_drawdown=${mdd:>8.2f}"
+        )
+    return 0
+
+
+# =====================================================================
+# 3) METAR-PEAK GERCEKCI — tahmin=round(actual) vs clairvoyant (ust sinir)
+# =====================================================================
+# Kaynak: scripts/backtest_metar_peak_realistic.py (merge edildi, tasindi -> backtest_archive/)
+# Neden: eski backtest_metar_peak.py 'winrate %100 / ROI %286' veriyordu —
+# kazanan bucket'i GERCEK cozumden aliyordu (clairvoyant). Bu modul
+# tahmini CANLI METAR/actual'dan yapar; cozum Polymarket gercek cozumudur.
+
+PEAK_CLOSE_HOURS = 12
+
+
+def _load_orderbook(ob_path: str):
+    """market_id -> [(t, ask)] - kilitliyse kopya al (bot calisirken guvenli)."""
+    try:
+        db = sqlite3.connect(ob_path, timeout=20)
+        db.execute("PRAGMA busy_timeout=20000")
+        series = defaultdict(list)
+        for mid, ask, st in db.execute(
+            "SELECT market_id, best_ask, snapshot_time FROM orderbook_snapshots WHERE best_ask IS NOT NULL"
+        ):
+            t = ts(st)
+            if t is None:
+                continue
+            try:
+                a = float(ask)
+                if 0 < a <= 1:
+                    series[str(mid)].append((t, a))
+            except (TypeError, ValueError):
+                pass
+        db.close()
+        for k in series:
+            series[k].sort(key=lambda x: x[0])
+        return series
+    except sqlite3.OperationalError as exc:
+        print(f"[ob] canli okunamadi ({exc}); kopya deneniyor...")
+        import shutil
+        import tempfile
+
+        snap = os.path.join(tempfile.gettempdir(), "ob_snap.db")
+        shutil.copy2(ob_path, snap)
+        j = ob_path + "-journal"
+        if os.path.exists(j):
+            shutil.copy2(j, snap + "-journal")
+        return _load_orderbook(snap)
+
+
+def price_at(series, bet_ts, window_sec=6 * 3600):
+    """bet_ts oncesi, window icindeki son ask. Yoksa None."""
+    best = None
+    for t, a in series:
+        if t > bet_ts:
+            break
+        if bet_ts - t <= window_sec:
+            best = a
+    return best
+
+
+def cmd_metar_peak(args) -> int:
+    stake = args.stake
+
+    ask_series = _load_orderbook(OB_DB)
+
+    db = sqlite3.connect(BOT_DB, timeout=30)
+    db.execute("PRAGMA busy_timeout=30000")
+
+    code_name = {}
+    for c, code in db.execute(
+        "SELECT DISTINCT city, city_code FROM weather_markets WHERE city_code IS NOT NULL AND city_code != ''"
+    ):
+        if code and c:
+            code_name.setdefault(code, c)
+
+    # (code, day, thr) -> (mid, target_ts, outcome)
+    market = {}
+    for r in db.execute(
+        "SELECT id, city_code, threshold, target_date, raw_data FROM weather_markets "
+        "WHERE threshold IS NOT NULL AND target_date IS NOT NULL AND raw_data IS NOT NULL"
+    ):
+        code, thr, day = r[1], float(r[2]) if r[2] is not None else None, str(r[3])[:10]
+        if thr is None or not code:
+            continue
+        if not (args.min_day <= day <= args.max_day):
+            continue
+        o = parse_resolved_outcome(r[4])
+        t = ts(r[3])
+        market[(code, day, int(thr))] = (str(r[0]), t, o)
+
+    # Gercek cozumden kazanan bucket: (code, day) -> thr (YES cozulen en yuksek esik)
+    winner = {}
+    for (code, day, thr), (_, _, o) in market.items():
+        if o is True:
+            cur = winner.get((code, day))
+            if cur is None or thr > cur:
+                winner[(code, day)] = thr
+
+    # Gercek max sicaklik (Open-Meteo archive / historical_calibrations)
+    actuals = {}
+    for r in db.execute(
+        "SELECT city_code, date, actual_value FROM historical_calibrations "
+        "WHERE metric='temperature_max' AND actual_value IS NOT NULL"
+    ):
+        code, day = r[0], str(r[1])[:10]
+        if code:
+            actuals.setdefault((code, day), float(r[2]))
+    db.close()
+
+    # AYNI evrende iki mod:
+    #   "actual" -> bucket = round(actual)   (METAR detektoru proxy'si, ~%30 dogru)
+    #   "clair"  -> bucket = gercek cozum    (look-ahead UST SINIR, %100 dogru)
+    actual_bet = []
+    clair_bet = []
+    for (code, day), pred in actuals.items():
+        if winner.get((code, day)) is None:
+            continue
+        w = winner[(code, day)]
+
+        for label, thr in (("actual", int(round(pred))), ("clair", w)):
+            m = market.get((code, day, thr))
+            if m is None:
+                continue
+            mid, tgt, o = m
+            if tgt is None:
+                continue
+            bet_ts = tgt + (PEAK_CLOSE_HOURS - args.hours_before) * 3600
+            series = ask_series.get(mid)
+            entry = price_at(series, bet_ts) if series else None
+            if entry is None or not (0.01 <= entry < MAX_ENTRY):
+                continue
+            fee = stake * FEE_RATE * (1.0 - entry)
+            cost = stake + fee + GAS
+            win = thr == w
+            gain = (stake / entry - cost) if win else -cost
+            bucket = (code, day)
+            if label == "actual":
+                actual_bet.append((bucket, entry, win, gain))
+            else:
+                clair_bet.append((bucket, entry, win, gain))
+
+    def summarize(bets):
+        n = len(bets)
+        wins = sum(1 for b in bets if b[2])
+        pnl = sum(b[3] for b in bets)
+        return n, wins, pnl
+
+    def print_mode(name, bets):
+        n, wins, pnl = summarize(bets)
+        stk = n * stake
+        print(
+            f"  [{name}] bet={n}, winrate=%{wins / max(n, 1) * 100:.1f}, "
+            f"NET ${pnl:+.2f}, ROI %{pnl / max(stk, 1) * 100:.1f}, ort ${pnl / max(n, 1):+.2f}/bet"
+        )
+        return pnl
+
+    print("=== METAR-PEAK GERCEKCI backtest (ayni evren, iki senaryo) ===")
+    print(f"  kapanisa {args.hours_before} saat kala, stake=${stake:g}, kandidat (code,day)={len(actuals)}")
+    pnl_actual = print_mode("tahmin=round(actual) (~%30 dogru, METAR proxy'si)", actual_bet)
+    pnl_clair = print_mode("clairvoyant   (cozumden %100 dogru, UST SINIR)", clair_bet)
+
+    # Gercek detektor ~%71: p*(clair) + (1-p)*(actual) yaklasimi
+    p = 0.71
+    blend = p * pnl_clair + (1 - p) * pnl_actual
+    print(
+        f"  GERCEKCI KARISIM (detektor %{p * 100:.0f} dogru): "
+        f"0.71*clair + 0.29*actual = ${blend:+.2f} (ayni bet seti uzerinde)"
+    )
+    print(
+        f"  bucket dogrulugu (round(actual) vs cozum): "
+        f"%{sum(1 for b in actual_bet if b[2]) / max(len(actual_bet), 1) * 100:.0f}"
+    )
+    return 0
+
+
+# =====================================================================
+# 4) METAR vs SETTLEMENT — METAR bucket vs gercek Polymarket kapanisi
+# =====================================================================
+# Kaynak: scripts/test_metar_vs_settlement.py (merge edildi, tasindi -> backtest_archive/)
+# Kullanici sorusu: "METAR sonuclari WU'dan aliyor, Polymarket da WU'dan aliyor,
+# neden tutmuyor?"  ->  METAR-bucket vs kazanan-bucket, actual vs kazanan,
+# METAR vs actual fark dagilimi + RANGE/HIGH ayri winrate + RANGE PnL tahmini.
+
+
+def cmd_metar_vs_settlement(args) -> int:
+    db = sqlite3.connect(BOT_DB, timeout=20)
+    db.execute("PRAGMA busy_timeout=20000")
+    cur = db.cursor()
+
+    # 1) METAR arsivi: (city_code, day) -> max temp
+    metar_max: dict[tuple[str, str], float] = {}
+    try:
+        for code, day, tmax in cur.execute(
+            "SELECT city_code, day, MAX(temp_c) FROM metar_observations "
+            "WHERE city_code IS NOT NULL AND day IS NOT NULL "
+            "AND day >= ? AND day <= ? GROUP BY city_code, day",
+            (args.min_day, args.max_day),
+        ):
+            if code and tmax is not None:
+                metar_max[(code, day)] = float(tmax)
+    except sqlite3.OperationalError as exc:
+        print(f"metar_observations okunamadi: {exc}")
+        return 1
+
+    # 2) Gercek cozum: (city_code, day) -> kazanan bucket.
+    #    SADECE temperature_max + RANGE (tam bucket) marketlerinden — botun
+    #    hedefi bu. Lowest-temp veya HIGH/LOW marketleri karistirilmaz
+    #    (2026-08-18 bugfix: HK 08-15 'kazanan 26' aslinda lowest-temp'ti,
+    #    highest METAR 33 ile karismis -> yanlis fark +7C raporlaniyordu).
+    code_name: dict[str, str] = {}
+    winner: dict[tuple[str, str], int] = {}
+    for city, code, thr, day, raw, mtype, metric in cur.execute(
+        "SELECT city, city_code, threshold, target_date, raw_data, market_type, metric "
+        "FROM weather_markets "
+        "WHERE threshold IS NOT NULL AND target_date IS NOT NULL AND raw_data IS NOT NULL"
+    ):
+        if mtype != "RANGE" or metric != "temperature_max":
+            continue
+        d = str(day)[:10]
+        if not (args.min_day <= d <= args.max_day):
+            continue
+        if code:
+            code_name.setdefault(code, city)
+        o = parse_resolved_outcome(raw)
+        if o is None:
+            continue
+        try:
+            t = int(thr)
+        except (TypeError, ValueError):
+            continue
+        if o is True and (winner.get((code, d)) is None or winner.get((code, d), -999) < t):
+            winner[(code, d)] = t
+
+    # 3) Open-Meteo actual: (city_code, day) -> gercek max (kac modelden olursa, son deger)
+    actual_val: dict[tuple[str, str], float] = {}
+    for code, day, av in cur.execute(
+        "SELECT city_code, date, actual_value FROM historical_calibrations "
+        "WHERE metric='temperature_max' AND actual_value IS NOT NULL"
+    ):
+        d = str(day)[:10]
+        if code and args.min_day <= d <= args.max_day:
+            actual_val[(code, d)] = float(av)
+    db.close()
+
+    print("=== METAR bucket vs GERCEK Polymarket kapanisi ===")
+    print(
+        f"  pencere: {args.min_day} .. {args.max_day} | metar_cities={len(metar_max)} "
+        f"resolved_cities={len(winner)} actual_cities={len(actual_val)}"
+    )
+    print(f"{'city':12s} {'day':10s} {'METARmax':>8s} {'METARbkt':>7s} {'WIN':>3s} {'ACT':>5s} {'tutuyor':>7s}")
+
+    metar_ok = act_ok = n = 0
+    metar_vs_act_diff: list[tuple[float | None, float | None]] = []
+    mismatches = []
+    for code, day in sorted(winner):
+        city = code_name.get(code, code)
+        w = winner[(code, day)]
+        mb = None
+        if (code, day) in metar_max:
+            mb = int(round(metar_max[(code, day)]))
+        ab = None
+        if (code, day) in actual_val:
+            ab = int(round(actual_val[(code, day)]))
+            mx = metar_max[(code, day)] if (code, day) in metar_max else None
+            metar_vs_act_diff.append((mx, actual_val[(code, day)]))
+        hit = "?" if mb is None else ("TUTUYOR" if mb == w else "X")
+        if mb is not None:
+            n += 1
+            if mb == w:
+                metar_ok += 1
+            else:
+                mismatches.append((city, day, metar_max[(code, day)], mb, w))
+        if ab is not None:
+            act_ok += int(ab == w)
+        row = f"{city:12s} {day:10s}"
+        row += f" {metar_max.get((code, day), float('nan')):8.1f}" if (code, day) in metar_max else f" {'-':>8s}"
+        row += f" {mb if mb is not None else '-':>7d}" if mb is not None else f" {'-':>7s}"
+        row += f" {w:>3d}"
+        row += f" {ab if ab is not None else '-':>5d}" if ab is not None else f" {'-':>5s}"
+        row += f" {hit:>7s}"
+        print(row)
+
+    print()
+    if n:
+        print(
+            f"METAR bucket dogrulugu (esitlik): {metar_ok}/{n} = %{metar_ok / max(n, 1) * 100:.0f} "
+            f"(round(METAR max) == Polymarket kazanan bucket)"
+        )
+    na = len(actual_val)
+    print(
+        f"Open-Meteo actual dogrulugu (esitlik): {act_ok}/{na} = %{act_ok / max(na, 1) * 100:.0f} "
+        f"(round(actual) == kazanan bucket)"
+    )
+
+    # IKI MARKET TIPI (kullanici 2026-08-18 duzeltmesi):
+    #   RANGE (tam bucket, "exactly 32C"): YES sadece round(gercek max) == b ise.
+    #   HIGH (or-above, ">= 32C"): YES gercek max >= b ise (b <= kazanan bucket).
+    print("\n--- IKI MARKET TIPI ICIN AYRI WINRATE ---")
+    print(
+        f"  RANGE (tam bucket 'exactly bC'): %{metar_ok / max(n, 1) * 100:.0f} ({metar_ok}/{n})  <- botun ana bet tipi"
+    )
+    bets = wins = 0
+    loss_list = []
+    for (code, day), w in winner.items():
+        mx = metar_max.get((code, day))
+        if mx is None:
+            continue
+        b = int(round(mx))
+        bets += 1
+        if b <= w:
+            wins += 1
+        else:
+            loss_list.append((code_name.get(code, code), day, mx, b, w, b - w))
+    print(f"  HIGH  (or-above '>= bC'): %{wins / max(bets, 1) * 100:.0f} ({wins}/{bets})  <- daha kolay kazanan tip")
+    print("\n  --- HIGH icin kayiplar (METAR abartti: b > kazanan) ---")
+    for city, day, mx, b, w, over in sorted(loss_list, key=lambda x: -x[5]):
+        print(f"    {city:12s} {day}  METARmax={mx:5.1f}->{b}C  KAZANAN={w}C  abartma={over}C")
+
+    # METAR vs actual fark dagilimi (istasyon uyusmazligi)
+    pairs = [d for d in metar_vs_act_diff if d[0] is not None and d[1] is not None]
+    if pairs:
+        diffs: list[float] = []
+        for a, b in pairs:
+            if a is not None and b is not None:
+                diffs.append(round(float(a) - float(b), 1))
+        over = sum(1 for x in diffs if x >= 1.5)
+        under = sum(1 for x in diffs if x <= -1.5)
+        avg = sum(diffs) / len(diffs) if diffs else 0.0
+        print(
+            f"METAR max vs Open-Meteo actual fark: n={len(diffs)} ort={avg:+.1f}C "
+            f"(METAR>=actual+1.5C: {over}, METAR<=actual-1.5C: {under})"
+        )
+
+    if mismatches:
+        print("\n--- UYUSMAYANLAR (METAR yanlis bucket dedi) ---")
+        for city, day, mx, mb, w in mismatches:
+            print(f"  {city:12s} {day}  METARmax={mx:.1f}->bucket{mb}  KAZANAN={w}  (fark {mx - (w):+.1f}C)")
+
+    # Cozum kurali dogrulamasi: kazanan bucket == round(gercek max)?
+    print("\n--- Cozum kurali: kazanan bucket == round(actual max)? ---")
+    rule_n = rule_ok = 0
+    for (code, day), w in winner.items():
+        av = actual_val.get((code, day))
+        if av is None:
+            continue
+        rule_n += 1
+        if int(round(av)) == w:
+            rule_ok += 1
+    print(f"  round(actual)==kazanan: {rule_ok}/{rule_n} = %{rule_ok / max(rule_n, 1) * 100:.0f}")
+
+    # PnL tahmini: RANGE (tam bucket) marketi, orderbook giris fiyati ile.
+    print("\n--- RANGE (tam bucket) PnL tahmini (orderbook giris, son 3 gun) ---")
+    _pnl_hours = 6
+    _stake = 3.0
+    _fee = 0.05
+    _gas = 0.10
+
+    ob_series = None
+    try:
+        import sqlite3 as _sq
+
+        ob = _sq.connect(OB_DB, timeout=15)
+        ob.execute("PRAGMA busy_timeout=15000")
+        ob_series = defaultdict(list)
+        for mid, ask, st in ob.execute(
+            "SELECT market_id, best_ask, snapshot_time FROM orderbook_snapshots WHERE best_ask IS NOT NULL"
+        ):
+            t = ts(st)
+            if t is None:
+                continue
+            try:
+                a = float(ask)
+                if 0 < a <= 1:
+                    ob_series[str(mid)].append((t, a))
+            except (TypeError, ValueError):
+                pass
+        for k in ob_series:
+            ob_series[k].sort(key=lambda x: x[0])
+        ob.close()
+    except Exception as exc:
+        print(f"  (orderbook okunamadi: {exc})")
+
+    market_range = {}  # (code, day, thr) -> (mid, target_ts)
+    _db2 = sqlite3.connect(BOT_DB, timeout=20)
+    for r in _db2.execute(
+        "SELECT id, city_code, threshold, target_date, market_type, metric FROM weather_markets "
+        "WHERE threshold IS NOT NULL AND target_date IS NOT NULL AND market_type='RANGE' AND metric='temperature_max'"
+    ):
+        mid, code, thr, tdate = r[0], r[1], r[2], r[3]
+        d = str(tdate)[:10]
+        if code and args.min_day <= d <= args.max_day:
+            t = ts(tdate)
+            if t is not None:
+                market_range[(code, d, int(thr))] = (str(mid), t)
+    _db2.close()
+
+    def _price_at(series, bet_ts, window_sec=8 * 3600):
+        best = None
+        if not series:
+            return None
+        for t, a in series:
+            if t > bet_ts:
+                break
+            if bet_ts - t <= window_sec:
+                best = a
+        return best
+
+    if ob_series is not None:
+        pnl_bets = []
+        for (code, day), mx in metar_max.items():
+            if winner.get((code, day)) is None:
+                continue
+            b = int(round(mx))
+            w = winner[(code, day)]
+            m = market_range.get((code, day, b))
+            if m is None:
+                continue
+            mid, tgt = m
+            if tgt is None:
+                continue
+            bet_ts = tgt + (12 - _pnl_hours) * 3600
+            entry = _price_at(ob_series.get(mid), bet_ts)
+            if entry is None or not (0.01 <= entry < 0.95):
+                continue
+            fee = _stake * _fee * (1.0 - entry)
+            cost = _stake + fee + _gas
+            win = b == w
+            gain = (_stake / entry - cost) if win else -cost
+            pnl_bets.append((code_name.get(code, code), day, b, entry, win, gain))
+        n_b = len(pnl_bets)
+        wins = sum(1 for p in pnl_bets if p[4])
+        net = sum(p[5] for p in pnl_bets)
+        stk = n_b * _stake
+        print(
+            f"  bet={n_b}  win=%{wins / max(n_b, 1) * 100:.0f}  "
+            f"NET ${net:+.2f}  ROI %{net / max(stk, 1) * 100:.1f}  (stake=${_stake:g}, kapanisa {_pnl_hours}h kala)"
+        )
+        print("  bet detay (ilk 15):")
+        for city, day, b, entry, win, gain in pnl_bets[:15]:
+            print(f"    {city:12s} {day}  bkt={b:3d}  entry={entry:6.3f}  {'WIN' if win else 'LOST'}  ${gain:+.2f}")
+    return 0
+
+
+# =====================================================================
+# 5) WALK-FORWARD — look-ahead'siz, zaman-tabanli fold dogrulama
+# =====================================================================
+# Kaynak: scripts/walk_forward_backtest.py (merge edildi, tasindi -> backtest_archive/)
+# Uyari (2026-08-18): model secimi yalnizca onceki gunlerin kalibrasyonundan
+# gelmelidir; bu modul in-sample vs out-of-sample secim yanliligini aciga cikarir.
+
+import numpy as np  # noqa: E402
+
+WF_BACKTEST_DB = os.path.join(_REPO_ROOT, "data", "backtest.db")
+WF_OUTPUT_DIR = Path(_REPO_ROOT) / "data" / "backtest_results" / "walk_forward"
+
+TRAIN_DAYS = 2
+TEST_DAYS = 1
+STEP_DAYS = 1
+MIN_TRAIN_SAMPLES = 5
+
+FLAT_BET = 10.0
+MIN_EDGE = 0.05
+MAX_ENTRY_PRICE = 0.90
+MAX_HOURS_TO_SETTLEMENT = 24
+MIN_HOURS_TO_SETTLEMENT = 1
+
+
+def _norm_cdf(x: float) -> float:
+    return 0.5 * (1.0 + _erf(x / np.sqrt(2.0)))
+
+
+def _erf(x: float) -> float:
+    a1, a2, a3, a4, a5 = (0.254829592, -0.284496736, 1.421413741, -1.453152027, 1.061405429)
+    p = 0.3275911
+    sign = 1.0 if x >= 0 else -1.0
+    x = abs(x)
+    t = 1.0 / (1.0 + p * x)
+    y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * np.exp(-x * x)
+    return sign * y
+
+
+def _wf_estimate_probability(mean: float, std: float, threshold: float, metric: str = "temperature_max") -> float:
+    if std is None or std <= 0:
+        std = 2.0
+    z = (threshold - mean) / std
+    if metric in ("temperature_max", "temperature_mean"):
+        return 1.0 - _norm_cdf(z)
+    else:
+        return _norm_cdf(z)
+
+
+def _wf_load_data():
+    conn = sqlite3.connect(str(WF_BACKTEST_DB))
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT id as market_id, city, city_code, metric, threshold,
+               target_date, yes_price, no_price, status
+        FROM weather_markets
+        WHERE city IS NOT NULL AND target_date IS NOT NULL
+    """
+    )
+    markets = [dict(r) for r in cur.fetchall()]
+
+    cur.execute(
+        """
+        SELECT market_id, city, metric, target_date, yes_price, no_price,
+               snapshot_time, hours_to_settlement
+        FROM market_snapshots
+        ORDER BY market_id, snapshot_time
+    """
+    )
+    snapshots = [dict(r) for r in cur.fetchall()]
+
+    cur.execute(
+        """
+        SELECT market_id, city, metric, target_date, source,
+               predicted_value, confidence, model_weight, fetched_at
+        FROM weather_forecasts
+        ORDER BY market_id, fetched_at
+    """
+    )
+    forecasts = [dict(r) for r in cur.fetchall()]
+
+    cur.execute(
+        """
+        SELECT id as bet_id, market_id, city, outcome, stake_amount,
+               entry_price, shares, status, placed_at, settled_at
+        FROM bets
+        WHERE status IN ('won', 'lost')
+        ORDER BY placed_at
+    """
+    )
+    resolved_bets = [dict(r) for r in cur.fetchall()]
+
+    conn.close()
+
+    for m in markets:
+        if m.get("target_date"):
+            m["target_date"] = datetime.fromisoformat(m["target_date"])
+        if m.get("yes_price") is not None:
+            m["yes_price"] = float(m["yes_price"])
+
+    for s in snapshots:
+        if s.get("snapshot_time"):
+            s["snapshot_time"] = datetime.fromisoformat(s["snapshot_time"])
+        if s.get("target_date"):
+            s["target_date"] = datetime.fromisoformat(s["target_date"])
+        if s.get("yes_price") is not None:
+            s["yes_price"] = float(s["yes_price"])
+        if s.get("hours_to_settlement") is not None:
+            s["hours_to_settlement"] = float(s["hours_to_settlement"])
+
+    for f in forecasts:
+        if f.get("fetched_at"):
+            f["fetched_at"] = datetime.fromisoformat(f["fetched_at"])
+        if f.get("target_date"):
+            f["target_date"] = datetime.fromisoformat(f["target_date"])
+        if f.get("predicted_value") is not None:
+            f["predicted_value"] = float(f["predicted_value"])
+        if f.get("confidence") is not None:
+            f["confidence"] = float(f["confidence"])
+        if f.get("model_weight") is not None:
+            f["model_weight"] = float(f["model_weight"])
+
+    for b in resolved_bets:
+        if b.get("placed_at"):
+            b["placed_at"] = datetime.fromisoformat(b["placed_at"])
+        if b.get("settled_at"):
+            b["settled_at"] = datetime.fromisoformat(b["settled_at"])
+
+    return markets, snapshots, forecasts, resolved_bets
+
+
+def _wf_get_available_forecast(forecasts: list, market_id: str, decision_time: datetime):
+    available = [
+        f
+        for f in forecasts
+        if f["market_id"] == market_id and f.get("fetched_at") is not None and f["fetched_at"] <= decision_time
+    ]
+    if not available:
+        return None
+    available.sort(key=lambda f: f["fetched_at"])
+    latest = available[-1]
+    return {
+        "mean": latest.get("predicted_value"),
+        "std": latest.get("confidence") or 2.0,
+        "weight": latest.get("model_weight") or 1.0,
+    }
+
+
+def _wf_simulate_decision(snap: dict, forecast, hours_to_settlement: float):
+    if hours_to_settlement > MAX_HOURS_TO_SETTLEMENT:
+        return None
+    if hours_to_settlement < MIN_HOURS_TO_SETTLEMENT:
+        return None
+
+    entry_price = snap.get("yes_price")
+    if entry_price is None or entry_price > MAX_ENTRY_PRICE or entry_price < 0.05:
+        return None
+
+    if forecast is None or forecast.get("mean") is None:
+        return None
+
+    model_prob = _wf_estimate_probability(
+        forecast["mean"], forecast["std"], snap.get("threshold", 25), snap.get("metric", "temperature_max")
+    )
+    model_prob = max(0.01, min(0.99, model_prob))
+
+    edge = model_prob - entry_price
+    net_edge = edge - FEE_RATE * entry_price * (1 - entry_price)
+
+    if net_edge < MIN_EDGE:
+        return None
+
+    return {
+        "model_prob": model_prob,
+        "edge": edge,
+        "net_edge": net_edge,
+        "entry_price": entry_price,
+    }
+
+
+def _wf_resolve_outcome(resolved_bets: list, market_id: str):
+    for b in resolved_bets:
+        if b["market_id"] == market_id:
+            return b["status"] == "won"
+    return None
+
+
+def _wf_run_single_fold(
+    markets,
+    snapshots,
+    forecasts,
+    resolved_bets,
+    train_start,
+    train_end,
+    test_start,
+    test_end,
+    fold_id,
+):
+    results = []
+
+    test_snaps = [
+        s for s in snapshots if s.get("snapshot_time") is not None and test_start <= s["snapshot_time"] < test_end
+    ]
+
+    if not test_snaps:
+        return results
+
+    market_lookup = {m["market_id"]: m for m in markets}
+
+    for snap in test_snaps:
+        market_id = snap["market_id"]
+        decision_time = snap["snapshot_time"]
+        hours_to_settlement = snap.get("hours_to_settlement")
+
+        if hours_to_settlement is None:
+            target = market_lookup.get(market_id, {}).get("target_date")
+            if target:
+                hours_to_settlement = (target - decision_time).total_seconds() / 3600
+            else:
+                continue
+
+        market = market_lookup.get(market_id)
+        if market is None:
+            continue
+
+        forecast = _wf_get_available_forecast(forecasts, market_id, decision_time)
+        if forecast is None:
+            continue
+
+        decision = _wf_simulate_decision(snap, forecast, hours_to_settlement)
+        if decision is None:
+            continue
+
+        won = _wf_resolve_outcome(resolved_bets, market_id)
+        if won is None:
+            continue
+
+        if won:
+            pnl = FLAT_BET * (1 / decision["entry_price"] - 1) * (1 - FEE_RATE)
+        else:
+            pnl = -FLAT_BET
+
+        results.append(
+            {
+                "market_id": market_id,
+                "city": market.get("city", "unknown"),
+                "metric": market.get("metric", "unknown"),
+                "entry_time": decision_time,
+                "entry_price": decision["entry_price"],
+                "model_prob": decision["model_prob"],
+                "edge": decision["edge"],
+                "net_edge": decision["net_edge"],
+                "hours_to_settlement": hours_to_settlement,
+                "won": won,
+                "pnl": pnl,
+                "fold": fold_id,
+            }
+        )
+
+    return results
+
+
+def _wf_walk_forward(markets, snapshots, forecasts, resolved_bets):
+    all_times = []
+    for s in snapshots:
+        if s.get("snapshot_time"):
+            all_times.append(s["snapshot_time"])
+    for m in markets:
+        if m.get("target_date"):
+            all_times.append(m["target_date"])
+
+    if not all_times:
+        return []
+
+    min_time = min(all_times)
+    max_time = max(all_times)
+    print(f"Veri araligi: {min_time} -> {max_time}")
+
+    all_results = []
+    fold_id = 0
+    current_train_start = min_time
+
+    while True:
+        train_end = current_train_start + timedelta(days=TRAIN_DAYS)
+        test_start = train_end
+        test_end = test_start + timedelta(days=TEST_DAYS)
+
+        if test_end > max_time + timedelta(days=1):
+            break
+
+        train_markets = [m for m in markets if m.get("target_date") is not None and m["target_date"] <= train_end]
+
+        train_settled = sum(1 for m in train_markets if _wf_resolve_outcome(resolved_bets, m["market_id"]) is not None)
+
+        print(f"\n=== Fold {fold_id} ===")
+        print(
+            f"  Train: {current_train_start.date()} -> {train_end.date()} "
+            f"({len(train_markets)} markets, {train_settled} settled)"
+        )
+        print(f"  Test : {test_start.date()} -> {test_end.date()}")
+
+        if train_settled < MIN_TRAIN_SAMPLES:
+            current_train_start += timedelta(days=STEP_DAYS)
+            fold_id += 1
+            continue
+
+        fold_results = _wf_run_single_fold(
+            markets,
+            snapshots,
+            forecasts,
+            resolved_bets,
+            current_train_start,
+            train_end,
+            test_start,
+            test_end,
+            fold_id,
+        )
+
+        print(f"  -> {len(fold_results)} bet")
+        all_results.extend(fold_results)
+
+        current_train_start += timedelta(days=STEP_DAYS)
+        fold_id += 1
+
+        if fold_id > 100:
+            break
+
+    return all_results
+
+
+def _wf_calculate_metrics(results):
+    if not results:
+        return {}
+
+    total_bets = len(results)
+    wins = sum(1 for r in results if r["won"])
+    wr = wins / total_bets if total_bets > 0 else 0
+
+    total_pnl = sum(r["pnl"] for r in results)
+    total_staked = total_bets * FLAT_BET
+    roi = total_pnl / total_staked if total_staked > 0 else 0
+
+    pnl_by_date = defaultdict(float)
+    for r in results:
+        d = r["entry_time"].date()
+        pnl_by_date[d] += r["pnl"]
+
+    daily_pnls = list(pnl_by_date.values())
+    sd = np.std(daily_pnls) if len(daily_pnls) > 1 else 0
+    sharpe = (np.mean(daily_pnls) / sd) * np.sqrt(365) if sd > 0 else 0
+
+    cum_pnl = np.cumsum([r["pnl"] for r in results])
+    peak = np.maximum.accumulate(cum_pnl)
+    dd = cum_pnl - peak
+    max_dd = float(np.min(dd)) if len(dd) > 0 else 0.0
+
+    return {
+        "total_bets": total_bets,
+        "wins": wins,
+        "win_rate": round(wr, 4),
+        "total_pnl": round(total_pnl, 2),
+        "total_staked": round(total_staked, 2),
+        "roi": round(roi, 4),
+        "sharpe": round(sharpe, 2),
+        "max_drawdown": round(max_dd, 2),
+        "avg_net_edge": round(float(np.mean([r["net_edge"] for r in results])), 4),
+        "avg_hours_to_settlement": round(float(np.mean([r["hours_to_settlement"] for r in results])), 1),
+    }
+
+
+def cmd_walk_forward() -> int:
+    WF_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    print("Walk-Forward Backtest basliyor...\n")
+
+    markets, snapshots, forecasts, resolved_bets = _wf_load_data()
+    print(
+        f"Yuklenen: {len(markets)} market, {len(snapshots)} snapshot, "
+        f"{len(forecasts)} forecast, {len(resolved_bets)} resolved bet"
+    )
+
+    results = _wf_walk_forward(markets, snapshots, forecasts, resolved_bets)
+
+    if not results:
+        print("Sonuc yok.")
+        return 0
+
+    df_path = WF_OUTPUT_DIR / "walk_forward_trades.csv"
+    with open(df_path, "w", encoding="utf-8") as f:
+        f.write(
+            "market_id,city,metric,entry_time,entry_price,model_prob,edge,net_edge,hours_to_settlement,won,pnl,fold\n"
+        )
+        for r in results:
+            f.write(
+                f"{r['market_id']},{r['city']},{r['metric']},"
+                f"{r['entry_time'].isoformat()},{r['entry_price']:.4f},"
+                f"{r['model_prob']:.4f},{r['edge']:.4f},{r['net_edge']:.4f},"
+                f"{r['hours_to_settlement']:.1f},{r['won']},{r['pnl']:.2f},{r['fold']}\n"
+            )
+    print(f"\nTrade'ler kaydedildi: {df_path}")
+
+    metrics = _wf_calculate_metrics(results)
+    print("\n=== GENEL SONUC ===")
+    for k, v in metrics.items():
+        print(f"  {k:30}: {v}")
+
+    fold_metrics = defaultdict(list)
+    for r in results:
+        fold_metrics[r["fold"]].append(r)
+
+    print("\n=== FOLD BAZLI ===")
+    print(f"  {'Fold':>5} | {'Bahis':>6} | {'WR%':>6} | {'Net Kar':>10} | {'ROI%':>7}")
+    print(f"  {'-' * 5}-+-{'-' * 6}-+-{'-' * 6}-+-{'-' * 10}-+-{'-' * 7}")
+    for fid in sorted(fold_metrics.keys()):
+        fm = _wf_calculate_metrics(fold_metrics[fid])
+        print(
+            f"  {fid:5d} | {fm.get('total_bets', 0):6d} | "
+            f"{fm.get('win_rate', 0) * 100:5.1f}% | "
+            f"${fm.get('total_pnl', 0):9.2f} | "
+            f"{fm.get('roi', 0) * 100:6.1f}%"
+        )
+
+    report = {
+        "config": {
+            "train_days": TRAIN_DAYS,
+            "test_days": TEST_DAYS,
+            "step_days": STEP_DAYS,
+            "min_edge": MIN_EDGE,
+            "max_hours": MAX_HOURS_TO_SETTLEMENT,
+            "flat_bet": FLAT_BET,
+            "fee_rate": FEE_RATE,
+        },
+        "overall": metrics,
+        "folds": {str(fid): _wf_calculate_metrics(fold_metrics[fid]) for fid in sorted(fold_metrics.keys())},
+    }
+
+    import json
+
+    report_path = WF_OUTPUT_DIR / "walk_forward_report.json"
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, default=str)
+
+    print(f"\nRapor: {report_path}")
+    return 0
+
+
+# =====================================================================
+# Ana girisc
+# =====================================================================
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description="Junbo backtest komut dosyasi (tek giris noktasi)")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    g = sub.add_parser("gunluk", help="gun gun gercekci backtest (botun su anki modu)")
+    g.add_argument("--days", default="2026-08-16,2026-08-17", help="virgullu target gunler")
+    g.add_argument("--detail", action="store_true", help="bet-bazli detay tablosu")
+    g.set_defaults(func=lambda a: cmd_gunluk(a))
+
+    o = sub.add_parser("orderbook", help="orderbook tabanli gercekci backtest (ham vs kalibre)")
+    o.add_argument("--spread", type=int, default=3)
+    o.add_argument("--max-entry", type=float, default=0.95)
+    o.add_argument("--gap", type=float, default=0.0, help="fair-value gap (0=market<fair)")
+    o.add_argument("--min-date", default="2026-08-05", help="orderbook basladi")
+    o.add_argument("--bias-top", type=int, default=15)
+    o.add_argument(
+        "--fill",
+        default="first_ask",
+        choices=["first_ask", "median_ask", "vwap"],
+        help="acilis fiyati varsayimi: first_ask=market ilk goruldugu an, "
+        "median_ask=ilk 20 snapshot medyani, vwap=ilk 20 snapshot agirlikli ort",
+    )
+    o.add_argument(
+        "--fair",
+        default="gaussian",
+        choices=["gaussian", "empirical"],
+        help="fair-value modeli: gaussian (eski) veya empirical CDF (kalin kuyruk)",
+    )
+    o.set_defaults(func=lambda a: cmd_orderbook(a))
+
+    m = sub.add_parser("metar_peak", help="METAR-peak gercekci backtest (actual vs clairvoyant)")
+    m.add_argument("--hours-before", type=int, default=6)
+    m.add_argument("--stake", type=float, default=3.0)
+    m.add_argument("--min-day", default="2026-08-05")
+    m.add_argument("--max-day", default="2026-08-16")
+    m.set_defaults(func=lambda a: cmd_metar_peak(a))
+
+    v = sub.add_parser("metar_vs_settlement", help="METAR bucket vs GERCEK Polymarket kapanisi dogrulama")
+    v.add_argument("--min-day", default="2026-08-13")
+    v.add_argument("--max-day", default="2026-08-17")
+    v.set_defaults(func=lambda a: cmd_metar_vs_settlement(a))
+
+    w = sub.add_parser("walk_forward", help="walk-forward (look-ahead'siz) model dogrulama")
+    w.set_defaults(func=lambda a: cmd_walk_forward())
+
+    return p
+
+
+def main() -> int:
+    args = _build_parser().parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

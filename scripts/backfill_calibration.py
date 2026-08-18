@@ -14,7 +14,7 @@ METAR/WU'dan alalim"):
                      DEGIL: round(archive) == kazanan bucket yalnizca %30.
   --source metar   : METAR/WU istasyon max/min (metar_observations). Polymarket
                      WU (NOAA METAR) verisiyle cozer: round(METAR max) ==
-                     kazanan bucket %74 (test_metar_vs_settlement). METAR
+                     kazanan bucket %74 (backtest.py metar_vs_settlement). METAR
                      modunda METAR kapsamayan (city,date,metric) satirlari
                      tablodan temizlenir — karisik kaynakli bias olmaz.
 
@@ -46,7 +46,7 @@ def _load_metar_actuals(session) -> dict[tuple[str, str, str], float]:
     """(city_code, day, metric) -> METAR istasyon max/min (bugun haric).
 
     Polymarket weather marketleri Weather Underground (NOAA/NWS METAR) verisiyle
-    cozulur; round(METAR max) == kazanan bucket %74 (test_metar_vs_settlement,
+    cozulur; round(METAR max) == kazanan bucket %74 (backtest.py metar_vs_settlement,
     2026-08-18). Open-Meteo Archive actual yalnizca %30 — bias referansi olarak
     Archive yerine METAR kullanilir (kullanici karari 2026-08-18). Bugunku
     kismi gun (day == bugun) atlanir; yarin tam veriyle yeniden yazilir.

@@ -399,7 +399,7 @@ Degisiklik oldugunda bu bolumu de guncelle.
      Kullanici bunu "sallama" olarak isaretledi — aciklamalarda gercek mekanizma
      boyle soylenmemeli.
   4. **TAM-7 KURALI KALDIRILDI (2026-08-11 kullanici karari A).** Backtest
-     (gercek bot davranisi, kayan pencere dahil — `scripts/backtest_rolling_window.py`):
+     (gercek bot davranisi, kayan pencere dahil — `backtest_archive/backtest_rolling_window.py`):
      tam-7 zorunlu karliligi DUSURUYOR: 0.30 tam-7'siz +$53,284 vs tam-7'li +$5,611;
      0.99 tam-7'siz +$52,018 vs tam-7'li +$19,747. Sebep: 7 esigin hepsi acik +
      fiyat siniri altinda sarti, merkez kayinca kARLI esikleri de kapatiyor.

@@ -2,7 +2,7 @@
 
 Kullanici karari: "bias Open-Meteo'dan yanlis hesaplaniyorsa METAR/WU'dan
 alalim". Polymarket weather marketleri WU (NOAA METAR) verisiyle cozer;
-round(METAR max) == kazanan bucket %74 (test_metar_vs_settlement) vs Open-Meteo
+round(METAR max) == kazanan bucket %74 (backtest.py metar_vs_settlement) vs Open-Meteo
 Archive %30. `scripts/backfill_calibration.py --source metar` bias referansini
 METAR istasyonu yapar. Bu test `_load_metar_actuals` cekirdek mantigini dogrular.
 """

@@ -67,7 +67,7 @@ def test_import_all_modules():
         rel = fpath.relative_to(REPO_ROOT)
         dotted = str(rel.with_suffix("")).replace(os.sep, ".")
         # Skip test files, __init__, and scripts with leading underscore.
-        if rel.parts and rel.parts[0] in ("tests", "scripts"):
+        if rel.parts and rel.parts[0] in ("tests", "scripts", "backtest_archive"):
             continue
         if dotted.endswith("__init__"):
             continue
@@ -190,6 +190,14 @@ ALLOWED_DEAD = {
     "SvcDoRun",
     "bot_lifespan",
     "lifespan",
+    # scripts/backtest.py argparse subcommand entry points (wired to the
+    # subparsers inside the SAME file, so the cross-file census cannot see
+    # the reference; they are reached via args.func(args) dispatch).
+    "cmd_gunluk",
+    "cmd_orderbook",
+    "cmd_metar_peak",
+    "cmd_metar_vs_settlement",
+    "cmd_walk_forward",
     # Finance helpers covered by unit tests but no non-test caller today
     # (api.py computes equity inline; kept as a documented formula helper)
     "portfolio_current_value",
