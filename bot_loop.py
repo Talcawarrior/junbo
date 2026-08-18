@@ -746,14 +746,35 @@ def _clob_rest_poll_once() -> None:
                 return None
 
         saved = 0
+        updates = []
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as ex:
             for m, ask in zip(markets, ex.map(_fetch, markets)):
                 if ask is None:
                     continue
                 _archive_clob_price(m, ask)
                 saved += 1
+                updates.append((str(m.id), ask))
         if saved:
             logger.info("CLOB REST poll: %d market fiyati arsivlendi", saved)
+        # 2026-08-18 audit fix (ag #9): REST yedegi SADECE orderbook arsivliyor,
+        # weather_markets.yes_price'i guncellemiyordu -> WS kesintisinde bet giris
+        # fiyati 5dk'lik Gamma poll'una kadar BAYAT kaliyordu (fantom fiyat riski).
+        # CLOB canli kottan gelen fiyatlar birlikte yes_price/no_price'a yazilir.
+        if updates:
+            try:
+                with get_session() as s:
+                    for mid, ask in updates:
+                        s.query(WeatherMarket).filter(WeatherMarket.id == mid).update(
+                            {
+                                WeatherMarket.yes_price: float(ask),
+                                WeatherMarket.no_price: max(0.0, min(1.0, 1.0 - float(ask))),
+                                WeatherMarket.last_updated: datetime.now(timezone.utc).replace(tzinfo=None),
+                            },
+                            synchronize_session=False,
+                        )
+                    s.commit()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("CLOB REST poll yes_price guncelleme hatasi: %s", exc)
     except Exception as exc:  # noqa: BLE001
         logger.warning("CLOB REST poll hatasi: %s", exc)
 

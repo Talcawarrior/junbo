@@ -243,7 +243,10 @@ def _place_spread_bets_inner(session, target_day) -> dict:
             skipped += 1
             continue
         fmean, fstd = fval
-        center = round(fmean)
+        # 2026-08-18 audit fix (C2): Python round() banker's (half-even) -> 26.5
+        # bucket 26 verir, ama botun olasilik modeli 26.5'i bucket 27 (half-up)
+        # sayar. Tutarli olmak icin half-up kullanilir.
+        center = int(fmean + 0.5) if fmean >= 0 else int(fmean - 0.5)
         targets = set(range(center - radius, center + radius + 1))
 
         # KAYDIRMA KAPALI (2026-08-12 kullanici karari): merkez kayarsa bile
@@ -283,6 +286,29 @@ def _place_spread_bets_inner(session, target_day) -> dict:
             if not (0 < entry < max_entry):
                 skipped += 1
                 continue
+
+            # 2026-08-18 audit fix (C3): fantom/stale fiyat guardi. Gamma
+            # weather_markets.yes_price 5dk gecikmeli ve WS dustugunde REST poll
+            # fiyati guncellemez -> 0.001-0.02 gibi gercek-disi fiyatlarla bet
+            # acilabiliyor. CLOB canli kotu DB fiyatla %15'ten fazla sapiyorsa
+            # bet REDDEDILIR. CLOB hataliysa bet asla engellenmez (bet_placer
+            # ile ayni kural).
+            try:
+                from utils.clob_live import live_quote_for_market, price_is_stale
+
+                _tok, live_ask, live_bid = live_quote_for_market(mkt.raw_data)
+                if _tok is not None and live_ask is not None and price_is_stale(entry, live_ask, live_bid):
+                    logger.warning(
+                        "STALE PRICE GUARD: %s DB yes=%.4f vs CLOB ask=%.4f (bid=%.4f) - bet refused",
+                        mkt.id,
+                        entry,
+                        live_ask,
+                        live_bid,
+                    )
+                    skipped += 1
+                    continue
+            except Exception as exc:  # never block betting on CLOB failure
+                logger.debug("Live price guard skipped for %s: %s", mkt.id, exc)
 
             # 2026-08-16 kullanici karari: fair-value ve 0.10-0.20 olum bolge
             # filtreleri KALDIRILDI — "fiyat ne olursa olsun 0.01-0.95 arasi

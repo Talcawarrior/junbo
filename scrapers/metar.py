@@ -118,6 +118,92 @@ def fetch_metar_day(icao: str, day: str) -> list[tuple[int, float]]:
     return day_rows
 
 
+# 2026-08-18 audit fix (M3): sehrin gercek saat dilimi. Eski round(lon/15)
+# nominal offset'i verir ama politik sinirlar + DST ile yanlis olabilir:
+#   - China/Singapore/Malaysia lon/15=+7  -> gercek UTC+8
+#   - Seoul lon/15=+8                     -> gercek UTC+9
+#   - London lon/15=+0 (BST)              -> gercek UTC+1 (DST)
+#   - Toronto lon/15=-5 (EDT)             -> gercek UTC-4 (DST)
+#   - Lucknow (VILK) lon/15=+5            -> gercek UTC+5:30
+# zoneinfo (IANA tz DB, Windows 10+ dahili) gercek offset + DST verir.
+_CITY_TZ: dict[str, str] = {
+    "CYYZ": "America/Toronto",
+    "EDDM": "Europe/Berlin",
+    "EFHK": "Europe/Helsinki",
+    "EGLC": "Europe/London",
+    "EHAM": "Europe/Amsterdam",
+    "EPWA": "Europe/Warsaw",
+    "FACT": "Africa/Johannesburg",
+    "KATL": "America/New_York",
+    "KAUS": "America/Chicago",
+    "KBKF": "America/Denver",
+    "KDAL": "America/Chicago",
+    "KHOU": "America/Chicago",
+    "KLAX": "America/Los_Angeles",
+    "KLGA": "America/New_York",
+    "KMIA": "America/New_York",
+    "KORD": "America/Chicago",
+    "KSEA": "America/Los_Angeles",
+    "KSFO": "America/Los_Angeles",
+    "LEMD": "Europe/Madrid",
+    "LFPB": "Europe/Paris",
+    "LIMC": "Europe/Rome",
+    "LLBG": "Asia/Jerusalem",
+    "LTAC": "Europe/Istanbul",
+    "LTFM": "Europe/Istanbul",
+    "MMMX": "America/Mexico_City",
+    "MPMG": "America/Panama",
+    "NZWN": "Pacific/Auckland",
+    "OEJN": "Asia/Riyadh",
+    "OPKC": "Asia/Karachi",
+    "RCSS": "Asia/Taipei",
+    "RJTT": "Asia/Tokyo",
+    "RKPK": "Asia/Seoul",
+    "RKSI": "Asia/Seoul",
+    "RPLL": "Asia/Manila",
+    "SAEZ": "America/Argentina/Buenos_Aires",
+    "SBGR": "America/Sao_Paulo",
+    "UUWW": "Europe/Moscow",
+    "VHHH": "Asia/Hong_Kong",
+    "VILK": "Asia/Kolkata",
+    "WMKK": "Asia/Kuala_Lumpur",
+    "WSSS": "Asia/Singapore",
+    "ZBAA": "Asia/Shanghai",
+    "ZGGG": "Asia/Shanghai",
+    "ZGSZ": "Asia/Shanghai",
+    "ZHHH": "Asia/Shanghai",
+    "ZSPD": "Asia/Shanghai",
+    "ZSQD": "Asia/Shanghai",
+    "ZUCK": "Asia/Shanghai",
+    "ZUUU": "Asia/Shanghai",
+}
+
+
+def city_utc_offset(city_code: str, day: str, fallback_lon: Optional[float] = None) -> float:
+    """Sehrin UTC offset'ini saat cinsinden verir (target gun, DST dahil).
+
+    Bilinen sehirlerde zoneinfo tz DB'sinden gercek offset okunur; bilinmeyen
+    sehirde lon/15 nominal degerine duser. day: 'YYYY-MM-DD'.
+    """
+    import zoneinfo
+
+    tz_name = _CITY_TZ.get(city_code)
+    if tz_name:
+        try:
+            tz = zoneinfo.ZoneInfo(tz_name)
+            y, m, d = int(day[:4]), int(day[5:7]), int(day[8:10])
+            base = datetime(y, m, d, 0, 0, 0, tzinfo=timezone.utc)
+            off = base.astimezone(tz).utcoffset()
+            if off is not None:
+                return off.total_seconds() / 3600.0
+        except Exception as exc:  # noqa: BLE001 — tz DB eksikse fallback
+            logger.warning("metar tz %s (%s) cozulemedi: %s", city_code, tz_name, exc)
+    try:
+        return round(float(fallback_lon) / 15.0) if fallback_lon is not None else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def detect_peak(
     day_rows: list[tuple[int, float]], min_local_hour: int = 13, utc_offset_hours: float = 0.0
 ) -> tuple[Optional[float], bool]:

@@ -209,3 +209,27 @@ def test_run_retries_and_stops_on_connection_error():
         await stream.run(stop, max_retries=2)
 
     asyncio.run(run_with_stop())  # should not hang
+
+
+def test_run_escalates_after_3_connect_failures_for_rest_fallback():
+    """2026-08-18 audit fix (ag #8): SOCKS proxy reddi bir aiohttp.ClientError
+    -> eski kod sonsuz ic retry yapiyor, bot_loop.ws_fail_streak artmiyor, REST
+    yedigine gecilmiyordu (17-Agu'da REST'e sadece getaddrinfo OSError kactigi
+    icin gecildi). max_retries=None (bot_loop modu) baglanti KURULAMAYAN 3
+    denemeden sonra DISARI FIRLATIR; disaridaki loop streak'i artirip REST
+    polling'e gecer."""
+    from unittest.mock import AsyncMock, patch
+
+    stream = CLOBMarketStream(["tok"], lambda ev: None)
+
+    with (
+        patch("scrapers.clob_stream.CLOBMarketStream._run_connection", side_effect=ConnectionError("down")),
+        patch("scrapers.clob_stream.asyncio.sleep", new=AsyncMock()),  # retry bekleme yok
+    ):
+
+        async def run():
+            stop = asyncio.Event()
+            with pytest.raises(ConnectionError):
+                await stream.run(stop, max_retries=None)
+
+        asyncio.run(run())

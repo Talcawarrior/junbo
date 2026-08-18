@@ -101,6 +101,12 @@ def _close_wrong_bucket_bets(session, city_code: str, target_date, winning_bucke
         .filter(
             WeatherMarket.city_code == city_code,
             WeatherMarket.target_date.isnot(None),
+            # 2026-08-18 audit fix (M12): bucket mantigi yalnizca temperature_max
+            # RANGE marketleri icindir (kullanici "tam bucket a aciyoruz").
+            # temperature_min / HIGH / LOW marketlerinin kazanan bucket'i yoktur;
+            # METAR peak bucket'i ile karsilastirilarak satilmazlar.
+            WeatherMarket.metric == "temperature_max",
+            WeatherMarket.market_type == "RANGE",
             Bet.status.in_(("placed", "open", "active", "pending")),
         )
         .all()
@@ -112,7 +118,7 @@ def _close_wrong_bucket_bets(session, city_code: str, target_date, winning_bucke
             continue
         if wm.threshold is None:
             continue
-        if round(float(wm.threshold)) == winning_bucket:
+        if int(float(wm.threshold) + 0.5) == winning_bucket:
             continue  # kazanan bucket TUTULUR
         try:
             live = float(wm.yes_price) if wm.yes_price else float(bet.entry_price or 0)
@@ -156,6 +162,28 @@ def _open_metar_bet(session, market: WeatherMarket, peak_temp: float) -> Optiona
         )
         return None
 
+    # 2026-08-18 audit fix (C3): fantom/stale fiyat guardi. Canli METAR-peak
+    # betleri (30 bet, -$32.84) icin entry=0.01-0.03 longshot'lar tamamen
+    # kayipti. MIN_ENTRY uzerindekiler de CLOB canli kottan %15'ten fazla
+    # sapiyorsa reddedilir. CLOB hataliysa bet asla engellenmez.
+    try:
+        from utils.clob_live import live_quote_for_market, price_is_stale
+
+        # getattr: WeatherMarket.raw_data mypy'de Column[str]; runtime'da str|None.
+        # live_quote_for_market(str|None) bekler — Column tipini asla gecirmeyiz.
+        _tok, live_ask, live_bid = live_quote_for_market(getattr(market, "raw_data", None))
+        if _tok is not None and live_ask is not None and price_is_stale(entry, live_ask, live_bid):
+            logger.warning(
+                "metar_peak: STALE PRICE GUARD %s DB yes=%.4f vs CLOB ask=%.4f (bid=%.4f) - bet refused",
+                market.id,
+                entry,
+                live_ask,
+                live_bid,
+            )
+            return None
+    except Exception as exc:  # never block betting on CLOB failure
+        logger.debug("metar_peak: live price guard skipped for %s: %s", market.id, exc)
+
     pf = session.query(Portfolio).filter(Portfolio.id == 1).first()
     cash = float(pf.cash_balance) if pf else 0.0
     use_stake = min(METAR_STAKE, max(0.0, cash))
@@ -194,6 +222,16 @@ def _open_metar_bet(session, market: WeatherMarket, peak_temp: float) -> Optiona
         covered_fraction=0.0,
     )
     session.add(bet)
+    # 2026-08-18 audit fix (C1): stake daha once HIC dusulmuyordu -> kagit nakit
+    # ve exposure yanlis. bet_placer/spread_placer gibi burada da debit edilir.
+    try:
+        from utils.accounting import debit_stake
+
+        debit_stake(session, use_stake, f"metar_peak {market.city} {market.threshold}C")
+    except ValueError as exc:
+        logger.warning("metar_peak: %s %sC nakit dusulemedi (%s) - bet iptal", market.city, market.threshold, exc)
+        session.rollback()
+        return None
     logger.info(
         "metar_peak: BET acildi %s %sC peak=%.1f giris=%.3f stake=%.2f",
         market.city,
@@ -277,11 +315,11 @@ def run_metar_peak_bets() -> int:
             if _existing_metar_bet(session, str(m.id)):
                 continue
             day = m.target_date.date().isoformat() if m.target_date else today
-            utc_offset = 0.0
-            try:
-                utc_offset = round(float(m.longitude) / 15.0)
-            except (TypeError, ValueError):
-                utc_offset = 0.0
+            # 2026-08-18 audit fix (M3): gercek saat dilimi (zoneinfo + DST),
+            # round(lon/15) nominal degil. China +8, Seoul +9, London BST +1.
+            from scrapers.metar import city_utc_offset
+
+            utc_offset = city_utc_offset(m.city_code, day, m.longitude)
             candidates.append((m, day, utc_offset))
 
         # Ilk olarak sadece benzersiz (city_code, day) icin METAR cek (cache'li)
@@ -316,7 +354,8 @@ def run_metar_peak_bets() -> int:
             peak, confirmed = detect_peak(day_rows, utc_offset_hours=utc_offset)
             if not confirmed or peak is None:
                 continue  # zirve henuz kilitlenmedi
-            bucket = round(peak)
+            # 2026-08-18 audit fix (C2): round() banker's yerine half-up.
+            bucket = int(peak + 0.5) if peak >= 0 else int(peak - 0.5)
             if float(m.threshold) != bucket:
                 continue  # bu market kazanan bucket degil
             bet = _open_metar_bet(session, m, peak)

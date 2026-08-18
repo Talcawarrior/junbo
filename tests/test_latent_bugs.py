@@ -238,6 +238,13 @@ ALLOWED_DEAD = {
     "db_max_age",
     "ensure_task_enabled",
     "run_script",
+    # Backtest script internal helpers (standalone scripts: kendi icinde
+    # kullanilir, disardan cagrilmaz — census false-positive)
+    "ask_at_or_after",
+    "cost_of",
+    "fetch_history",
+    "first_ask_below",
+    "peak_lock",
     # Strategy methods used via dispatch / polymorphism
     "analyze_signal",
     "execute_signal",

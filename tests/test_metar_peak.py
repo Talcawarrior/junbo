@@ -4,8 +4,10 @@ Bug (2026-08-15): detect_peak sabahin gece sicakligini (00:00'da 25C) zirve
 sanip erken kilitleniyordu -> yanlis bucket'a bet acildi (Paris 25 vs gercek
 31). Duzeltme: UTC >= 15:00 sonrasi kilitlenir. Bu test o regresyonu korur.
 """
+
 import sys
-sys.path.insert(0, r'C:\Users\fdemir\Documents\New project\junbo')
+
+sys.path.insert(0, r"C:\Users\fdemir\Documents\New project\junbo")
 
 from datetime import datetime, timezone
 
@@ -58,11 +60,24 @@ class TestDetectPeakMorningBug:
         from scrapers.metar import detect_peak
 
         # Paris: 00:00 25, sabah 22-23, oglen 28-30, 15:00-17:00 31, sonra 30-29
-        rows = _rows_at([
-            (0, 25.0), (3, 24.0), (4, 23.0), (5, 22.0), (8, 25.0),
-            (9, 28.0), (11, 30.0), (12, 29.0), (14, 30.0), (15, 31.0),
-            (16, 31.0), (17, 31.0), (18, 30.0), (19, 29.0),
-        ])
+        rows = _rows_at(
+            [
+                (0, 25.0),
+                (3, 24.0),
+                (4, 23.0),
+                (5, 22.0),
+                (8, 25.0),
+                (9, 28.0),
+                (11, 30.0),
+                (12, 29.0),
+                (14, 30.0),
+                (15, 31.0),
+                (16, 31.0),
+                (17, 31.0),
+                (18, 30.0),
+                (19, 29.0),
+            ]
+        )
         peak, confirmed = detect_peak(rows)
         assert confirmed is True
         assert peak == 31.0, f"Paris gercek max 31 olmali: {peak}"
@@ -124,25 +139,99 @@ class TestCloseWrongBucketBets:
             s.query(Portfolio).delete()
             pf = Portfolio(id=1, cash_balance=100.0, total_value=100.0)
             s.add(pf)
-            # kazanan bucket 34C; 32C ve 34C marketleri
-            w1 = WeatherMarket(id="M1", city="Hong Kong", city_code="VHHH",
-                               question="Hong Kong temperature", threshold=32.0,
-                               target_date=day, status="open",
-                               yes_price=0.25, latitude=22.3, longitude=114.2)
-            w2 = WeatherMarket(id="M2", city="Hong Kong", city_code="VHHH",
-                               question="Hong Kong temperature", threshold=34.0,
-                               target_date=day, status="open",
-                               yes_price=0.45, latitude=22.3, longitude=114.2)
-            s.add_all([w1, w2])
-            b1 = Bet(id=1, market_id="M1", city="Hong Kong", side="YES",
-                     amount=2.0, stake_amount=2.0, price=0.25, entry_price=0.25,
-                     shares=8.0, current_price=0.25, status="placed",
-                     strike_temp=32.0, order_id="spread_1")
-            b2 = Bet(id=2, market_id="M2", city="Hong Kong", side="YES",
-                     amount=2.0, stake_amount=2.0, price=0.45, entry_price=0.45,
-                     shares=4.44, current_price=0.45, status="placed",
-                     strike_temp=34.0, order_id="spread_2")
-            s.add_all([b1, b2])
+            # kazanan bucket 34C; 32C ve 34C RANGE temperature_max marketleri
+            w1 = WeatherMarket(
+                id="M1",
+                city="Hong Kong",
+                city_code="VHHH",
+                question="Hong Kong temperature",
+                threshold=32.0,
+                target_date=day,
+                status="open",
+                yes_price=0.25,
+                latitude=22.3,
+                longitude=114.2,
+                metric="temperature_max",
+                market_type="RANGE",
+            )
+            w2 = WeatherMarket(
+                id="M2",
+                city="Hong Kong",
+                city_code="VHHH",
+                question="Hong Kong temperature",
+                threshold=34.0,
+                target_date=day,
+                status="open",
+                yes_price=0.45,
+                latitude=22.3,
+                longitude=114.2,
+                metric="temperature_max",
+                market_type="RANGE",
+            )
+            # M12 (2026-08-18): bucket mantigi SADECE temperature_max RANGE
+            # icindir. temperature_min marketi yanlis "bucket"ta olsa da
+            # kapatilmamali (onun kazanan bucket'i yoktur).
+            w3 = WeatherMarket(
+                id="M3",
+                city="Hong Kong",
+                city_code="VHHH",
+                question="Hong Kong temperature min",
+                threshold=32.0,
+                target_date=day,
+                status="open",
+                yes_price=0.25,
+                latitude=22.3,
+                longitude=114.2,
+                metric="temperature_min",
+                market_type="RANGE",
+            )
+            s.add_all([w1, w2, w3])
+            b1 = Bet(
+                id=1,
+                market_id="M1",
+                city="Hong Kong",
+                side="YES",
+                amount=2.0,
+                stake_amount=2.0,
+                price=0.25,
+                entry_price=0.25,
+                shares=8.0,
+                current_price=0.25,
+                status="placed",
+                strike_temp=32.0,
+                order_id="spread_1",
+            )
+            b2 = Bet(
+                id=2,
+                market_id="M2",
+                city="Hong Kong",
+                side="YES",
+                amount=2.0,
+                stake_amount=2.0,
+                price=0.45,
+                entry_price=0.45,
+                shares=4.44,
+                current_price=0.45,
+                status="placed",
+                strike_temp=34.0,
+                order_id="spread_2",
+            )
+            b3 = Bet(
+                id=3,
+                market_id="M3",
+                city="Hong Kong",
+                side="YES",
+                amount=2.0,
+                stake_amount=2.0,
+                price=0.25,
+                entry_price=0.25,
+                shares=8.0,
+                current_price=0.25,
+                status="placed",
+                strike_temp=32.0,
+                order_id="spread_3",
+            )
+            s.add_all([b1, b2, b3])
             s.commit()
 
             closed = _close_wrong_bucket_bets(s, "VHHH", day, 34)
@@ -151,3 +240,4 @@ class TestCloseWrongBucketBets:
         assert closed == 1, f"Sadece yanlis bucket (32C) kapatilmali: {closed}"
         assert statuses[1] == "closed", "32C beti kapanmali"
         assert statuses[2] in ("placed", "open"), "34C kazanan bucket TUTULMALI"
+        assert statuses[3] in ("placed", "open"), "temperature_min beti KAPATILMAMALI (M12)"

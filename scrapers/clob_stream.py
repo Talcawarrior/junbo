@@ -69,17 +69,31 @@ class CLOBMarketStream:
     async def run(self, stop: asyncio.Event | None = None, *, max_retries: int | None = None) -> None:
         stop = stop or asyncio.Event()
         retries = 0
+        connect_fails = 0
         while not stop.is_set() and (max_retries is None or retries <= max_retries):
             try:
                 await self._run_connection(stop)
+                connect_fails = 0
                 retries = 0
-            except (aiohttp.ClientError, asyncio.TimeoutError, ConnectionError) as exc:
+            except asyncio.CancelledError:
+                raise
+            except (aiohttp.ClientError, asyncio.TimeoutError, ConnectionError, OSError) as exc:
                 retries += 1
+                connect_fails += 1
                 if stop.is_set():
                     break
                 delay = min(30.0, 2.0 ** min(retries, 4))
                 logger.warning("CLOB market stream disconnected: %s; retrying in %.1fs", exc, delay)
                 await asyncio.sleep(delay)
+                # 2026-08-18 audit fix (ag #8): SOCKS proxy reddi bir
+                # aiohttp.ClientError -> burada sonsuz ic retry olur, disaridaki
+                # bot_loop.ws_fail_streak HIC artmaz, REST yedigine gecilmezdi.
+                # (17-Agu'da REST'e gecildi cunku getaddrinfo OSError'i kaciyordu.)
+                # max_retries=None (bot_loop) modunda 3 kez ust uste baglanti
+                # kurulamadiysa DISARI FIRLATILIR; bot_loop streak'i artirip REST
+                # polling'e gecer. Sinirli max_retries (testler) temiz cikar.
+                if connect_fails >= 3 and max_retries is None:
+                    raise
 
     async def _run_connection(self, stop: asyncio.Event) -> None:
         owns_session = self.session is None
