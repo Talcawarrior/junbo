@@ -484,10 +484,15 @@ class PolymarketScraper:
                     status = "no_coords" if not has_coords else "open"
 
                     # --- Duplicate prevention ---
-                    # Build a strike key: (city, date_str, threshold)
+                    # Build a strike key: (city, date_str, threshold, metric).
+                    # 2026-08-19 BUG (kullanici buldu): metric YOKTU — highest ve
+                    # lowest pazarlari ayni °F araliginda (orn. NY 76-77°F) AYNI
+                    # threshold uretir (24.7°C); lowest once islenince highest
+                    # "duplicate" sanilip ATILIYORDU (3687084/85 DB'ye hic
+                    # girmemisti). Metric eklenince highest/lowest ayrisir.
                     _td = parsed["target_date"]
                     _td_str = _td.strftime("%Y-%m-%d") if hasattr(_td, "strftime") else str(_td)[:10]
-                    _strike_key = (parsed["city"], _td_str, parsed["threshold"])
+                    _strike_key = (parsed["city"], _td_str, parsed["threshold"], parsed["metric"])
 
                     # Check by Polymarket ID first (fast path)
                     existing = session.query(WeatherMarket).filter_by(id=parsed["id"]).first()
@@ -500,6 +505,7 @@ class PolymarketScraper:
                             session.query(WeatherMarket)
                             .filter(
                                 WeatherMarket.city == parsed["city"],
+                                WeatherMarket.metric == parsed["metric"],
                                 WeatherMarket.threshold == parsed["threshold"],
                                 WeatherMarket.target_date.isnot(None),
                                 # Filter by same date (string comparison in DB)
