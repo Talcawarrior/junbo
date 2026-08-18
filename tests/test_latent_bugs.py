@@ -196,6 +196,7 @@ ALLOWED_DEAD = {
     "cmd_gunluk",
     "cmd_orderbook",
     "cmd_metar_peak",
+    "cmd_metar_peak_live",
     "cmd_metar_vs_settlement",
     "cmd_walk_forward",
     # Finance helpers covered by unit tests but no non-test caller today
