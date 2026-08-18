@@ -1264,7 +1264,7 @@ def _wf_load_data():
     cur.execute(
         """
         SELECT id as market_id, city, city_code, metric, threshold,
-               target_date, yes_price, no_price, status
+               target_date, yes_price, no_price, status, raw_data
         FROM weather_markets
         WHERE city IS NOT NULL AND target_date IS NOT NULL
     """
@@ -1291,24 +1291,34 @@ def _wf_load_data():
     )
     forecasts = [dict(r) for r in cur.fetchall()]
 
-    cur.execute(
-        """
-        SELECT id as bet_id, market_id, city, outcome, stake_amount,
-               entry_price, shares, status, placed_at, settled_at
-        FROM bets
-        WHERE status IN ('won', 'lost')
-        ORDER BY placed_at
-    """
-    )
-    resolved_bets = [dict(r) for r in cur.fetchall()]
-
     conn.close()
+
+    # 2026-08-18 audit fix (W1b): backtest.db sync'inde cozumler yalnizca
+    # 05-Agu'ya kadar gelmis; bot.db'de 04-17 Agu arasi TAM. Outcome oncelikle
+    # bot.db'den (guncel), eksikse backtest.db raw_data'sindan alinir.
+    live_outcomes: dict[str, bool] = {}
+    try:
+        out_db = sqlite3.connect(BOT_DB, timeout=30)
+        out_db.execute("PRAGMA busy_timeout=30000")
+        for mid, raw in out_db.execute("SELECT id, raw_data FROM weather_markets WHERE raw_data IS NOT NULL"):
+            o = parse_resolved_outcome(raw)
+            if o is not None:
+                live_outcomes[str(mid)] = o
+        out_db.close()
+    except sqlite3.OperationalError:
+        pass
 
     for m in markets:
         if m.get("target_date"):
             m["target_date"] = datetime.fromisoformat(m["target_date"])
         if m.get("yes_price") is not None:
             m["yes_price"] = float(m["yes_price"])
+        # 2026-08-18 audit fix (W1): sonuc kaynagi `bets` tablosu degil,
+        # marketin GERCEK Polymarket cozumu. bets'te yalnizca botun kendi
+        # gecmisi var (~44 cozumlu satir) -> walk-forward tek gun uretiyordu.
+        m["outcome"] = live_outcomes.get(str(m["market_id"]))
+        if m["outcome"] is None and m.get("raw_data"):
+            m["outcome"] = parse_resolved_outcome(m["raw_data"])
 
     for s in snapshots:
         if s.get("snapshot_time"):
@@ -1332,25 +1342,41 @@ def _wf_load_data():
         if f.get("model_weight") is not None:
             f["model_weight"] = float(f["model_weight"])
 
-    for b in resolved_bets:
-        if b.get("placed_at"):
-            b["placed_at"] = datetime.fromisoformat(b["placed_at"])
-        if b.get("settled_at"):
-            b["settled_at"] = datetime.fromisoformat(b["settled_at"])
-
-    return markets, snapshots, forecasts, resolved_bets
+    return markets, snapshots, forecasts
 
 
-def _wf_get_available_forecast(forecasts: list, market_id: str, decision_time: datetime):
-    available = [
-        f
-        for f in forecasts
-        if f["market_id"] == market_id and f.get("fetched_at") is not None and f["fetched_at"] <= decision_time
-    ]
-    if not available:
+def _wf_forecast_index(forecasts: list) -> dict:
+    """market_id -> fetched_at artan sirada forecast listesi.
+
+    2026-08-18 audit fix (W4): eski kod her snapshot icin TUM forecast
+    listesini lineer taradi (113k satir x 20k snapshot x 19 fold ~ milyarlarca
+    karsilastirma -> dakikalar/saatler). Tek seferlik indeks ile her arama
+    o marketin kendi kisa listesinde yapilir.
+    """
+    by_mid: dict[str, list] = defaultdict(list)
+    for f in forecasts:
+        by_mid[f["market_id"]].append(f)
+    for lst in by_mid.values():
+        lst.sort(key=lambda f: f.get("fetched_at") or datetime.min)
+    return by_mid
+
+
+def _wf_get_available_forecast(forecasts_by_mid: dict, market_id: str, decision_time: datetime):
+    """decision_time oncesindeki SON fetch (bot func.max(fetched_at) secimi)."""
+    avail = forecasts_by_mid.get(market_id)
+    if not avail:
         return None
-    available.sort(key=lambda f: f["fetched_at"])
-    latest = available[-1]
+    latest = None
+    for f in avail:
+        ft = f.get("fetched_at")
+        if ft is None:
+            continue
+        if ft <= decision_time:
+            latest = f
+        else:
+            break
+    if latest is None:
+        return None
     return {
         "mean": latest.get("predicted_value"),
         "std": latest.get("confidence") or 2.0,
@@ -1358,21 +1384,24 @@ def _wf_get_available_forecast(forecasts: list, market_id: str, decision_time: d
     }
 
 
-def _wf_simulate_decision(snap: dict, forecast, hours_to_settlement: float):
+def _wf_simulate_decision(snap: dict, forecast, hours_to_settlement: float, threshold, entry_price):
     if hours_to_settlement > MAX_HOURS_TO_SETTLEMENT:
         return None
     if hours_to_settlement < MIN_HOURS_TO_SETTLEMENT:
         return None
 
-    entry_price = snap.get("yes_price")
     if entry_price is None or entry_price > MAX_ENTRY_PRICE or entry_price < 0.05:
         return None
 
     if forecast is None or forecast.get("mean") is None:
         return None
 
+    # 2026-08-18 audit fix (W2): eski kod snap.get("threshold", 25)
+    # kullaniyordu ama market_snapshots'ta threshold kolonu YOK -> her bet icin
+    # sabit 25 varsayiliyor, P(max>=25)~1 -> model_prob 0.99'a kilitleniyordu
+    # (sahte %100 winrate'in asil kaynagi). Esik artik MARKET kaydindan gelir.
     model_prob = _wf_estimate_probability(
-        forecast["mean"], forecast["std"], snap.get("threshold", 25), snap.get("metric", "temperature_max")
+        forecast["mean"], forecast["std"], threshold, snap.get("metric", "temperature_max")
     )
     model_prob = max(0.01, min(0.99, model_prob))
 
@@ -1390,23 +1419,15 @@ def _wf_simulate_decision(snap: dict, forecast, hours_to_settlement: float):
     }
 
 
-def _wf_resolve_outcome(resolved_bets: list, market_id: str):
-    for b in resolved_bets:
-        if b["market_id"] == market_id:
-            return b["status"] == "won"
-    return None
-
-
 def _wf_run_single_fold(
-    markets,
+    market_lookup,
     snapshots,
-    forecasts,
-    resolved_bets,
-    train_start,
-    train_end,
+    forecasts_by_mid,
+    price_series,
     test_start,
     test_end,
     fold_id,
+    seen,
 ):
     results = []
 
@@ -1417,41 +1438,66 @@ def _wf_run_single_fold(
     if not test_snaps:
         return results
 
-    market_lookup = {m["market_id"]: m for m in markets}
+    # 2026-08-18 audit fix (W3): bet zamana gore ilk UYGUN snapshot'ta acilir
+    # ve market basina TEK bet vardir (botun dup-guard'i ile ayni). Eski kod
+    # her saatlik snapshot'ta ayni markete yeniden giriyordu (ayni gun 11 bet,
+    # %100 winrate'in ikinci kaynagi).
+    test_snaps.sort(key=lambda s: s["snapshot_time"])
 
     for snap in test_snaps:
         market_id = snap["market_id"]
+        if market_id in seen:
+            continue
         decision_time = snap["snapshot_time"]
-        hours_to_settlement = snap.get("hours_to_settlement")
-
-        if hours_to_settlement is None:
-            target = market_lookup.get(market_id, {}).get("target_date")
-            if target:
-                hours_to_settlement = (target - decision_time).total_seconds() / 3600
-            else:
-                continue
 
         market = market_lookup.get(market_id)
         if market is None:
             continue
 
-        forecast = _wf_get_available_forecast(forecasts, market_id, decision_time)
+        hours_to_settlement = snap.get("hours_to_settlement")
+        if hours_to_settlement is None:
+            target = market.get("target_date")
+            if target:
+                hours_to_settlement = (target - decision_time).total_seconds() / 3600
+            else:
+                continue
+
+        outcome = market.get("outcome")
+        if outcome is None:
+            continue  # cozumlenmemis market simule edilemez
+
+        forecast = _wf_get_available_forecast(forecasts_by_mid, market_id, decision_time)
         if forecast is None:
             continue
 
-        decision = _wf_simulate_decision(snap, forecast, hours_to_settlement)
+        # 2026-08-18 audit fix (W5): giris fiyati market_snapshots.yes_price
+        # DEGIL, gercek fiyat serisinden (orderbook + CLOB price_history) —
+        # snapshot yes_price market fonlanmadan once ~0 artefakti uretiyordu
+        # (gunluk backtest'in C1 kuralinin aynisi).
+        seri = price_series.get(market_id)
+        if not seri:
+            continue
+        # ask_at_or_after epoch (float) bekler; dosyadaki ts() ile ayni kural.
+        entry_price = ask_at_or_after(seri, decision_time.timestamp())
+        if entry_price is None:
+            continue
+
+        threshold = market.get("threshold")
+        if threshold is None:
+            continue
+
+        decision = _wf_simulate_decision(snap, forecast, hours_to_settlement, threshold, entry_price)
         if decision is None:
             continue
 
-        won = _wf_resolve_outcome(resolved_bets, market_id)
-        if won is None:
-            continue
+        won = bool(outcome)
 
         if won:
             pnl = FLAT_BET * (1 / decision["entry_price"] - 1) * (1 - FEE_RATE)
         else:
             pnl = -FLAT_BET
 
+        seen.add(market_id)
         results.append(
             {
                 "market_id": market_id,
@@ -1472,7 +1518,7 @@ def _wf_run_single_fold(
     return results
 
 
-def _wf_walk_forward(markets, snapshots, forecasts, resolved_bets):
+def _wf_walk_forward(markets, snapshots, forecasts_by_mid, price_series):
     all_times = []
     for s in snapshots:
         if s.get("snapshot_time"):
@@ -1488,6 +1534,8 @@ def _wf_walk_forward(markets, snapshots, forecasts, resolved_bets):
     max_time = max(all_times)
     print(f"Veri araligi: {min_time} -> {max_time}")
 
+    market_lookup = {m["market_id"]: m for m in markets}
+    seen: set[str] = set()
     all_results = []
     fold_id = 0
     current_train_start = min_time
@@ -1502,7 +1550,7 @@ def _wf_walk_forward(markets, snapshots, forecasts, resolved_bets):
 
         train_markets = [m for m in markets if m.get("target_date") is not None and m["target_date"] <= train_end]
 
-        train_settled = sum(1 for m in train_markets if _wf_resolve_outcome(resolved_bets, m["market_id"]) is not None)
+        train_settled = sum(1 for m in train_markets if m.get("outcome") is not None)
 
         print(f"\n=== Fold {fold_id} ===")
         print(
@@ -1517,15 +1565,14 @@ def _wf_walk_forward(markets, snapshots, forecasts, resolved_bets):
             continue
 
         fold_results = _wf_run_single_fold(
-            markets,
+            market_lookup,
             snapshots,
-            forecasts,
-            resolved_bets,
-            current_train_start,
-            train_end,
+            forecasts_by_mid,
+            price_series,
             test_start,
             test_end,
             fold_id,
+            seen,
         )
 
         print(f"  -> {len(fold_results)} bet")
@@ -1584,13 +1631,33 @@ def cmd_walk_forward() -> int:
     WF_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     print("Walk-Forward Backtest basliyor...\n")
 
-    markets, snapshots, forecasts, resolved_bets = _wf_load_data()
-    print(
-        f"Yuklenen: {len(markets)} market, {len(snapshots)} snapshot, "
-        f"{len(forecasts)} forecast, {len(resolved_bets)} resolved bet"
-    )
+    markets, snapshots, forecasts = _wf_load_data()
+    resolved = sum(1 for m in markets if m.get("outcome") is not None)
+    print(f"Yuklenen: {len(markets)} market ({resolved} cozumlu), {len(snapshots)} snapshot, {len(forecasts)} forecast")
 
-    results = _wf_walk_forward(markets, snapshots, forecasts, resolved_bets)
+    # Tek seferlik indeksler (W4): forecast lineer taramasi kaldirildi.
+    forecasts_by_mid = _wf_forecast_index(forecasts)
+
+    # Gercek fiyat serisi (W5): orderbook best_ask + CLOB price_history,
+    # gunluk backtest ile ayni kaynaklar.
+    price_series = _load_orderbook(OB_DB)
+    if os.path.exists(BP_DB):
+        try:
+            bp = sqlite3.connect(BP_DB, timeout=30)
+            for mid, t, p in bp.execute(
+                "SELECT market_id, ts, price FROM price_history WHERE price > 0 AND price <= 1"
+            ):
+                try:
+                    price_series[str(mid)].append((float(t), float(p)))
+                except (TypeError, ValueError):
+                    pass
+            bp.close()
+        except sqlite3.OperationalError:
+            pass
+    for k in price_series:
+        price_series[k].sort(key=lambda x: x[0])
+
+    results = _wf_walk_forward(markets, snapshots, forecasts_by_mid, price_series)
 
     if not results:
         print("Sonuc yok.")
