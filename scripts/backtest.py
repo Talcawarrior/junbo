@@ -1421,6 +1421,30 @@ def cmd_metar_peak_live(args) -> int:
         print(f"  fee + gas toplami     : ${tot_cost:.2f}")
         print(f"  NET (slippage dahil)  : ${tot_pnl:+.2f}")
         print(f"  [slippage etkisi]     : slippage'siz NET ${tot_ideal:+.2f}  ->  fark ${tot_ideal - tot_pnl:+.2f}")
+        # ---- COMPOUND (2026-08-19 kullanici: "100 usd yatirip 70 usd
+        # kazandiysan ertesi gun 2 ve 3 usd leri buna gore artir") ----
+        # Her gun bankroll'un sabit %'sini (peak: stake/100) yatir; gun sonu
+        # kazanc bankroll'e EKLENIR (compound). Gas $0.10 her bette sabit.
+        if getattr(args, "stake_mode", "flat") == "compound":
+            bankroll = args.bankroll
+            ratio = stake / 100.0
+            comp_rows = []
+            for day in sorted({b["day"] for b in bets}):
+                dbets = [b for b in bets if b["day"] == day]
+                day_stake = 0.0
+                day_pnl = 0.0
+                for b in dbets:
+                    st = bankroll * ratio
+                    pnl_c = st * b["per"] - GAS
+                    day_stake += st
+                    day_pnl += pnl_c
+                bankroll += day_pnl
+                comp_rows.append((day, len(dbets), day_stake, day_pnl, bankroll))
+            print()
+            print("  [COMPOUND ] baslangic $%.2f, peak orani %%%.1f/gun beti" % (args.bankroll, ratio * 100))
+            for day, n, dst, dpnl, broll in comp_rows:
+                print(f"  {day:10s} bet={n:>3d} stake=${dst:>8.2f} gun_kar=${dpnl:>+8.2f} bankroll=${broll:>9.2f}")
+            print(f"  {len(comp_rows)} gun sonunda bankroll: ${bankroll:.2f}  (baslangic ${args.bankroll:.2f})")
         # ---- KELLY varyasyonu (2026-08-18 kullanici: "stake kelly tarzi") ----
         # f = p - (1-p)*entry/(1-entry); p = ayni fiyat araliginin ampirik
         # winrate'i. Ortalama stake flat baz'a esit kalacak sekilde olceklenir
@@ -2313,8 +2337,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--min-lock-hour", type=int, default=6, help="min kilidi icin yerel saat esigi (dip gundogumu sonrasi)"
     )
     pl.add_argument(
-        "--stake-mode", default="flat", choices=["flat", "kelly"], help="flat=$3 sabit, kelly=fiyata gore olcekli"
+        "--stake-mode",
+        default="flat",
+        choices=["flat", "kelly", "compound"],
+        help="flat=$3 sabit, kelly=fiyata gore, compound=kazanci bankroll'e ekle",
     )
+    pl.add_argument("--bankroll", type=float, default=100.0, help="compound baslangic bankroll'u (USD)")
     pl.set_defaults(func=lambda a: cmd_metar_peak_live(a))
 
     w = sub.add_parser("walk_forward", help="walk-forward (look-ahead'siz) model dogrulama")

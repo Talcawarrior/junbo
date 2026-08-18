@@ -402,6 +402,18 @@ def run_metar_peak_bets() -> int:
             # Austin 35.9C marketi bucket 36'ya karsilik gelir.
             if int(float(m.threshold) + 0.5) != winner_bucket:
                 continue  # bu market kazanan bucket degil
+            # 2026-08-19 OTOMATIK UYARI (kullanici: "bunu onleyecek/kontrol
+            # edecek bir sey yap"): kilitli peak'in bucket marketi DB'de YOKSA
+            # uyar. Not: market cakisma fix'inden (metric'li dup-key) sonra bu
+            # uyari yalnizca GERCEKTEN acilmamis bucket'lari gosterir; yutulan
+            # marketler artik kaydediliyor. Istatistik icin log'a yazilir.
+            logger.warning(
+                "metar_peak: KILITLI BUCKET MARKETI YOK %s %sC (kilitli peak=%.1f) — "
+                "Polyde yeni acildiysa bir sonraki dongude yakalanir",
+                m.city,
+                m.threshold,
+                peak,
+            )
             bet = _open_metar_bet(session, m, winner_val)
             if bet:
                 opened += 1
