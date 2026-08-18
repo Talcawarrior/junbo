@@ -254,6 +254,7 @@ ALLOWED_DEAD = {
     # kullanilir, disardan cagrilmaz — census false-positive)
     "ask_at_or_after",
     "cost_of",
+    "peak_break",
     "fetch_history",
     "first_ask_below",
     "peak_lock",

@@ -67,7 +67,8 @@ SPREAD_STAKE = 2.0
 PEAK_STAKE = 3.0
 PEAK_MIN_ENTRY = 0.10
 BIAS_TOP = 15  # spread_max_cities (spread_placer.py)
-BIAS_TOP_PEAK = 40  # BIAS_TOP_CITIES (jobs/metar_peak.py)
+# METAR-PEAK sehir filtresi 2026-08-18'de KALDIRILDI (kullanici: "bias a gerek
+# yok, nasil olsa peak tespit edilmis oluyor") -> TUM sehirler.
 MIN_HOURS_BEFORE_CLOSE = 2.0  # jobs/metar_peak.py
 CLOSE_WINDOW_SEC = 6 * 3600  # peak zamanina en yakin ask icin arama penceresi
 
@@ -118,6 +119,21 @@ def peak_lock(rows: list[tuple[float, float]], utc_off: float, min_hour: int = 1
     return (None, None)
 
 
+def peak_break(rows: list[tuple[float, float]], locked_peak: float, after_epoch: float) -> tuple[float, float] | None:
+    """Kilitli peak'i ASAN ilk gozlem (epoch, temp) — kilit bozulma ani.
+
+    2026-08-18 canli kural (jobs/metar_peak.py): kilitli zirve asilirsa 2 dusus
+    beklenmeden yanlis bucket betleri derhal kapatilir (Milan: kilit 31, sonra
+    32 geldi). after_epoch sonrasi ilk aşan gozlem doner; yoksa None.
+    """
+    for epoch, temp in rows:
+        if epoch <= after_epoch:
+            continue
+        if temp > locked_peak:
+            return (float(epoch), float(temp))
+    return None
+
+
 def cost_of(stake: float, entry: float) -> float:
     fee = stake * FEE_RATE * (1.0 - entry)
     return stake + fee + GAS
@@ -149,7 +165,6 @@ def cmd_gunluk(args) -> int:
     cb = {c: bs[c] / bc[c] for c in bs if bc[c] > 0}
     ordered = [c for c, _ in sorted(cb.items(), key=lambda kv: kv[1])]
     keep = {c for c in ordered[:BIAS_TOP]}
-    keep_peak = {c for c in ordered[:BIAS_TOP_PEAK]}
 
     # market: (code, day, thr) -> (mid, target_ts, outcome, market_type)
     # SADECE temperature_max (spread + metar-peak max bucket'ina bet acar);
@@ -349,9 +364,15 @@ def cmd_gunluk(args) -> int:
         if pk is not None:
             p_bucket, pk_t = pk
             P = int(p_bucket + 0.5)  # audit C2: half-up
-            if P != center:
-                # yanlis bucket: peak aninda canli fiyattan satilir
-                pk_ask = ask_at_or_after(seri, pk_t) if pk_t else None
+            # 2026-08-18 canli kural: kilit bozulduysa (kilitli peak asildi)
+            # kazanan asilma degerinin bucket'idir ve kapatma ASILMA aninda
+            # yapilir; bozulmadiysa kilitli bucket + kilit ani (eski davranis).
+            bk = peak_break(day_rows.get((code, day), []), p_bucket, pk_t)
+            winner_bucket = int(bk[1] + 0.5) if bk is not None else P
+            close_t = bk[0] if bk is not None else pk_t
+            if winner_bucket != center:
+                # yanlis bucket: canli fiyattan satilir (kilit ya da asilma aninda)
+                pk_ask = ask_at_or_after(seri, close_t) if close_t else None
                 if pk_ask is not None and 0 < pk_ask <= 1:
                     exit_tip = "sold_peak"
                     # kapanis maliyeti: satis tarafinda fee = stake*0.05*(1-ask) + gas
@@ -383,12 +404,14 @@ def cmd_gunluk(args) -> int:
             }
         )
 
-    # METAR-PEAK legi: bias-top 40, KILITLI peak bucket'i, SADECE RANGE
+    # METAR-PEAK legi: TUM sehirler (bias filtresi 2026-08-18'de kaldirildi),
+    # KILITLI peak bucket'i, SADECE RANGE. Kilit bozulursa (peak asilirsa)
+    # canli yeni kural: bet acilir AMA asilma aninda canli fiyattan kapatilir.
     for (code, day), (peak_temp, lock_epoch) in metar_peak_.items():
         if day not in days:
             continue
         city = code_name.get(code)
-        if not city or city not in keep_peak:
+        if not city:
             continue
         B = int(peak_temp + 0.5)  # audit C2: half-up
         m = market.get((code, day, float(B)))
@@ -414,8 +437,25 @@ def cmd_gunluk(args) -> int:
             continue
         stake = PEAK_STAKE
         cost = cost_of(stake, entry)
-        won = outcome
-        pnl = (stake / entry - cost) if won else -cost
+        shares = stake / entry
+        # 2026-08-18 canli kural: kilitli peak asildiysa bet asilma aninda
+        # kapatilir (Milan: kilit 31 -> 32 geldi, fiyat cokmeden sat).
+        bk = peak_break(day_rows.get((code, day), []), peak_temp, lock_epoch)
+        if bk is not None:
+            bk_t = bk[0]
+            bk_ask = ask_at_or_after(seri, bk_t)
+            if bk_ask is not None and 0 < bk_ask <= 1:
+                exit_tip = "sold_broken_lock"
+                pnl = (bk_ask - entry) * shares - stake * FEE_RATE * (1.0 - bk_ask) - GAS
+                won = bk_ask > entry
+            else:
+                exit_tip = "hold_settlement"
+                won = outcome
+                pnl = (stake / entry - cost) if outcome else -cost
+        else:
+            exit_tip = "hold_settlement"
+            won = outcome
+            pnl = (stake / entry - cost) if outcome else -cost
         peak.append(
             {
                 "day": day,
@@ -427,8 +467,8 @@ def cmd_gunluk(args) -> int:
                 "stake": stake,
                 "pnl": pnl,
                 "won": won,
-                "exit": "hold_settlement",
-                "exit_ask": None,
+                "exit": exit_tip,
+                "exit_ask": bk_ask if exit_tip == "sold_broken_lock" else None,
             }
         )
 
@@ -476,7 +516,7 @@ def cmd_gunluk(args) -> int:
         f"max_entry={MAX_ENTRY}, fair-filter YOK; kapanis: METAR-peak yanlis bucket satisi + settlement"
     )
     print(
-        f"  METAR-PEAK: bias-top {BIAS_TOP_PEAK}, stake=${PEAK_STAKE:.0f}, MIN_ENTRY={PEAK_MIN_ENTRY}, "
+        f"  METAR-PEAK: TUM sehirler (bias yok), stake=${PEAK_STAKE:.0f}, MIN_ENTRY={PEAK_MIN_ENTRY}, "
         f"bucket=round(KILITLI METAR peak), kapanisa<{MIN_HOURS_BEFORE_CLOSE:.0f}sa YOK"
     )
     print(f"  fee=%{FEE_RATE * 100:.0f} gas=${GAS:.2f}  |  gunler: {', '.join(days)}")
@@ -1096,9 +1136,23 @@ def cmd_metar_peak_live(args) -> int:
         entry_eff = entry + slippage
         if entry_eff >= 1.0:
             continue  # kaydirilmis fiyatla alinamaz
-        cost = cost_of(stake, entry_eff)
-        won = outcome
-        pnl = (stake / entry_eff - cost) if won else -cost
+        # 2026-08-18 canli kural: kilitli peak ASILDIYSA bet asilma aninda
+        # kapatilir (Milan senaryosu); asilma yoksa settlement.
+        bk = peak_break(rows, pk, lock_epoch)
+        if bk is not None:
+            bk_ask = ask_at_or_after(seri, bk[0])
+            if bk_ask is not None and 0 < bk_ask <= 1:
+                shares = stake / entry_eff
+                pnl = (bk_ask - entry_eff) * shares - stake * FEE_RATE * (1.0 - bk_ask) - GAS
+                won = bk_ask > entry_eff
+            else:
+                cost = cost_of(stake, entry_eff)
+                won = outcome
+                pnl = (stake / entry_eff - cost) if won else -cost
+        else:
+            cost = cost_of(stake, entry_eff)
+            won = outcome
+            pnl = (stake / entry_eff - cost) if won else -cost
         bets.append(
             {
                 "day": day,
