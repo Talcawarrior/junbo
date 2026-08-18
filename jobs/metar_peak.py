@@ -18,9 +18,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from database.db import get_session
-from database.models import Bet, HistoricalCalibration, Portfolio, WeatherMarket
+from database.models import Bet, Portfolio, WeatherMarket
 from config.settings import bot_config
-from sqlalchemy import func
 
 # bot_loop._FETCH_TIMEOUT ile ayni deger — circular import onlemek icin burada
 _FETCH_TIMEOUT = 60
@@ -43,9 +42,9 @@ MIN_ENTRY = 0.10
 METAR_STAKE = 3.0
 # Kapanis = target_date + 12h (24:00 UTC)
 CLOSE_HOURS = 12
-# METAR-peak bet'i icin sehir secimi: bias-top N (en az sapan). Kullanici
-# karari 2026-08-16: "bias'ta ilk 40 sehir icin bet acalim".
-BIAS_TOP_CITIES = 40
+# 2026-08-18 kullanici karari: "Metar betleri acilirken bias a gerek yok,
+# nasil olsa peak tespit edilmis oluyor" -> BIAS_TOP_CITIES KALDIRILDI,
+# TUM sehirlerin acik RANGE+max marketlerine bakilir.
 
 
 def _hours_until_close(market) -> float:
@@ -304,31 +303,11 @@ def run_metar_peak_bets() -> int:
         # 2026-08-18 kullanici karari: 24 saat kesintisiz METAR arsivi —
         # bet acma mantigindan bagimsiz (aksam kesilmesi duzeltildi).
         collect_metar_archive(session)
-        # Bias-top N sehir secimi (en az sapan) — kullanici karari 2026-08-16
-        bias_scores: dict[str, float] = {}
-        for code, b in (
-            session.query(
-                HistoricalCalibration.city_code,
-                func.abs(HistoricalCalibration.bias),
-            )
-            .filter(HistoricalCalibration.bias.isnot(None))
-            .all()
-        ):
-            if code:
-                bias_scores[code] = bias_scores.get(code, 0.0) + float(b)
-        bias_cnt: dict[str, int] = {}
-        for (code,) in (
-            session.query(HistoricalCalibration.city_code).filter(HistoricalCalibration.bias.isnot(None)).all()
-        ):
-            if code:
-                bias_cnt[code] = bias_cnt.get(code, 0) + 1
-        avg_bias: dict[str, float] = {}
-        for code in bias_scores:
-            if bias_cnt.get(code, 0) > 0:
-                avg_bias[code] = bias_scores[code] / bias_cnt[code]
-        top_codes = {c for c, _ in sorted(avg_bias.items(), key=lambda kv: kv[1])[:BIAS_TOP_CITIES]}
 
-        # Acik marketler (status=open), bugun ve gelecek gun, bias-top sehirler
+        # 2026-08-18 kullanici karari: "Metar betleri acilirken bias a gerek
+        # yok, nasil olsa peak tespit edilmis oluyor" -> bias-top sehir
+        # filtresi KALDIRILDI, TUM sehirlerin acik marketlerine bakilir.
+        # Acik marketler (status=open), bugun ve gelecek gun, TUM sehirler
         markets = (
             session.query(WeatherMarket)
             .filter(
@@ -350,7 +329,6 @@ def run_metar_peak_bets() -> int:
             )
             .all()
         )
-        markets = [m for m in markets if m.city_code in top_codes]
         if not markets:
             return 0
 
@@ -399,6 +377,7 @@ def run_metar_peak_bets() -> int:
                 metar_rows[(code, day)] = rows
 
         # Paralele cekilen verilerle peak kontrolu + bet ac
+        closed_cities: set[tuple[str, str]] = set()
         for m, day, utc_offset in candidates:
             day_rows = metar_rows.get((m.city_code, day)) or []
             if not day_rows:
@@ -406,6 +385,18 @@ def run_metar_peak_bets() -> int:
             peak, confirmed = detect_peak(day_rows, utc_offset_hours=utc_offset)
             if not confirmed or peak is None:
                 continue  # zirve henuz kilitlenmedi
+            # 2026-08-18 kullanici: "ya koy" — kilitli zirve ASILDI ise eski
+            # bucket betleri YANLIS demektir. Milan 18 Agu canli ornegi: kilit
+            # 31C'de verildi, sonra 32C geldi; eski kod yeni zirvenin 2 dusus
+            # ile kilitlenmesini beklerken 31C fiyati 0.0005'e coktu (bet 1452
+            # -$3). Yeni kural: cur_max > kilitli peak ise 2 dusus BEKLEMEDEN
+            # eski bucket betleri DERHAL kapatilir (yeni cummax kazanan sayilir).
+            cur_max = max(t for _, t in day_rows)
+            if cur_max > peak:
+                if (m.city_code, day) not in closed_cities:
+                    _close_wrong_bucket_bets(session, m.city_code, m.target_date, float(cur_max))
+                    closed_cities.add((m.city_code, day))
+                continue  # kilit bozuldu: eski bucket'a yeni bet acilmaz
             # 2026-08-18 audit fix (C2): round() banker's yerine half-up.
             bucket = int(peak + 0.5) if peak >= 0 else int(peak - 0.5)
             if float(m.threshold) != bucket:
@@ -418,7 +409,11 @@ def run_metar_peak_bets() -> int:
             # betleri KAPAT (T-2'de yanlis bucket'a acilan spread betleri dahil).
             # Bot daha once kapatmiyordu: 16 Agu'da 75 acik bet, sadece 6'si
             # kazanan bucket'ta, 69 yanlis bet settlement'a kadar acik kaldi.
-            _close_wrong_bucket_bets(session, m.city_code, m.target_date, bucket)
+            # 2026-08-18: kapatma artik kazanan-bucket marketi OLMASA da
+            # cagrilir (sehir-gun basina bir kez, closed_cities).
+            if (m.city_code, day) not in closed_cities:
+                _close_wrong_bucket_bets(session, m.city_code, m.target_date, bucket)
+                closed_cities.add((m.city_code, day))
 
         session.commit()
     if opened:

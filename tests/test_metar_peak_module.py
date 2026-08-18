@@ -1,7 +1,10 @@
-"""METAR-peak modul testleri (2026-08-16).
+"""METAR-peak modul testleri (2026-08-16, guncel 2026-08-18).
 
-Kullanici karari: METAR stake 1->2 USD, bias-top 40 sehir. Bu testler
-sabitleri ve bias filtresinin calistigini dogrular.
+2026-08-18 kullanici kararlari:
+  - "Metar betleri acilirken bias a gerek yok" -> bias-top sehir filtresi
+    KALDIRILDI, TUM sehirlerin acik marketlerine bakilir.
+  - "ya koy" -> kilitli peak ASILIRSA (cur_max > peak) yanlis bucket betleri
+    2 dusus beklenmeden DERHAL kapatilir (Milan 18 Agu canli ornegi).
 """
 
 import sys
@@ -18,34 +21,9 @@ class TestMetarPeakConfig:
         """Kullanici karari 2026-08-16: METAR bet stake 3 USD (optimum)."""
         assert mp.METAR_STAKE == 3.0
 
-    def test_bias_top_40(self):
-        """Kullanici karari 2026-08-16: bias-top 40 sehir."""
-        assert mp.BIAS_TOP_CITIES == 40
-
     def test_min_hours_before_close(self):
         """Kullanici karari 2026-08-16: erken giris -> kapanisa <2 saat kala bet acilmaz."""
         assert mp.MIN_HOURS_BEFORE_CLOSE == 2
-
-
-class TestMetarPeakBiasFilter:
-    def test_bias_top_sinirlama(self):
-        """run_metar_peak_bets bias-top sehirlerle sinirli marketlere bakar.
-
-        Mock: bias verisi olan sehirlerin sayisi BIAS_TOP_CITIES'i gecmemeli.
-        """
-        import sqlite3
-
-        # dogrudan bias hesap mantigini test et: avg_bias en az sapan N sehir
-        db = sqlite3.connect("file:C:/Users/fdemir/Documents/New project/junbo/data/bot.db?immutable=1", uri=True)
-        cur = db.cursor()
-        rows = cur.execute(
-            "SELECT city_code, AVG(ABS(bias)) FROM historical_calibrations WHERE bias IS NOT NULL GROUP BY city_code"
-        ).fetchall()
-        db.close()
-        avg = {c: b for c, b in rows}
-        top = {c for c, _ in sorted(avg.items(), key=lambda kv: kv[1])[: mp.BIAS_TOP_CITIES]}
-        assert len(top) == mp.BIAS_TOP_CITIES or len(top) == len(avg)
-        assert len(top) <= 40
 
 
 class TestMetarPeakMarketTypeFilter:
@@ -56,27 +34,12 @@ class TestMetarPeakMarketTypeFilter:
     """
 
     def test_sadece_range_temperature_max_markete_bet_acilir(self, market_factory):
+        """Bias verisi OLMAYAN sehir de islenir (2026-08-18: bias filtresi
+        kaldirildi) ve SADECE RANGE + temperature_max markete bet acilir."""
         from unittest.mock import patch
 
         from database.db import get_session
-        from database.models import HistoricalCalibration, WeatherMarket
-
-        # sehir bias-top'a girebilsin (bias=0 = en az sapan)
-        today = datetime.now().date()
-        with get_session() as s:
-            s.add(
-                HistoricalCalibration(
-                    city_code="EGLL",
-                    city="London",
-                    date=today,
-                    metric="temperature_max",
-                    model="test",
-                    predicted_value=24.0,
-                    actual_value=24.0,
-                    bias=0.0,
-                )
-            )
-            s.commit()
+        from database.models import WeatherMarket
 
         # Ayni sehir, ayni esik, 3 farkli market tipi — sadece 1'i hedef
         tgt = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=8)
@@ -131,3 +94,52 @@ class TestMetarPeakMarketTypeFilter:
             assert bet_mkt is not None
             assert bet_mkt.market_type == "RANGE"
             assert bet_mkt.metric == "temperature_max"
+
+
+class TestMetarPeakBrokenLock:
+    """2026-08-18 kullanici: "ya koy" — kilitli peak asilirsa (cur_max >
+    kilitli peak) yanlis bucket betleri 2 dusus beklenmeden kapatilir.
+    Milan 18 Agu: kilit 31C, sonra 32C geldi; eski kod beklerken 31C fiyati
+    0.0005'e coktu ve bet -$3 kaybetti.
+    """
+
+    def test_kilit_asilinca_kapatma_cagrilir_bet_acilmaz(self, market_factory):
+        from unittest.mock import patch
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        # kilitli peak 24.0 ama son gozlem 25.0 (zirve asildi)
+        rows = [
+            (int(now.timestamp()) - 3600, 24.0),
+            (int(now.timestamp()) - 1800, 25.0),
+        ]
+        tgt = now + timedelta(hours=8)
+        m_24 = market_factory(
+            city="Milan",
+            city_code="LIMC",
+            metric="temperature_max",
+            market_type="RANGE",
+            threshold=24.0,
+            target_date=tgt,
+        )
+        closed_calls: list[float] = []
+
+        with (
+            patch("scrapers.metar.fetch_metar_day", return_value=rows),
+            patch("scrapers.metar.detect_peak", return_value=(24.0, True)),
+            patch("scrapers.metar.archive_metar_observations", return_value=0),
+            patch.object(mp, "_open_metar_bet", return_value=None) as fake_bet,
+            patch.object(
+                mp,
+                "_close_wrong_bucket_bets",
+                side_effect=lambda _s, _c, _td, bucket: closed_calls.append(bucket),
+            ),
+        ):
+            mp.run_metar_peak_bets()
+
+        # yeni zirve (25.0) kazanan sayilir, kapatma onunla cagrilir
+        # (diger testlerden kalan sehir marketleri de ayni mock'u gorur;
+        # onlar icin de kapatma 25.0 ile cagrilir — hepsi ayni kural)
+        assert closed_calls and all(c == 25.0 for c in closed_calls)
+        # eski kilitli bucket'a (24) yeni bet ACILMAZ
+        fake_bet.assert_not_called()
+        assert m_24 is not None
