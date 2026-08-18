@@ -65,11 +65,11 @@ def ts(s) -> float | None:
 
 SPREAD_STAKE = 2.0
 PEAK_STAKE = 3.0
-PEAK_MIN_ENTRY = 0.10
+PEAK_MIN_ENTRY = 0.05  # 2026-08-18 E config (kullanici karari, backtest +$820.96)
 BIAS_TOP = 15  # spread_max_cities (spread_placer.py)
 # METAR-PEAK sehir filtresi 2026-08-18'de KALDIRILDI (kullanici: "bias a gerek
 # yok, nasil olsa peak tespit edilmis oluyor") -> TUM sehirler.
-MIN_HOURS_BEFORE_CLOSE = 2.0  # jobs/metar_peak.py
+MIN_HOURS_BEFORE_CLOSE = 0.0  # 2026-08-18 E config: kapanisa kadar bet acilir
 CLOSE_WINDOW_SEC = 6 * 3600  # peak zamanina en yakin ask icin arama penceresi
 
 
@@ -2292,7 +2292,7 @@ def _build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--max-day", default=None, help="bitis gunu (default: fiyat verisi araligi)")
     pl.add_argument("--stake", type=float, default=3.0)
     pl.add_argument("--slippage", type=float, default=0.01, help="ask ustune eklenen fiyat kaymasi")
-    pl.add_argument("--min-entry", type=float, default=0.10, help="MIN_ENTRY (0 = filtre yok)")
+    pl.add_argument("--min-entry", type=float, default=0.05, help="MIN_ENTRY (0 = filtre yok)")
     pl.add_argument("--bias-top", type=int, default=0, help="en az sapan N sehir (0 = tum sehirler)")
     pl.add_argument(
         "--metric", default="max", choices=["max", "min"], help="max=zirve (varsayilan), min=dip (low temp)"

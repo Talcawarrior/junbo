@@ -22,8 +22,9 @@ class TestMetarPeakConfig:
         assert mp.METAR_STAKE == 3.0
 
     def test_min_hours_before_close(self):
-        """Kullanici karari 2026-08-16: erken giris -> kapanisa <2 saat kala bet acilmaz."""
-        assert mp.MIN_HOURS_BEFORE_CLOSE == 2
+        """2026-08-18 E config: kapanisa kadar bet acilir (0) — yanlis bucket
+        kapatmalari bundan ETKILENMEZ (aktar mekanizmasi ayri calisir)."""
+        assert mp.MIN_HOURS_BEFORE_CLOSE == 0
 
 
 class TestMetarPeakMarketTypeFilter:

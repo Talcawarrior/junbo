@@ -26,16 +26,16 @@ _FETCH_TIMEOUT = 60
 
 logger = logging.getLogger("SCHEDULER_METAR_PEAK")
 
-# Kapanisa bu kadar saat kala hala zirve kilitlenmediyse bet acilmaz.
-# 2026-08-16: kullanici "peak YEREL saatte olunca gir" dedi -> erken giris.
-# 4 saat -> 2 saat (kapanisa cok yakin olanlar riski; peak kilitlenince girilir)
-MIN_HOURS_BEFORE_CLOSE = 2
-# 2026-08-17 MIN_ENTRY: canli METAR-peak betleri analizi (30 bet, NET -$32.84):
-#   entry < 0.10  -> 24 bet, NET -$39.90 (0.01-0.03 longshot'lar TAMAMEN kayip)
-#   entry >= 0.10 ->  6 bet, NET +$7.06 (+$5.62 Toronto 0.150, +$1.30 BA 0.685, +$0.14 Taipei 0.945)
-# Piyasa bir bucket'i 0.01'e fiyatliyorsa kazanma sansi ~%1 demektir; METAR
-# tespiti yanlis. Sadece piyasanin da gercek sans verdigi bucket'a bet acilir.
-MIN_ENTRY = 0.10
+# Kapanisa kadar bet ACILABILIR (2026-08-18 E config, kullanici karari).
+# Eski 2h kurali kapanisa yakin kilitlenen 13 sehir/gunun betini kaciriyordu.
+# DIKKAT: yanlis bucket'taki acik betler (METAR'da farkli peak bulunan sehirler)
+# kapanisa kadar KAPATILMAYA devam eder — bu sinir sadece YENI bet acma icindir
+# (aktar mekanizmasi: zirve degisirse kapat + yeni zirveye ac).
+MIN_HOURS_BEFORE_CLOSE = 0
+# MIN_ENTRY 0.10 -> 0.05 (2026-08-18 E config, kullanici karari + backtest:
+# 240 bet +$820.96 vs 202 bet +$593.62). 0.01-0.03 longshot'lar hala disinda
+# (0.05 alti piyasa suphesi = METAR tespiti yanlis demektir).
+MIN_ENTRY = 0.05
 # METAR stake (kullanici karari 2026-08-16: 1 -> 2 -> 3 USD optimum.
 # Backtest: bias-top 40 + tek esik, $3 stake = %91.7, +$120, maxDD $3.2.
 # ROI stake'ten bagimsiz ama mutlak kazanc ve risk dengede $3 en iyi.)
