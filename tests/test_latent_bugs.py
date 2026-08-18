@@ -199,6 +199,9 @@ ALLOWED_DEAD = {
     "cmd_metar_peak_live",
     "cmd_metar_vs_settlement",
     "cmd_walk_forward",
+    # 2026-08-18: 24 saat METAR arsiv toplayici — run_metar_peak_bets icinden
+    # cagrilir (jobs.metar_peak.py), cross-file census goremez.
+    "collect_metar_archive",
     # Finance helpers covered by unit tests but no non-test caller today
     # (api.py computes equity inline; kept as a documented formula helper)
     "portfolio_current_value",

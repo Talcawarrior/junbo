@@ -243,6 +243,55 @@ def _open_metar_bet(session, market: WeatherMarket, peak_temp: float) -> Optiona
     return bet
 
 
+def collect_metar_archive(session) -> int:
+    """Tum sehirlerin bugunku METAR gozlemlerini arsivler (bet mantigindan BAGIMSIZ).
+
+    2026-08-18 kullanici karari: "24 saat veri topla bundan sonra". Eski akis
+    yalnizca ACIK marketi olan (ve kapanisa >2h kalan) sehirleri cekiyordu ->
+    aksam 22:00 sonrasi toplama duruyordu; 16-17 Agu arsivi ~21:00'de kesildi,
+    13 sehir/gun peak kilitlense bile MIN_HOURS_BEFORE_CLOSE yuzunden bet
+    kacirdi. Bu fonksiyon her 30dk'da (metar_loop) TUM sehirlerin bugunku
+    gozlemlerini ceker ve idempotent arsive yazar; bet acmaz, market durumuna
+    bakmaz, kapanis saati filtrelemez.
+    """
+    from database.models import MetarObservation
+
+    codes = [r[0] for r in session.query(MetarObservation.city_code).distinct().order_by(MetarObservation.city_code)]
+    # Arsivde henuz gozlem olmayan sehirler de toplanmali -> weather_markets.
+    mk = [
+        r[0]
+        for r in session.query(WeatherMarket.city_code)
+        .filter(WeatherMarket.city_code.isnot(None), WeatherMarket.city_code != "")
+        .distinct()
+    ]
+    all_codes = sorted(set(codes) | set(mk))
+    if not all_codes:
+        return 0
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from scrapers.metar import archive_metar_observations, fetch_metar_day
+
+    def _one(icao: str) -> int:
+        try:
+            rows = fetch_metar_day(icao, today)
+            if rows:
+                return archive_metar_observations(icao, icao, rows)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("metar arsiv fetch fail %s: %s", icao, exc)
+        return 0
+
+    added = 0
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futs = [ex.submit(_one, c) for c in all_codes]
+        for fut in as_completed(futs, timeout=_FETCH_TIMEOUT or 60):
+            try:
+                added += fut.result() or 0
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("metar arsiv worker fail: %s", exc)
+    return added
+
+
 def run_metar_peak_bets() -> int:
     """Simdiki gunun acik marketlerine, METAR zirvesi kilitlenenlerde tek esik bet acar."""
     from scrapers.metar import fetch_metar_day, detect_peak
@@ -252,6 +301,9 @@ def run_metar_peak_bets() -> int:
     today = now.date().isoformat()
 
     with get_session() as session:
+        # 2026-08-18 kullanici karari: 24 saat kesintisiz METAR arsivi —
+        # bet acma mantigindan bagimsiz (aksam kesilmesi duzeltildi).
+        collect_metar_archive(session)
         # Bias-top N sehir secimi (en az sapan) — kullanici karari 2026-08-16
         bias_scores: dict[str, float] = {}
         for code, b in (
