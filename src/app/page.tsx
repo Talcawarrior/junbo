@@ -1145,10 +1145,11 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
           </CardContent>
         </Card>
 
-        {/* 24h Activity — wider center */}
+        {/* Tum islemler ozeti — veri TUM zamanlar (api health settled_all filtreli
+            degil); etiket yaniltici olmasin. 2026-08-19 kullanici tespiti. */}
         <Card className="shadow-sm py-4 gap-3 lg:col-span-2" style={{ borderColor: BORDER }}>
           <CardHeader className="pb-0 pt-0 px-5">
-            <CardTitle className="text-sm font-semibold" style={{ color: TEXT_PRIMARY }}>24 Saatlik Aktivite</CardTitle>
+            <CardTitle className="text-sm font-semibold" style={{ color: TEXT_PRIMARY }}>Tum Islemler Ozeti</CardTitle>
           </CardHeader>
           <CardContent className="px-4">
             <div className="grid grid-cols-2 gap-2">

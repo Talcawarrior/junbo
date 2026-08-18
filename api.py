@@ -1347,13 +1347,15 @@ def get_health_check():
     db = get_db_session()
     try:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
+        h24 = now - timedelta(hours=24)
         h48 = now - timedelta(hours=48)
 
-        # 1. Activity in last 24h
+        # 1. Activity in last 24h (2026-08-19 fix: h48 -> h24, etiket "24h"
+        # yanilticiydi; pass_reasons 48h kalir)
         bets_opened_24h = (
             db.query(Bet)
             .filter(
-                Bet.placed_at >= h48,
+                Bet.placed_at >= h24,
                 Bet.status.in_(OPEN_BET_STATUSES),
             )
             .count()
