@@ -399,7 +399,10 @@ def run_metar_peak_bets() -> int:
                 continue  # kilit bozuldu: eski bucket'a yeni bet acilmaz
             # 2026-08-18 audit fix (C2): round() banker's yerine half-up.
             bucket = int(peak + 0.5) if peak >= 0 else int(peak - 0.5)
-            if float(m.threshold) != bucket:
+            # half-up (2026-08-18 audit): US sehirlerinde esikler float C'dir
+            # (F'den donusturulur) — int() truncate yanlis bucket uretir;
+            # Austin 35.9C marketi bucket 36'ya karsilik gelir.
+            if int(float(m.threshold) + 0.5) != bucket:
                 continue  # bu market kazanan bucket degil
             bet = _open_metar_bet(session, m, peak)
             if bet:

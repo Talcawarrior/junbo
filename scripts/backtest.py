@@ -219,7 +219,9 @@ def cmd_gunluk(args) -> int:
             continue
         o = parse_resolved_outcome(r[4])
         t = ts(r[3])
-        market[(code, day, float(thr))] = (str(r[0]), t, o, r[5])
+        # half-up: US sehirlerinde esikler float C'dir (F'den donusturulur),
+        # int() truncate yanlis bucket uretir (Austin 35.9C -> bucket 36).
+        market[(code, day, int(float(thr) + 0.5))] = (str(r[0]), t, o, r[5])
 
     # METAR KILITLI peak (look-ahead YOK): bot final max'i bilmez, `detect_peak`
     # (yerel saat >= 13 + 2 ardısık dusus) kilitlediginde girer. Final max ile
@@ -371,7 +373,7 @@ def cmd_gunluk(args) -> int:
         vals = list(models.values())
         # 2026-08-18 audit fix (C2): banker's round() yerine half-up (bot ile ayni)
         center = int(sum(vals) / len(vals) + 0.5)
-        m = market.get((code, day, float(center)))
+        m = market.get((code, day, center))
         if m is None:
             continue
         mid, tgt, outcome, _ = m
@@ -453,7 +455,7 @@ def cmd_gunluk(args) -> int:
         if not city:
             continue
         B = int(peak_temp + 0.5)  # audit C2: half-up
-        m = market.get((code, day, float(B)))
+        m = market.get((code, day, B))
         # 2026-08-18 kullanici karari: peak bet'i SADECE RANGE marketlerine
         if m is None or m[3] != "RANGE":
             continue
@@ -932,7 +934,7 @@ def cmd_metar_peak(args) -> int:
             continue
         o = parse_resolved_outcome(r[4])
         t = ts(r[3])
-        market[(code, day, int(thr))] = (str(r[0]), t, o)
+        market[(code, day, int(thr + 0.5))] = (str(r[0]), t, o)
 
     # Gercek cozumden kazanan bucket: (code, day) -> thr (YES cozulen en yuksek esik)
     winner = {}
@@ -1095,7 +1097,7 @@ def cmd_metar_peak_live(args) -> int:
         if not code:
             continue
         try:
-            thi = int(float(thr))
+            thi = int(float(thr) + 0.5)  # half-up: US esikleri float C (35.9 -> bucket 36)
         except (TypeError, ValueError):
             continue
         o = parse_resolved_outcome(r[4])
@@ -1438,7 +1440,7 @@ def cmd_metar_vs_settlement(args) -> int:
         if o is None:
             continue
         try:
-            t = int(thr)
+            t = int(float(thr) + 0.5)
         except (TypeError, ValueError):
             continue
         if o is True and (winner.get((code, d)) is None or winner.get((code, d), -999) < t):
@@ -1604,7 +1606,7 @@ def cmd_metar_vs_settlement(args) -> int:
         if code and args.min_day <= d <= args.max_day:
             t = ts(tdate)
             if t is not None:
-                market_range[(code, d, int(thr))] = (str(mid), t)
+                market_range[(code, d, int(float(thr) + 0.5))] = (str(mid), t)
     _db2.close()
 
     def _price_at(series, bet_ts, window_sec=8 * 3600):
