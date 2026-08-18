@@ -652,6 +652,28 @@ def cmd_gunluk(args) -> int:
         f"  [BIRLESIK    ] bet={len(comb):>3} kazandi={won:>3} winrate=%{won / len(comb) * 100:>5.1f} "
         f"yatirilan=${staked:>7.2f} NET=${pnl:>+8.2f} ROI=%{pnl / staked * 100:>+7.1f}"
     )
+    # 2026-08-18 kullanici: gunluk birlesik tablo — yatirilan/kazanilan/
+    # winrate/ROI/fee+gas hepsi tek satirda (sabit rapor).
+    print()
+    print("  GUNLUK BIRLESIK (spread + peak):")
+    print(
+        f"  {'gun':10s} {'bet':>4s} {'kazan':>6s} {'win%':>6s} "
+        f"{'stake$':>8s} {'fee+gas$':>9s} {'NET$':>9s} {'ROI%':>8s}"
+    )
+    for day in days:
+        db_ = [b for b in comb if b["day"] == day]
+        if not db_:
+            continue
+        n = len(db_)
+        w = sum(1 for b in db_ if b["won"])
+        stk = sum(b["stake"] for b in db_)
+        fees = sum(b["stake"] * FEE_RATE * (1.0 - b["entry"]) + GAS for b in db_)
+        pnl_day = sum(b["pnl"] for b in db_)
+        roi = pnl_day / stk * 100 if stk else 0.0
+        print(
+            f"  {day:10s} {n:>4d} {w:>6d} %{w / n * 100:>5.1f} "
+            f"${stk:>7.2f} ${fees:>8.2f} ${pnl_day:>+8.2f} %{roi:>+7.1f}"
+        )
     if args.real_entry:
         n_ideal = sum(1 for b in comb if not b.get("fill") == "real")
         n_real = sum(1 for b in comb if b.get("fill") == "real")
