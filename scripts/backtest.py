@@ -1440,7 +1440,16 @@ def cmd_metar_peak_live(args) -> int:
                     cap = getattr(args, "max_bet_stake", 0.0)
                     if cap > 0 and st > cap:
                         st = cap
-                    pnl_c = st * b["per"] - GAS
+                    per_eff = b["per"]
+                    # 2026-08-19 DERINLIK SLIPPAGE: giris araligina gore p10
+                    # derinlik asilirsa fiyat itilir. eff_entry = entry *
+                    # (1 + max(0, st/depth_p10 - 1)); kazanan betlerin getirisi
+                    # oransal duser, kaybedenlerde stake kaybi ayni kalir.
+                    depth_p10 = getattr(args, "depth_p10", 0.0)
+                    if depth_p10 > 0 and st > depth_p10 and b["won"]:
+                        eff_ratio = b["entry_eff"] / (b["entry_eff"] * (1.0 + (st / depth_p10 - 1.0)))
+                        per_eff = b["per"] * eff_ratio
+                    pnl_c = st * per_eff - GAS
                     day_stake += st
                     day_pnl += pnl_c
                 bankroll += day_pnl
@@ -2350,6 +2359,12 @@ def _build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--bankroll", type=float, default=100.0, help="compound baslangic bankroll'u (USD)")
     pl.add_argument(
         "--max-bet-stake", type=float, default=0.0, help="bet basina max stake (orderbook derinlik; 0=sinirsiz)"
+    )
+    pl.add_argument(
+        "--depth-p10",
+        type=float,
+        default=0.0,
+        help="orderbook p10 derinlik: asilirsa kazanan betlerde fiyat itilir (slippage)",
     )
     pl.set_defaults(func=lambda a: cmd_metar_peak_live(a))
 
