@@ -428,8 +428,14 @@ def run_metar_peak_bets() -> int:
             else:
                 direction = "-"
             last_local_hour = datetime.fromtimestamp(day_rows[-1][0] + utc_offset * 3600, tz=timezone.utc).hour
+            cur_max = max(t for _, t in day_rows)
             if confirmed and peak is not None:
-                status = f"kilitli peak={peak:.1f}C"
+                # 2026-08-19 kullanici: "sicaklik yukseliyor ama kilitli gorunuyor"
+                # — kilitten SONRA zirve asildiysa bunu GOSTER (aktar devrede).
+                if cur_max > peak:
+                    status = f"zirve asildi -> {cur_max:.1f}C (aktar)"
+                else:
+                    status = f"kilitli peak={peak:.1f}C"
             elif last_local_hour >= 13:
                 status = "takip (13+ sonrasi)"
             else:

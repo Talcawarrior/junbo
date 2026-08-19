@@ -83,6 +83,29 @@ async def verify_api_key(x_api_key: str = Header(default="")):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
+def _code_version() -> str:
+    """Calisan kodun git commit hash'i (yoksa dosya mtime'i).
+
+    2026-08-19: restart dogrulamasi icin — eski surec tuzağina bir daha
+    dusmemek icin /api/status'ta gorunur.
+    """
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return "unknown"
+
+
 def _recent_activity_events(limit: int = 200) -> list[dict]:
     """Son aktivite olaylari (peak bulundu / bet engellendi / hata / gunluk ozet)."""
     try:
@@ -430,6 +453,10 @@ def get_status():
 
         return {
             "is_running": state.is_running,
+            # 2026-08-19: hangi KOD calisiyor — restart dogrulamasinin tek kaynagi.
+            # (Ders: 18 saatlik eski surec portu tuttu, yeni kod hic yuklenmedi,
+            # "is_running True" eski surecin yanitiydi.)
+            "code_version": _code_version(),
             "locked": state.locked,
             "scan_health": scan_health,
             "last_scan": state.last_scan.isoformat() + "Z" if state.last_scan else None,
