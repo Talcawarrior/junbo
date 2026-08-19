@@ -1184,6 +1184,26 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
                 ))
               )}
             </div>
+            {/* 2026-08-19: Aktivite Akisi — peak bulundu / bet engellendi / hata */}
+            <div className="space-y-0.5 pt-1">
+              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: TEXT_MUTED }}>Aktivite Akışı (peak / bet / hata)</p>
+              {(h.activity_events ?? []).length === 0 ? (
+                <p className="text-xs py-2" style={{ color: TEXT_MUTED }}>Kayıt yok</p>
+              ) : (
+                (h.activity_events ?? []).map((ev: any, i: number) => {
+                  const color = ev.category === "error" ? RED : ev.category === "bet_opened" ? TEAL : ev.category === "peak_found" ? "#f59e0b" : TEXT_MUTED;
+                  const icon = ev.category === "error" ? "✕" : ev.category === "bet_opened" ? "✓" : ev.category === "bet_blocked" ? "⊘" : ev.category === "bet_closed" ? "✎" : "▲";
+                  return (
+                    <div key={i} className="flex items-start gap-2 text-[11px] py-0.5 border-b last:border-0" style={{ borderColor: `${BORDER}60` }}>
+                      <span className="tabular-nums shrink-0 pt-0.5 font-mono" style={{ color: TEXT_MUTED, fontSize: 10 }}>{ev.ts?.slice(11, 16) ?? "?"}</span>
+                      <span style={{ color }} className="shrink-0">{icon}</span>
+                      <span className="shrink-0 font-semibold" style={{ color: TEXT_PRIMARY }}>{ev.city ?? ""}</span>
+                      <span style={{ color: TEXT_MUTED }} className="flex-1">{ev.detail}</span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </CardContent>
         </Card>
 

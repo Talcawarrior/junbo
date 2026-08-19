@@ -151,14 +151,23 @@ def _open_metar_bet(session, market: WeatherMarket, peak_temp: float) -> Optiona
     # entry<0.10 24 bet -$39.90 kaybetti (piyasa o bucket'e ~%1 sans veriyor
     # = METAR tespiti yanlis). entry>=0.10 6 bet +$7.06 kazandi.
     if not (MIN_ENTRY <= entry < max_entry):
+        neden = f"giris={entry:.3f} disinda [MIN_ENTRY={MIN_ENTRY}, max={max_entry}]"
+        if entry >= max_entry:
+            neden = f"fiyat cok pahali ({entry:.3f} >= {max_entry})"
+        elif entry < MIN_ENTRY:
+            neden = f"piyasa supheli ({entry:.3f} < MIN_ENTRY={MIN_ENTRY})"
         logger.info(
-            "metar_peak: %s %sC giris=%.3f [MIN_ENTRY=%.2f, max_entry=%.2f], atlandi",
+            "metar_peak: %s %sC giris=%.3f [MIN_ENTRY=%.2f, max_entry=%.2f], atlandi (%s)",
             market.city,
             market.threshold,
             entry,
             MIN_ENTRY,
             max_entry,
+            neden,
         )
+        from utils.activity_log import log_event
+
+        log_event("bet_blocked", str(market.city), f"peak bucket {float(market.threshold):.1f}C: {neden}")
         return None
 
     # 2026-08-18 audit fix (C3): fantom/stale fiyat guardi. Canli METAR-peak
@@ -178,6 +187,13 @@ def _open_metar_bet(session, market: WeatherMarket, peak_temp: float) -> Optiona
                 entry,
                 live_ask,
                 live_bid,
+            )
+            from utils.activity_log import log_event
+
+            log_event(
+                "bet_blocked",
+                str(market.city),
+                f"STALE PRICE GUARD: DB={entry:.3f} vs CLOB ask={live_ask:.3f} (fark > %15)",
             )
             return None
     except Exception as exc:  # never block betting on CLOB failure
@@ -394,6 +410,8 @@ def run_metar_peak_bets() -> int:
                 metar_rows[(code, day)] = rows
 
         # Paralele cekilen verilerle peak kontrolu + bet ac
+        from utils.activity_log import log_event
+
         last_closed: dict[tuple[str, str], int] = {}
         for m, day, utc_offset in candidates:
             day_rows = metar_rows.get((m.city_code, day)) or []
@@ -411,13 +429,23 @@ def run_metar_peak_bets() -> int:
             cur_max = max(t for _, t in day_rows)
             winner_val = float(cur_max) if cur_max > peak else peak
             winner_bucket = int(winner_val + 0.5) if winner_val >= 0 else int(winner_val - 0.5)
+            # 2026-08-19 AKTIVITE: bulunan peak her zaman kaydedilir.
+            log_event("peak_found", m.city, f"peak={winner_val:.1f}C bucket={winner_bucket}C")
             if last_closed.get((m.city_code, day)) != winner_bucket:
                 _close_wrong_bucket_bets(session, m.city_code, m.target_date, winner_bucket)
                 last_closed[(m.city_code, day)] = winner_bucket
+                log_event("bet_closed", m.city, f"yanlis bucketlar kapatildi (kazanan {winner_bucket}C)")
             # half-up (2026-08-18 audit): US sehirlerinde esikler float C'dir
             # (F'den donusturulur) — int() truncate yanlis bucket uretir;
             # Austin 35.9C marketi bucket 36'ya karsilik gelir.
             if int(float(m.threshold) + 0.5) != winner_bucket:
+                # Bu market kazanan bucket degil — diger marketler de
+                # deneniyor; engellenme NEDENI aktivite akisinda.
+                log_event(
+                    "bet_blocked",
+                    m.city,
+                    f"bucket={winner_bucket}C: bu market {float(m.threshold):.1f}C (esik eslesmedi)",
+                )
                 continue  # bu market kazanan bucket degil
             # 2026-08-19 OTOMATIK UYARI (kullanici: "bunu onleyecek/kontrol
             # edecek bir sey yap"): kilitli peak'in bucket marketi DB'de YOKSA
@@ -431,9 +459,15 @@ def run_metar_peak_bets() -> int:
                 m.threshold,
                 peak,
             )
+            log_event("bet_blocked", m.city, f"bucket={winner_bucket}C: market DB'de yok")
             bet = _open_metar_bet(session, m, winner_val)
             if bet:
                 opened += 1
+                log_event(
+                    "bet_opened",
+                    m.city,
+                    f"{winner_bucket}C giris=${bet.entry_price:.3f} stake=${bet.stake_amount:.2f}",
+                )
 
         session.commit()
     if opened:

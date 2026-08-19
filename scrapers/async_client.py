@@ -158,6 +158,13 @@ async def _async_fetch_one(
                 return await resp.json()
         except (TimeoutError, aiohttp.ClientError) as exc:  # type: ignore
             logger.warning("async fetch %s failed: %s", url, exc)
+            # 2026-08-19: teknik hata aktivite akisina (dashboard'da gorunur).
+            try:
+                from utils.activity_log import log_event
+
+                log_event("error", host, f"{type(exc).__name__}: {str(exc)[:120]}")
+            except Exception:  # noqa: BLE001
+                pass
             if cache_key is not None:
                 _cache_set(cache_key, None)
             return None

@@ -387,6 +387,13 @@ def _place_spread_bets_inner(session, target_day) -> dict:
                 remaining -= 1
                 cities_used.add(city_name)
                 logger.info("spread open: bet#%s %s %s %sC entry=%.4f", bet.id, city_name, str(target_day), thr, entry)
+                # 2026-08-19 AKTIVITE: yeni gun spread betleri akista gorunur.
+                try:
+                    from utils.activity_log import log_event
+
+                    log_event("bet_opened", city_name, f"spread {str(target_day)[:10]} {thr:.0f}C giris=${entry:.3f}")
+                except Exception:  # noqa: BLE001
+                    pass
             except ValueError as exc:
                 logger.warning("spread debit failed for %s: %s", mkt.id, exc)
                 skipped += 1

@@ -125,6 +125,18 @@ class SettlementEngine:
             pending_count,
             total_pnl,
         )
+        # 2026-08-19 AKTIVITE: settlement ozeti akista (bet kapanislari).
+        try:
+            from utils.activity_log import log_event
+
+            log_event(
+                "daily_summary",
+                None,
+                f"settlement: {won_count} kazandi / {lost_count} kaybetti / {pending_count} bekleyen, "
+                f"PNL=${total_pnl:+.2f}",
+            )
+        except Exception:  # noqa: BLE001
+            pass
         return {
             "win": won_count,
             "loss": lost_count,

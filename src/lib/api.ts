@@ -697,6 +697,13 @@ export interface HealthResponse {
 
 
 
+  activity_events: Array<{
+    ts: string;
+    category: string;
+    city: string | null;
+    detail: string | null;
+  }>;
+
   summary_all: {
 
 

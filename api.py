@@ -83,6 +83,16 @@ async def verify_api_key(x_api_key: str = Header(default="")):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
+def _recent_activity_events(limit: int = 200) -> list[dict]:
+    """Son aktivite olaylari (peak bulundu / bet engellendi / hata / gunluk ozet)."""
+    try:
+        from utils.activity_log import recent_events
+
+        return recent_events(limit=limit)
+    except Exception:  # noqa: BLE001
+        return []
+
+
 # ── Global State tracking for FastAPI Web App ───────────────────────────────
 class BotState:
     """Global bot state tracking running status, modules, and tasks."""
@@ -1647,6 +1657,7 @@ def get_health_check():
                 "max_net_edge_pct": round(max_net_edge, 2),
                 "count": len(edge_values),
             },
+            "activity_events": _recent_activity_events(),
             "summary_all": {
                 "total_settled": total_settled,
                 "wins": wins_all,

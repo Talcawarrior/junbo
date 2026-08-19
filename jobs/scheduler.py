@@ -84,6 +84,14 @@ def run_fetch_markets():
 
     scraper = PolymarketScraper()
     count = scraper.fetch_and_save()
+    # 2026-08-19 AKTIVITE: gunde 1 kez poly vs db market/sehir sayisi
+    # (helper idempotent — ayni gun tekrar yazmaz).
+    try:
+        from utils.activity_log import log_daily_market_summary
+
+        log_daily_market_summary()
+    except Exception:  # noqa: BLE001
+        pass
     return f"{count} market cekildi ve kaydedildi"
 
 

@@ -146,6 +146,20 @@ def _run_calibration_backfill(now: datetime | None = None) -> dict:
             timeout=600,
         )
         cal_result["backfill_rows"] = proc.returncode
+        # 2026-08-19 AKTIVITE: bias olcumu ne zaman yapildi, kac gun geriye.
+        try:
+            from utils.activity_log import log_event
+
+            detail = f"bias kalibrasyonu (METAR): exit={proc.returncode}"
+            if proc.returncode == 0:
+                out = (proc.stdout or "")[-400:]
+                import re as _re
+
+                m = _re.search(r"(\d+)\s+satir", out) or _re.search(r"(\d+)", out)
+                detail += f" | {m.group(0) if m else ''}"
+            log_event("daily_summary", None, detail)
+        except Exception:  # noqa: BLE001
+            pass
         if proc.returncode != 0:
             logger.warning(
                 "Daily calibration: backfill exit=%d stderr=%s",

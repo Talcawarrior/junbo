@@ -102,6 +102,12 @@ def _fetch_metar(icao: str, hours: int = HISTORY_HOURS) -> list[tuple[int, float
                 time.sleep(1.5 * (attempt + 1))
     else:
         logger.warning("METAR fetch fail %s (3 deneme): %s", icao, last_exc)
+        try:
+            from utils.activity_log import log_event
+
+            log_event("error", icao, f"METAR fetch fail (3 deneme): {type(last_exc).__name__} {str(last_exc)[:120]}")
+        except Exception:  # noqa: BLE001
+            pass
         return None
     rows = []
     for m in data:
