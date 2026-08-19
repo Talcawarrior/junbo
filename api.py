@@ -1424,19 +1424,23 @@ def get_health_check():
         max_net_edge = max(net_edges) if net_edges else 0
 
         # 4. All-Time Closed Bets Summary (settled + closed_early)
+        # 2026-08-19 tutarlilik: KPI ile ayni tanim — TUM sonuclanmis (closed
+        # DAHIL), win = realized_pnl > 0. Eski: closed haric + pnl sutunu.
         settled_all = (
             db.query(Bet)
             .filter(
-                Bet.status.in_(("won", "lost", "settled", "closed_early")),
+                Bet.status.in_(("won", "lost", "settled", "closed_early", "closed")),
             )
             .all()
         )
 
         total_settled = len(settled_all)
-        wins_all = sum(1 for b in settled_all if b.pnl and b.pnl > 0)
-        losses_all = sum(1 for b in settled_all if b.pnl is not None and b.pnl <= 0)
+        wins_all = sum(1 for b in settled_all if (b.realized_pnl if b.realized_pnl is not None else b.pnl or 0) > 0)
+        losses_all = sum(1 for b in settled_all if (b.realized_pnl if b.realized_pnl is not None else b.pnl or 0) <= 0)
         win_rate_all = win_rate_pct(wins_all, total_settled)
-        total_pnl_all_health = sum(b.pnl or 0.0 for b in settled_all)
+        total_pnl_all_health = sum(
+            float(b.realized_pnl if b.realized_pnl is not None else b.pnl or 0.0) for b in settled_all
+        )
         total_stake_all_health = sum(b.amount or 0.0 for b in settled_all)
         roi_all = roi_pct(total_pnl_all_health, total_stake_all_health)
 
