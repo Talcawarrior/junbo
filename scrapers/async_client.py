@@ -42,9 +42,11 @@ logger = logging.getLogger("SCRAPER_ASYNC")
 
 
 # ---- Public knobs (module-level so tests can monkeypatch) -------------
-MAX_CONCURRENT = 20
+# 2026-08-19: 20 -> 8. Gece 422 "semaphore timeout" (aiohttp connector pool
+# doldu, istekler kuyrukta bekledi). Dusuk concurrency = kuyruk birikmez.
+MAX_CONCURRENT = 8
 _THROTTLE_S = 1.0
-_TIMEOUT_S = 15.0
+_TIMEOUT_S = 30.0  # 2026-08-19: 15 -> 30 (gece yavas yanitlara karsi)
 _USER_AGENT = "Junbo/1.0 (+tier3-12)"
 
 
@@ -147,9 +149,7 @@ async def _async_fetch_one(
                     break
             await asyncio.sleep(wait)
         try:
-            async with session.get(
-                url, params=params, timeout=aiohttp.ClientTimeout(total=_TIMEOUT_S)
-            ) as resp:
+            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=_TIMEOUT_S)) as resp:
                 if resp.status != 200:
                     logger.warning("async fetch %s -> HTTP %s", url, resp.status)
                     if cache_key is not None:
@@ -187,9 +187,14 @@ class AsyncHttpClient:
         with self._session_lock:
             if self._session is None or self._session.closed:
                 kwargs: dict = {"headers": {"User-Agent": _USER_AGENT}}
+                # 2026-08-19: connector limiti = MAX_CONCURRENT (asimdan
+                # semaphore timeout yerine kuyrukta bekleme; pool tasmaz).
+                # Proxy varken ozel connector kullanilir (socks); o zaman
+                # limiti degistirmeyiz — eski davranis korunur.
                 if self._proxy:
-                    # aiohttp proxy: http(s) ve socks icin proxy_str desteklenir
                     kwargs["proxy"] = self._proxy
+                else:
+                    kwargs["connector"] = aiohttp.TCPConnector(limit=MAX_CONCURRENT, ttl_dns_cache=300)
                 self._session = aiohttp.ClientSession(**kwargs)
             return self._session
 
@@ -239,7 +244,11 @@ class AsyncHttpClient:
             tasks = [
                 asyncio.create_task(
                     _async_fetch_one(
-                        session, sem, host, url, params,
+                        session,
+                        sem,
+                        host,
+                        url,
+                        params,
                         cache_key=_cache_key(url, params),
                     )
                 )
@@ -253,9 +262,7 @@ class AsyncHttpClient:
             await session.close()
 
     # ---- sync entry points --------------------------------------------
-    def fetch_one_blocking(
-        self, url: str, params: dict | None = None, host: str = ""
-    ) -> Any:
+    def fetch_one_blocking(self, url: str, params: dict | None = None, host: str = "") -> Any:
         """Synchronous fetch with cache + throttle. Returns parsed JSON or None.
 
         Uses aiohttp when available, falling back to ``requests`` so a
@@ -270,9 +277,7 @@ class AsyncHttpClient:
             return self._sync_fetch(url, params, host, key)
         return asyncio.run(self._afetch_one_async(url, params, host, key))
 
-    async def _afetch_one_async(
-        self, url: str, params: dict | None, host: str, key: tuple
-    ) -> Any:
+    async def _afetch_one_async(self, url: str, params: dict | None, host: str, key: tuple) -> Any:
         results = await self._afetch([(url, params, host)])
         value = results[0] if results else None
         # Also cache here in case _afetch didn't cache (e.g. aiohttp-less path)

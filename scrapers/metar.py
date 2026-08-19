@@ -16,12 +16,14 @@ METAR gozlemleri 30 dk'da bir yayinlanir (obsTime epoch, temp Celsius).
 from __future__ import annotations
 
 import logging
+import ssl
 import threading
 import time
 from datetime import datetime, timezone
 from typing import Optional
 
 import requests
+from requests.adapters import HTTPAdapter
 
 logger = logging.getLogger("SCRAPER_METAR")
 
@@ -31,6 +33,22 @@ HISTORY_URL = "https://aviationweather.gov/api/data/metar"
 # 30dk'da bir METAR yayinlanir; istasyon basina son 30 saatlik gecmis cekilir.
 HISTORY_HOURS = 30
 REQUEST_TIMEOUT = 20
+
+# Avast Web/Mail Shield TLS intercept: Windows sistem kok deposunu yukle
+# (weather_ensemble.py ile ayni cozum, 2026-08-19 metar.py'ye de tasindi),
+# dogrulama ACIK kalir. 17 Agu'da SSLCertVerificationError goruldu; requests
+# certifi Avast kokunu bilmiyor, sistem store biliyor.
+_SYSTEM_TLS = ssl.create_default_context()
+
+
+class _SystemStoreAdapter(HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):  # type: ignore[override]
+        kwargs["ssl_context"] = _SYSTEM_TLS
+        return super().init_poolmanager(*args, **kwargs)
+
+
+_SESSION = requests.Session()
+_SESSION.mount("https://", _SystemStoreAdapter())
 
 # In-process cache: (icao, day) -> [(epoch, temp_c)]
 _CACHE: dict[tuple[str, str], list[tuple[int, float]]] = {}
@@ -69,7 +87,7 @@ def _fetch_metar(icao: str, hours: int = HISTORY_HOURS) -> list[tuple[int, float
             # 2026-08-16: config/settings.py global olarak HTTP_PROXY/HTTPS_PROXY env
             # set ediyor (Polymarket SOCKS). aviationweather.gov geo-block'lu DEGIL ve
             # proxy uzerinden 20s timeout (172 hata) -> bu istek DIRECT gider.
-            resp = requests.get(
+            resp = _SESSION.get(
                 METAR_URL,
                 params={"ids": icao, "format": "json", "hours": str(hours)},
                 timeout=REQUEST_TIMEOUT,

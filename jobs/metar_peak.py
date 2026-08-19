@@ -296,7 +296,9 @@ def collect_metar_archive(session) -> int:
         return 0
 
     added = 0
-    with ThreadPoolExecutor(max_workers=8) as ex:
+    # 2026-08-19: 8 -> 4 worker — aviationweather.gov'u bogmamak icin
+    # (19 Agu gece 17 'Read timed out' + bot kendi istek yukunu yigdi).
+    with ThreadPoolExecutor(max_workers=4) as ex:
         futs = [ex.submit(_one, c) for c in all_codes]
         for fut in as_completed(futs, timeout=_FETCH_TIMEOUT or 60):
             try:

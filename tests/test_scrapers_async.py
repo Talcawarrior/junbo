@@ -30,7 +30,8 @@ def _reset_cache():
 
 
 def test_max_concurrent_constant_is_8():
-    assert MAX_CONCURRENT == 20  # ponytail audit kept 20
+    # 2026-08-19: 20 -> 8 (gece 422 semaphore timeout — Open-Meteo pool doldu).
+    assert MAX_CONCURRENT == 8
 
 
 def test_throttle_constant_is_quarter_second():
