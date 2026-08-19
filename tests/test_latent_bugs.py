@@ -257,6 +257,9 @@ ALLOWED_DEAD = {
     "peak_break",
     "trough_lock",
     "trough_break",
+    # 2026-08-19: derinlik siniri kullanici karariyla KALDIRILDI (0'lik cop
+    # betler uretiyordu); fonksiyon dokumante edilmis yardimci olarak kalir.
+    "max_stake_by_depth",
     "fetch_history",
     "first_ask_below",
     "peak_lock",

@@ -11,7 +11,7 @@ import sys
 
 sys.path.insert(0, r"C:\Users\fdemir\Documents\New project\junbo")
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import jobs.metar_peak as mp
 
@@ -37,13 +37,16 @@ class TestMetarPeakMarketTypeFilter:
     def test_sadece_range_temperature_max_markete_bet_acilir(self, market_factory):
         """Bias verisi OLMAYAN sehir de islenir (2026-08-18: bias filtresi
         kaldirildi) ve SADECE RANGE + temperature_max markete bet acilir."""
+        import time as _time
+
         from unittest.mock import patch
 
         from database.db import get_session
         from database.models import WeatherMarket
 
-        # Ayni sehir, ayni esik, 3 farkli market tipi — sadece 1'i hedef
-        tgt = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=8)
+        # Ayni sehir, ayni esik, 3 farkli market tipi — sadece 1'i hedef.
+        # 2026-08-19: target_date BUGUN olmali (yarinin marketleri islenmez).
+        tgt = datetime.now(timezone.utc).replace(tzinfo=None)
         m_range_max = market_factory(
             city="London",
             city_code="EGLL",
@@ -80,7 +83,12 @@ class TestMetarPeakMarketTypeFilter:
             return None
 
         with (
-            patch("scrapers.metar.fetch_metar_day", return_value=[(int(datetime.now(timezone.utc).timestamp()), 24.0)]),
+            patch(
+                "scrapers.metar.fetch_metar_day",
+                # 2026-08-20: gercek epoch (time.time) — naive .timestamp()
+                # lokal tz ile yorumlanip bayat korumasini yaniltiyordu.
+                return_value=[(int(_time.time()), 24.0)],
+            ),
             patch("scrapers.metar.detect_peak", return_value=(24.0, True)),
             patch("scrapers.metar.archive_metar_observations", return_value=0),
             patch.object(mp, "_open_metar_bet", side_effect=_fake_bet),
@@ -105,15 +113,20 @@ class TestMetarPeakBrokenLock:
     """
 
     def test_kilit_asilinca_kapat_ve_yeni_peake_ac(self, market_factory):
+        import time as _time
+
         from unittest.mock import patch
 
         now = datetime.now(timezone.utc).replace(tzinfo=None)
-        # kilitli peak 24.0 ama son gozlem 25.0 (zirve asildi)
+        # kilitli peak 24.0 ama son gozlem 25.0 (zirve asildi).
+        # 2026-08-20: gozlemler GUNCEL GERCEK epoch olmali — naive .timestamp()
+        # lokal tz ile yorumlanip 45dk bayat korumasini yaniltiyordu.
         rows = [
-            (int(now.timestamp()) - 3600, 24.0),
-            (int(now.timestamp()) - 1800, 25.0),
+            (int(_time.time()) - 120, 24.0),
+            (int(_time.time()) - 60, 25.0),
         ]
-        tgt = now + timedelta(hours=8)
+        # 2026-08-19: target_date BUGUN olmali (yarinin marketleri islenmez).
+        tgt = now
         m_24 = market_factory(
             city="Milan",
             city_code="LIMC",

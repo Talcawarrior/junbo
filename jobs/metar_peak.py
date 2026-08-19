@@ -14,6 +14,7 @@ Kullanim: bot_loop.metar_loop her 30dk'da bir run_metar_peak_bets cagirir.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -21,10 +22,11 @@ from database.db import get_session
 from database.models import Bet, Portfolio, WeatherMarket
 from config.settings import bot_config
 
-# bot_loop._FETCH_TIMEOUT ile ayni deger — circular import onlemek icin burada
-_FETCH_TIMEOUT = 60
-
 logger = logging.getLogger("SCHEDULER_METAR_PEAK")
+
+# Son tam arsiv toplama zamani (time.monotonic) — metar_loop 10 dk'ya inince
+# aviationweather.gov'u yormamak icin arsiv 25 dk'da bir toplanir.
+_LAST_ARCHIVE_RUN = 0.0
 
 # Kapanisa kadar bet ACILABILIR (2026-08-18 E config, kullanici karari).
 # Eski 2h kurali kapanisa yakin kilitlenen 13 sehir/gunun betini kaciriyordu.
@@ -199,6 +201,37 @@ def _open_metar_bet(session, market: WeatherMarket, peak_temp: float) -> Optiona
     except Exception as exc:  # never block betting on CLOB failure
         logger.debug("metar_peak: live price guard skipped for %s: %s", market.id, exc)
 
+    # 2026-08-20 STALE GUARD YEDEGI (orderbook.db — CLOB'dan BAGIMSIZ):
+    # Toronto 19 Agu'da CLOB istegi dusunce guard atlandi, bayat 25C'ye
+    # girildi (-$6). Orderbook.db botun kendi 5dk'lık GERCEK ask okumalaridir;
+    # son okuma DB fiyatindan %15+ sapiyorsa fiyat bayattir, bet reddedilir.
+    try:
+        import os as _os
+        import sqlite3 as _sq
+
+        _ob = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "data", "orderbook.db")
+        if _os.path.exists(_ob):
+            _oc = _sq.connect(_ob, timeout=5)
+            _last = _oc.execute(
+                "SELECT best_ask FROM orderbook_snapshots WHERE market_id=? AND best_ask IS NOT NULL "
+                "ORDER BY snapshot_time DESC LIMIT 1",
+                (str(market.id),),
+            ).fetchone()
+            _oc.close()
+            if _last and _last[0] is not None:
+                _ob_ask = float(_last[0])
+                if 0 < _ob_ask < 1 and abs(entry - _ob_ask) / _ob_ask > 0.15:
+                    from utils.activity_log import log_event
+
+                    log_event(
+                        "bet_blocked",
+                        str(market.city),
+                        f"STALE GUARD(ob): DB={entry:.3f} vs orderbook ask={_ob_ask:.3f} (fark > %15)",
+                    )
+                    return None
+    except Exception:  # noqa: BLE001 — yedek guard asla beti durdurmaz
+        pass
+
     pf = session.query(Portfolio).filter(Portfolio.id == 1).first()
     cash = float(pf.cash_balance) if pf else 0.0
     use_stake = min(METAR_STAKE, max(0.0, cash))
@@ -206,20 +239,9 @@ def _open_metar_bet(session, market: WeatherMarket, peak_temp: float) -> Optiona
         logger.warning("metar_peak: %s %sC nakit yetersiz (cash=%.2f)", market.city, market.threshold, cash)
         return None
 
-    # 2026-08-19 DERINLIK SINIRI (kullanici: "orderbook'a bakip ne kadar
-    # acabilirsin demen gerekir"): CLOB ask derinliginin %30'undan fazlasini
-    # tek emirde almaya calismayiz — fiyati ittirir. CLOB erisilemezse sinir
-    # uygulanmaz (eski davranis korunur).
-    try:
-        from utils.clob_live import extract_yes_token_id, max_stake_by_depth
-
-        tok = extract_yes_token_id(getattr(market, "raw_data", None))
-        if tok:
-            depth_limit = max_stake_by_depth(tok, entry)
-            if depth_limit is not None:
-                use_stake = min(use_stake, depth_limit)
-    except Exception:  # noqa: BLE001 — derinlik siniri asla beti engellemez
-        pass
+    # 2026-08-19 kullanici karari: DERINLIK SINIRI KALDIRILDI. CLOB ask
+    # derinligine gore stake kucultme 0.00/0.40 USD'lik cop betler uretiyordu
+    # (bos defter -> limit 0). Betler her zaman SABIT stake (3.0 USD) ile acilir.
 
     fill_price = max(0.01, min(0.99, round(entry, 4)))
     shares = bet_shares(use_stake, fill_price)
@@ -273,6 +295,48 @@ def _open_metar_bet(session, market: WeatherMarket, peak_temp: float) -> Optiona
     return bet
 
 
+def _merged_day_rows(
+    city_code: str, day: str, utc_offset_hours: float, fresh: list[tuple[int, float]]
+) -> list[tuple[int, float]]:
+    """Taze METAR fetch + kalici arsiv birlestirilir (kumulatif, monoton).
+
+    2026-08-19 fix: aviationweather.gov yanitlari donguden donguye degisebiliyor
+    (eksik gozlem) -> ayni gunun tespit edilen max'i orn. 24C/25C arasi
+    saliniyordu; kilitli peak geri dusup aktar mekanizmasini bos yere
+    tetikliyordu. Arsiv (metar_observations) bir kez gorulen gozlemi asla
+    kaybetmez; birlestirilmis satirlarda kumulatif max yalnizca ARTAR.
+    Pencere: sehirin YEREL gunu (yerel 00:00 = UTC 00:00 - offset) —
+    dunun aksam gozlemleri (eski UTC-gun filtresinin artiklari dahil) disarida kalir.
+    """
+    from datetime import timedelta
+
+    from database.models import MetarObservation
+
+    y, mo, d = int(day[:4]), int(day[5:7]), int(day[8:10])
+    start_naive = datetime(y, mo, d) - timedelta(seconds=utc_offset_hours * 3600)
+    end_naive = start_naive + timedelta(days=1)
+    merged: dict[int, float] = {e: t for e, t in fresh}
+    try:
+        with get_session() as session:
+            rows = (
+                session.query(MetarObservation.obs_time, MetarObservation.temp_c)
+                .filter(
+                    MetarObservation.city_code == city_code,
+                    MetarObservation.obs_time >= start_naive,
+                    MetarObservation.obs_time < end_naive,
+                )
+                .all()
+            )
+        for obs_dt, temp in rows:
+            if obs_dt is None or temp is None:
+                continue
+            ep = int(obs_dt.replace(tzinfo=timezone.utc).timestamp())
+            merged[ep] = max(merged.get(ep, -999.0), float(temp))
+    except Exception as exc:  # noqa: BLE001 — arsiv okunamazsa taze veri yeterli
+        logger.debug("metar arsiv merge fail %s: %s", city_code, exc)
+    return sorted(merged.items())
+
+
 def collect_metar_archive(session) -> int:
     """Tum sehirlerin bugunku METAR gozlemlerini arsivler (bet mantigindan BAGIMSIZ).
 
@@ -283,8 +347,18 @@ def collect_metar_archive(session) -> int:
     kacirdi. Bu fonksiyon her 30dk'da (metar_loop) TUM sehirlerin bugunku
     gozlemlerini ceker ve idempotent arsive yazar; bet acmaz, market durumuna
     bakmaz, kapanis saati filtrelemez.
+
+    2026-08-19: metar_loop 10dk'ya indirildi ama METAR yayinlari ~30dk'da bir
+    guncellenir — arsivi her 10dk'da toplamak aviationweather.gov'u bos yere
+    yorar (19 Agu aksami 17 timeout goruldu). Zaman kapisi: son toplamadan
+    25 dk gecmeden atlanir (arsiv idempotent, kayip yok).
     """
     from database.models import MetarObservation
+
+    global _LAST_ARCHIVE_RUN
+    if time.monotonic() - _LAST_ARCHIVE_RUN < 25 * 60:
+        return 0  # 10 dk'lik dongude her 3. kosuda bir toplanir
+    _LAST_ARCHIVE_RUN = time.monotonic()
 
     codes = [r[0] for r in session.query(MetarObservation.city_code).distinct().order_by(MetarObservation.city_code)]
     # Arsivde henuz gozlem olmayan sehirler de toplanmali -> weather_markets.
@@ -314,9 +388,12 @@ def collect_metar_archive(session) -> int:
     added = 0
     # 2026-08-19: 8 -> 4 worker — aviationweather.gov'u bogmamak icin
     # (19 Agu gece 17 'Read timed out' + bot kendi istek yukunu yigdi).
+    # 2026-08-19: as_completed timeout KALDIRILDI — 60s aksam yavasliginda
+    # asiliyor, TimeoutError run'u olduruyordu (loop 5 dk'da tekrar basliyor,
+    # cakisan run'lar uretiyordu). Her future kendi retry'siyle (4x12s) sinirli.
     with ThreadPoolExecutor(max_workers=4) as ex:
         futs = [ex.submit(_one, c) for c in all_codes]
-        for fut in as_completed(futs, timeout=_FETCH_TIMEOUT or 60):
+        for fut in as_completed(futs):
             try:
                 added += fut.result() or 0
             except Exception as exc:  # noqa: BLE001
@@ -340,12 +417,17 @@ def run_metar_peak_bets() -> int:
         # 2026-08-18 kullanici karari: "Metar betleri acilirken bias a gerek
         # yok, nasil olsa peak tespit edilmis oluyor" -> bias-top sehir
         # filtresi KALDIRILDI, TUM sehirlerin acik marketlerine bakilir.
-        # Acik marketler (status=open), bugun ve gelecek gun, TUM sehirler
+        # Acik marketler (status=open), SADECE BUGUN, TUM sehirler.
+        # 2026-08-19 fix: "bugun ve gelecek gun" filtresi yarinin marketlerini
+        # de isliyordu; yarinin YEREL gun penceresi gec saatlerde acildigi icin
+        # (HK +8 -> 19:00 TSİ) ilk gece gozlemleriyle (24-25C) SAHTE peak
+        # kilitleniyordu. Yarinin peak'i bugun bilinemez — sadece bugun.
         markets = (
             session.query(WeatherMarket)
             .filter(
                 WeatherMarket.status == "open",
                 WeatherMarket.target_date.isnot(None),
+                WeatherMarket.target_date.like(f"{today}%"),
                 WeatherMarket.city_code.isnot(None),
                 WeatherMarket.city_code != "",
                 WeatherMarket.latitude != 0,
@@ -400,15 +482,21 @@ def run_metar_peak_bets() -> int:
                 # kitledi, bu dunun mu").
                 rows = fetch_metar_day(m.city_code, day, utc_offset_hours=off)
                 archive_metar_observations(m.city_code, m.city or "", rows)
-                return m.city_code, day, rows
+                # 2026-08-19: arsiv ile birlestir (API donguden donguye eksik
+                # gozlem donebilir -> peak salinimi; arsiv kumulatiftir).
+                return m.city_code, day, _merged_day_rows(m.city_code, day, off, rows)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("metar_peak: METAR fetch fail %s: %s", m.city_code, exc)
                 return m.city_code, day, None
 
         metar_rows = {}
+        # 2026-08-19: as_completed timeout KALDIRILDI — 60s asilinca TimeoutError
+        # tum run'u oldurup (event'ler YAZILMADAN) loop'un 5 dk'da yeniden
+        # baslamasina yol aciyordu; arka planda yasayan eski thread'lerle
+        # cakisan run'lar olusuyordu. Her future kendi retry'siyle sinirli.
         with ThreadPoolExecutor(max_workers=8) as ex:
             futs = {ex.submit(_fetch_one, item): item for item in unique.values()}
-            for fut in as_completed(futs, timeout=_FETCH_TIMEOUT or 60):
+            for fut in as_completed(futs):
                 code, day, rows = fut.result()
                 metar_rows[(code, day)] = rows
 
@@ -416,10 +504,32 @@ def run_metar_peak_bets() -> int:
         from utils.activity_log import log_event, update_peak_watch
 
         last_closed: dict[tuple[str, str], int] = {}
+        # 2026-08-19: aktivite akisi gurultusu duzeltildi —
+        # peak_found sehir basina 1 kez, "market DB'de yok" yalnizca GERCEKTEN
+        # eslesen market yoksa, bet_closed yalnizca GERCEKTEN kapatma varsa.
+        peaks_logged: dict[tuple[str, str], tuple[int, str]] = {}  # (code, day) -> (bucket, sehir)
+        matched_markets: set[tuple[str, str]] = set()  # bucket marketi eslesen (code, day)
         watch_rows: dict[str, dict] = {}
         for m, day, utc_offset in candidates:
             day_rows = metar_rows.get((m.city_code, day)) or []
             if not day_rows:
+                continue
+            # 2026-08-20 BAYAT VERI KORUMASI (Toronto 19 Agu: bayat seriyle
+            # 25C'ye girildi, piyasa 27'yi biliyordu, -$6 uctu): aviationweather
+            # gozlemleri gecikmeli yayinlayabiliyor. Son gozlem 45dk'dan eskiyse
+            # kilit/bet ATLANIR — gecikme gecicidir, 30dk sonraki dongude taze
+            # veri gelir (kullanici: "90 cok uzun, o zamana kadar bet acar").
+            import time as _time
+
+            last_obs_age_min = (_time.time() - day_rows[-1][0]) / 60.0
+            if last_obs_age_min > 45.0:
+                from utils.activity_log import log_event as _le
+
+                _le(
+                    "bet_blocked",
+                    str(m.city),
+                    f"BAYAT METAR: son gozlem {last_obs_age_min:.0f} dk eski (>=45) - atlandi",
+                )
                 continue
             peak, confirmed = detect_peak(day_rows, utc_offset_hours=utc_offset)
             # 2026-08-19 PEAK TAKIBI (kullanici): su anki sicaklik + yon +
@@ -464,37 +574,25 @@ def run_metar_peak_bets() -> int:
             cur_max = max(t for _, t in day_rows)
             winner_val = float(cur_max) if cur_max > peak else peak
             winner_bucket = int(winner_val + 0.5) if winner_val >= 0 else int(winner_val - 0.5)
-            # 2026-08-19 AKTIVITE: bulunan peak her zaman kaydedilir.
-            log_event("peak_found", m.city, f"peak={winner_val:.1f}C bucket={winner_bucket}C")
-            if last_closed.get((m.city_code, day)) != winner_bucket:
-                _close_wrong_bucket_bets(session, m.city_code, m.target_date, winner_bucket)
-                last_closed[(m.city_code, day)] = winner_bucket
-                log_event("bet_closed", m.city, f"yanlis bucketlar kapatildi (kazanan {winner_bucket}C)")
+            key = (m.city_code, day)
+            # 2026-08-19 AKTIVITE: bulunan peak sehir basina 1 kez kaydedilir
+            # (market basina loglanirsa 9 marketli sehir 9 kere yazar).
+            if key not in peaks_logged:
+                peaks_logged[key] = (winner_bucket, m.city)
+                log_event("peak_found", m.city, f"peak={winner_val:.1f}C bucket={winner_bucket}C")
+            if last_closed.get(key) != winner_bucket:
+                closed = _close_wrong_bucket_bets(session, m.city_code, m.target_date, winner_bucket)
+                last_closed[key] = winner_bucket
+                # 2026-08-19: yalnizca GERCEKTEN kapatilan bet varsa logla
+                # (eski davranis: her dongude 0 kapatmayla da "kapatildi" yazardi).
+                if closed:
+                    log_event("bet_closed", m.city, f"yanlis bucketlar kapatildi (kazanan {winner_bucket}C)")
             # half-up (2026-08-18 audit): US sehirlerinde esikler float C'dir
             # (F'den donusturulur) — int() truncate yanlis bucket uretir;
             # Austin 35.9C marketi bucket 36'ya karsilik gelir.
             if int(float(m.threshold) + 0.5) != winner_bucket:
-                # Bu market kazanan bucket degil — diger marketler de
-                # deneniyor; engellenme NEDENI aktivite akisinda.
-                log_event(
-                    "bet_blocked",
-                    m.city,
-                    f"bucket={winner_bucket}C: bu market {float(m.threshold):.1f}C (esik eslesmedi)",
-                )
-                continue  # bu market kazanan bucket degil
-            # 2026-08-19 OTOMATIK UYARI (kullanici: "bunu onleyecek/kontrol
-            # edecek bir sey yap"): kilitli peak'in bucket marketi DB'de YOKSA
-            # uyar. Not: market cakisma fix'inden (metric'li dup-key) sonra bu
-            # uyari yalnizca GERCEKTEN acilmamis bucket'lari gosterir; yutulan
-            # marketler artik kaydediliyor. Istatistik icin log'a yazilir.
-            logger.warning(
-                "metar_peak: KILITLI BUCKET MARKETI YOK %s %sC (kilitli peak=%.1f) — "
-                "Polyde yeni acildiysa bir sonraki dongude yakalanir",
-                m.city,
-                m.threshold,
-                peak,
-            )
-            log_event("bet_blocked", m.city, f"bucket={winner_bucket}C: market DB'de yok")
+                continue  # bu market kazanan bucket degil — diger marketler denenir
+            matched_markets.add(key)
             bet = _open_metar_bet(session, m, winner_val)
             if bet:
                 opened += 1
@@ -503,6 +601,48 @@ def run_metar_peak_bets() -> int:
                     str(m.city),
                     f"{winner_bucket}C giris=${bet.entry_price:.3f} stake=${bet.stake_amount:.2f}",
                 )
+        # 2026-08-19 OTOMATIK UYARI (kullanici: "bunu onleyecek/kontrol edecek
+        # bir sey yap"): kilitli peak'in bucket marketi DB'de YOKSA uyar.
+        # Yalnizca HICBIR market eslesmeyen (code, day) icin, sehir basina 1 kez.
+        # Ama: bucket'ta zaten ACIK metar beti varsa ya da esik baska turde
+        # (HIGH/LOW/temperature_min) mevcutsa uyari yazilmaz — bunlar tasarim
+        # geregi atlanir, "market yok" degildir (2026-08-19 yanlis uyari fix).
+        for key, (bucket, city_name) in peaks_logged.items():
+            if key in matched_markets:
+                continue
+            code, day = key
+            bet_thr = [
+                r[0]
+                for r in session.query(WeatherMarket.threshold)
+                .join(Bet, Bet.market_id == WeatherMarket.id)
+                .filter(
+                    WeatherMarket.city_code == code,
+                    WeatherMarket.target_date.like(f"{day}%"),
+                    Bet.order_id.like("metar_%"),
+                    Bet.status.in_(("placed", "active")),
+                )
+                .all()
+            ]
+            if any(t is not None and int(float(t) + 0.5) == bucket for t in bet_thr):
+                continue  # bu bucket'ta bet zaten acik — eksik market yok
+            any_thr = [
+                r[0]
+                for r in session.query(WeatherMarket.threshold)
+                .filter(
+                    WeatherMarket.city_code == code,
+                    WeatherMarket.target_date.like(f"{day}%"),
+                    WeatherMarket.status == "open",
+                )
+                .all()
+            ]
+            if any(t is not None and int(float(t) + 0.5) == bucket for t in any_thr):
+                continue  # market var ama RANGE/temperature_max degil — tasarim geregi atlanir
+            logger.warning(
+                "metar_peak: KILITLI BUCKET MARKETI YOK %s %sC — Polyde yeni acildiysa bir sonraki dongude yakalanir",
+                city_name,
+                bucket,
+            )
+            log_event("bet_blocked", city_name, f"bucket={bucket}C: market DB'de yok")
 
         # 2026-08-19: peak takibi durumu tek seferde yazilir (dashboard).
         if watch_rows:
