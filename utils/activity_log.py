@@ -83,9 +83,25 @@ CREATE TABLE IF NOT EXISTS peak_watch (
     direction TEXT,
     status TEXT,
     peak REAL,
+    day TEXT,
     updated_at TEXT
 )
 """
+
+
+def _peak_watch_migrate(conn: sqlite3.Connection) -> None:
+    """Eski peak_watch tablosuna day kolonu ekle (2026-08-19 oncesi)."""
+    try:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(peak_watch)")]
+        if "day" not in cols:
+            conn.execute("ALTER TABLE peak_watch ADD COLUMN day TEXT")
+            # eski (gun'suz) kayitlar bugune ait sayilir — bir kez etiketle
+            conn.execute(
+                "UPDATE peak_watch SET day = ? WHERE day IS NULL",
+                (datetime.now(timezone.utc).strftime("%Y-%m-%d"),),
+            )
+    except sqlite3.OperationalError:
+        pass
 
 
 def update_peak_watch(rows: list[dict]) -> None:
@@ -101,15 +117,16 @@ def update_peak_watch(rows: list[dict]) -> None:
             conn.execute(_PEAK_WATCH_CREATE)
         except sqlite3.OperationalError:
             pass
+        _peak_watch_migrate(conn)
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         for r in rows:
             conn.execute(
-                "INSERT INTO peak_watch (city, cur, prev, direction, status, peak, updated_at) "
-                "VALUES (?,?,?,?,?,?,?) "
+                "INSERT INTO peak_watch (city, cur, prev, direction, status, peak, day, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(city) DO UPDATE SET cur=excluded.cur, prev=excluded.prev, "
                 "direction=excluded.direction, status=excluded.status, peak=excluded.peak, "
-                "updated_at=excluded.updated_at",
-                (r["city"], r["cur"], r["prev"], r["direction"], r["status"], r["peak"], now),
+                "day=excluded.day, updated_at=excluded.updated_at",
+                (r["city"], r["cur"], r["prev"], r["direction"], r["status"], r["peak"], r["day"], now),
             )
         conn.commit()
         conn.close()
@@ -118,7 +135,12 @@ def update_peak_watch(rows: list[dict]) -> None:
 
 
 def peak_watch_list() -> list[dict]:
-    """Tum takip edilen sehirlerin canli durumu (sicakliga gore azalan)."""
+    """BUGUNUN takip edilen sehirleri (sicakliga gore azalan).
+
+    2026-08-19 kullanici: "gun kapaninca ekrandaki tum kilitleri sil o gune
+    ait, yeni gun ile karisiyor" — onceki gunun kayitlari silinir, yalnizca
+    bugunun durumu doner.
+    """
     try:
         conn = sqlite3.connect(_DB_PATH, timeout=10)
         conn.execute("PRAGMA busy_timeout=10000")
@@ -126,9 +148,15 @@ def peak_watch_list() -> list[dict]:
             conn.execute(_PEAK_WATCH_CREATE)
         except sqlite3.OperationalError:
             pass
+        _peak_watch_migrate(conn)
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        # onceki gunun kilitleri temizlenir (yeni gun ile karismasin)
+        conn.execute("DELETE FROM peak_watch WHERE day IS NOT NULL AND day != ?", (today,))
+        conn.commit()
         rows = conn.execute(
             "SELECT city, cur, prev, direction, status, peak, updated_at "
-            "FROM peak_watch ORDER BY COALESCE(cur, -999) DESC"
+            "FROM peak_watch WHERE (day IS NULL OR day = ?) ORDER BY COALESCE(cur, -999) DESC",
+            (today,),
         ).fetchall()
         conn.close()
         return [

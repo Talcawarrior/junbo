@@ -32,7 +32,10 @@ HISTORY_URL = "https://aviationweather.gov/api/data/metar"
 
 # 30dk'da bir METAR yayinlanir; istasyon basina son 30 saatlik gecmis cekilir.
 HISTORY_HOURS = 30
-REQUEST_TIMEOUT = 20
+# 2026-08-19: 20 -> 12 sn + retry 4: aksamlari aviationweather yavasliyor;
+# uzun timeout 3 denemede 60+ sn surep donguyu (60s _FETCH_TIMEOUT) tasiriyordu.
+# Kisa timeout + hizli retry: en kotu ~48 sn.
+REQUEST_TIMEOUT = 12
 
 # Avast Web/Mail Shield TLS intercept: Windows sistem kok deposunu yukle
 # (weather_ensemble.py ile ayni cozum, 2026-08-19 metar.py'ye de tasindi),
@@ -80,9 +83,11 @@ def _fetch_metar(icao: str, hours: int = HISTORY_HOURS) -> list[tuple[int, float
 
     2026-08-18: 76 "Read timed out" gunluk hata — tek deneme yetersizdi; 3
     deneme + backoff eklendi (timeout'lar gecici, retry ile kurtariliyor).
+    2026-08-19: deneme 3 -> 4, timeout 12 sn (aksam yavasligi dongu 60s
+    limitini asmasin diye).
     """
     last_exc: Exception | None = None
-    for attempt in range(3):
+    for attempt in range(4):
         try:
             # 2026-08-16: config/settings.py global olarak HTTP_PROXY/HTTPS_PROXY env
             # set ediyor (Polymarket SOCKS). aviationweather.gov geo-block'lu DEGIL ve
@@ -131,20 +136,23 @@ def fetch_metar_live(icao: str) -> Optional[float]:
     return rows[-1][1]
 
 
-def fetch_metar_day(icao: str, day: str) -> list[tuple[int, float]]:
-    """Bir UTC gununun tum METAR gozlemlerini doner. Cache'li.
+def fetch_metar_day(icao: str, day: str, utc_offset_hours: float = 0.0) -> list[tuple[int, float]]:
+    """Bir YEREL gunun tum METAR gozlemlerini doner. Cache'li.
 
-    day: 'YYYY-MM-DD' (UTC). Gozlemler zaman sirali (epoch, temp_c).
+    day: 'YYYY-MM-DD'. 2026-08-19 kullanici: "NY cok batida nasil kitledi,
+    bu dunun mu" — UTC gun filtresi yanlisti (NY icin UTC 00:00-04:00 =
+    dunun yerel aksami; dunun peak'i bugunun kilidi saniliyordu). Artik
+    pencere yerel gune gore kaydirilir: yerel 00:00 = UTC 00:00 - offset.
     """
-    cache_key = (icao, day)
+    cache_key = (icao, day, utc_offset_hours)
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached
     rows = _fetch_metar(icao, hours=HISTORY_HOURS) or []
-    # gun bazinda filtrele
+    # YEREL gun bazinda filtrele
     day_rows = []
     for epoch, temp in rows:
-        dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
+        dt = datetime.fromtimestamp(epoch + utc_offset_hours * 3600, tz=timezone.utc)
         if dt.strftime("%Y-%m-%d") == day:
             day_rows.append((epoch, temp))
     day_rows.sort(key=lambda x: x[0])

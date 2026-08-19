@@ -393,9 +393,12 @@ def run_metar_peak_bets() -> int:
         from scrapers.metar import fetch_metar_day, archive_metar_observations
 
         def _fetch_one(item):
-            m, day, _ = item
+            m, day, off = item
             try:
-                rows = fetch_metar_day(m.city_code, day)
+                # 2026-08-19: YEREL gun penceresi — batili sehirlerde dunun
+                # aksami bugunun kilidi sanilmasin (kullanici: "NY nasil
+                # kitledi, bu dunun mu").
+                rows = fetch_metar_day(m.city_code, day, utc_offset_hours=off)
                 archive_metar_observations(m.city_code, m.city or "", rows)
                 return m.city_code, day, rows
             except Exception as exc:  # noqa: BLE001
@@ -447,6 +450,8 @@ def run_metar_peak_bets() -> int:
                 "direction": direction,
                 "status": status,
                 "peak": float(peak) if confirmed and peak is not None else None,
+                # 2026-08-19: gun kapaninca ekrandaki kilitler silinir (kullanici)
+                "day": day,
             }
             if not confirmed or peak is None:
                 continue  # zirve henuz kilitlenmedi (1 dusus kurali, 2026-08-18)

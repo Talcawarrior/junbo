@@ -230,13 +230,21 @@ def cmd_gunluk(args) -> int:
         except (TypeError, ValueError):
             pass
     day_rows: dict[tuple[str, str], list[tuple[float, float]]] = defaultdict(list)
+    # 2026-08-19 YEREL gun donusumu: batili sehirlerde UTC gununun ilk
+    # saatleri dunun yerel aksamidir — dunun peak'i bugunun kilidi sanilirdi
+    # (kullanici: "NY cok batida nasil kitledi, bu dunun mu").
+    _raw_rows: dict[tuple[str, str], list[tuple[float, float]]] = defaultdict(list)
     for code, tmax, obs in db.execute(
         "SELECT city_code, temp_c, obs_time FROM metar_observations WHERE temp_c IS NOT NULL AND obs_time IS NOT NULL"
     ):
-        day = str(obs)[:10]
         t = ts(obs)
-        if code and day in days and t is not None:
-            day_rows[(code, day)].append((t, float(tmax)))
+        if code and t is not None:
+            _raw_rows[(code, str(obs)[:10])].append((t, float(tmax)))
+    for (code, ud), rows in _raw_rows.items():
+        off = city_utc_offset(code, ud, lon.get(code))
+        for t, c in rows:
+            ld = datetime.fromtimestamp(t + off * 3600, tz=timezone.utc).strftime("%Y-%m-%d")
+            day_rows[(code, ld)].append((t, c))
     metar_peak_: dict[tuple[str, str], tuple[float, float]] = {}
     for (code, day), rows in day_rows.items():
         rows.sort(key=lambda x: x[0])
@@ -1179,14 +1187,20 @@ def cmd_metar_peak_live(args) -> int:
             pass
 
     # METAR gunluk serisi: (code, day) -> [(epoch, temp)]
+    # 2026-08-19 YEREL gun donusumu (cmd_gunluk ile ayni kural).
     day_rows: dict[tuple[str, str], list[tuple[float, float]]] = defaultdict(list)
+    _raw_rows: dict[tuple[str, str], list[tuple[float, float]]] = defaultdict(list)
     for code, tmax, obs in db.execute(
         "SELECT city_code, temp_c, obs_time FROM metar_observations WHERE temp_c IS NOT NULL AND obs_time IS NOT NULL"
     ):
-        day = str(obs)[:10]
         t = ts(obs)
         if code and t is not None:
-            day_rows[(code, day)].append((t, float(tmax)))
+            _raw_rows[(code, str(obs)[:10])].append((t, float(tmax)))
+    for (code, ud), rows in _raw_rows.items():
+        off = city_utc_offset(code, ud, lon.get(code))
+        for t, c in rows:
+            ld = datetime.fromtimestamp(t + off * 3600, tz=timezone.utc).strftime("%Y-%m-%d")
+            day_rows[(code, ld)].append((t, c))
     db.close()
 
     # Gun araligi: --min-day/--max-day verilmediyse fiyat verisinin araligi
