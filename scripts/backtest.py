@@ -1281,8 +1281,25 @@ def cmd_metar_peak_live(args) -> int:
         # min: altina) bet asilma aninda kapatilir (Milan senaryosu).
         # HIGH haric: HIGH'da YES = "max >= esik" — kilit bozulmasi (max
         # daha da yukselmesi) kazanma sansini ARTIRIR, kapatma yok, tutulur.
+        # 2026-08-19 STOP-LOSS (kullanici: "%50 stop loss koysak kayiplari
+        # yariya indirir miyiz?"): giristen sonra fiyat entry*(1-sl) altina
+        # dustuyse o noktada satilir. bk ile sl arasinda ONCE gelen kapanir.
+        # NOT: satis fiyati o noktadaki ASK'tir (gercekte bid ~biraz daha
+        # dusuktur — bu sim sl'yi iyimser gosterir).
+        sl = getattr(args, "stop_loss", 0.0)
+        t_sl = sl_price = None
+        if sl > 0 and seri:
+            sl_thr = entry_eff * (1.0 - sl)
+            for _st, _sa in seri:
+                if _st <= lock_epoch:
+                    continue
+                if _sa <= sl_thr:
+                    t_sl, sl_price = _st, _sa
+                    break
         bk = None if is_high else (trough_break if is_min else peak_break)(rows, pk, lock_epoch)
-        if bk is not None:
+        use_bk = bk is not None and (t_sl is None or bk[0] <= t_sl)
+        sl_hit = False
+        if use_bk:
             bk_ask = ask_at_or_after(seri, bk[0])
             if bk_ask is not None and 0 < bk_ask <= 1:
                 per = (bk_ask - entry_eff) / entry_eff - FEE_RATE * (1.0 - bk_ask)
@@ -1294,6 +1311,11 @@ def cmd_metar_peak_live(args) -> int:
                     else (-1.0 - FEE_RATE * (1.0 - entry_eff))
                 )
                 won = outcome
+        elif t_sl is not None and sl_price is not None:
+            # stop-loss: fiyat dustu — satis, bet KAYBEDER (zarar kesildi).
+            per = (sl_price - entry_eff) / entry_eff - FEE_RATE * (1.0 - sl_price)
+            won = False
+            sl_hit = True
         else:
             per = (
                 (1.0 / entry_eff - 1.0 - FEE_RATE * (1.0 - entry_eff))
@@ -1315,13 +1337,16 @@ def cmd_metar_peak_live(args) -> int:
                 "pnl": pnl,
                 "won": won,
                 "per": per,  # gas haric dolar basina net (kelly icin)
+                "sl_hit": sl_hit,
+                "would_win": outcome,
             }
         )
         # 2026-08-18 kullanici: "23 e ciktiginda 1 adet dusmesini beklemeyecek
         # hemen acacak, cunku 21 den 23 e cikti" — kilit bozulduysa bk aninda
         # eski bet KAPATILIR (yukarida) VE yeni zirvenin bucket'ina TEKRAR bet
         # acilir (dusus beklenmeden, bk degeri kazanan sayilir; zincir 1 adim).
-        if bk is not None and not is_min and not is_high:
+        # NOT: stop-loss ile kapatilan bette aktar YAPILMAZ (use_bk kosulu).
+        if use_bk and not is_min and not is_high:
             B2 = int(bk[1] + 0.5)
             m2, _ = _pick_mkt(code, day, B2)
             if m2 is not None:
@@ -1421,6 +1446,15 @@ def cmd_metar_peak_live(args) -> int:
         print(f"  fee + gas toplami     : ${tot_cost:.2f}")
         print(f"  NET (slippage dahil)  : ${tot_pnl:+.2f}")
         print(f"  [slippage etkisi]     : slippage'siz NET ${tot_ideal:+.2f}  ->  fark ${tot_ideal - tot_pnl:+.2f}")
+        # STOP-LOSS analizi (2026-08-19): SL'ye takilan betlerin kaci kalsaydi
+        # kazanacakti — kullanici: "%50 stop loss kayiplari yariya indirir mi?"
+        sl_hits = [b for b in bets if b.get("sl_hit")]
+        if sl_hits:
+            ww = sum(1 for b in sl_hits if b.get("would_win"))
+            print(
+                f"  [STOP-LOSS   ] {len(sl_hits)} bet SL'ye takildi; {ww} tanesi "
+                f"(%{ww / len(sl_hits) * 100:.0f}) kalsaydi KAZANACAKTI (SL kazanci kesti)"
+            )
         # ---- COMPOUND (2026-08-19 kullanici: "100 usd yatirip 70 usd
         # kazandiysan ertesi gun 2 ve 3 usd leri buna gore artir") ----
         # Her gun bankroll'un sabit %'sini (peak: stake/100) yatir; gun sonu
@@ -2365,6 +2399,12 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.0,
         help="orderbook p10 derinlik: asilirsa kazanan betlerde fiyat itilir (slippage)",
+    )
+    pl.add_argument(
+        "--stop-loss",
+        type=float,
+        default=0.0,
+        help="stop-loss orani: giristen sonra fiyat entry*(1-sl) altina duserse sat (0.5 = %50)",
     )
     pl.set_defaults(func=lambda a: cmd_metar_peak_live(a))
 
