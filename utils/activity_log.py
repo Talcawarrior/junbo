@@ -75,6 +75,78 @@ def recent_events(limit: int = 200) -> list[dict]:
         return []
 
 
+_PEAK_WATCH_CREATE = """
+CREATE TABLE IF NOT EXISTS peak_watch (
+    city TEXT PRIMARY KEY,
+    cur REAL,
+    prev REAL,
+    direction TEXT,
+    status TEXT,
+    peak REAL,
+    updated_at TEXT
+)
+"""
+
+
+def update_peak_watch(rows: list[dict]) -> None:
+    """Canli peak takibi durumu (sehir basina son durum, UPSERT).
+
+    2026-08-19 kullanici: "hangi sehirler peak takibinde, su anda kac,
+    bir oncekinden yuksek mu dusuk mu" — dashboard'da gorunur.
+    """
+    try:
+        conn = sqlite3.connect(_DB_PATH, timeout=10)
+        conn.execute("PRAGMA busy_timeout=10000")
+        try:
+            conn.execute(_PEAK_WATCH_CREATE)
+        except sqlite3.OperationalError:
+            pass
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        for r in rows:
+            conn.execute(
+                "INSERT INTO peak_watch (city, cur, prev, direction, status, peak, updated_at) "
+                "VALUES (?,?,?,?,?,?,?) "
+                "ON CONFLICT(city) DO UPDATE SET cur=excluded.cur, prev=excluded.prev, "
+                "direction=excluded.direction, status=excluded.status, peak=excluded.peak, "
+                "updated_at=excluded.updated_at",
+                (r["city"], r["cur"], r["prev"], r["direction"], r["status"], r["peak"], now),
+            )
+        conn.commit()
+        conn.close()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def peak_watch_list() -> list[dict]:
+    """Tum takip edilen sehirlerin canli durumu (sicakliga gore azalan)."""
+    try:
+        conn = sqlite3.connect(_DB_PATH, timeout=10)
+        conn.execute("PRAGMA busy_timeout=10000")
+        try:
+            conn.execute(_PEAK_WATCH_CREATE)
+        except sqlite3.OperationalError:
+            pass
+        rows = conn.execute(
+            "SELECT city, cur, prev, direction, status, peak, updated_at "
+            "FROM peak_watch ORDER BY COALESCE(cur, -999) DESC"
+        ).fetchall()
+        conn.close()
+        return [
+            {
+                "city": r[0],
+                "cur": r[1],
+                "prev": r[2],
+                "direction": r[3],
+                "status": r[4],
+                "peak": r[5],
+                "updated_at": r[6],
+            }
+            for r in rows
+        ]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def log_daily_market_summary() -> None:
     """Gunde 1 kez: Poly'de kac market/sehir var vs bizim DB'de kac var.
 

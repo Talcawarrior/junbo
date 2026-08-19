@@ -410,14 +410,38 @@ def run_metar_peak_bets() -> int:
                 metar_rows[(code, day)] = rows
 
         # Paralele cekilen verilerle peak kontrolu + bet ac
-        from utils.activity_log import log_event
+        from utils.activity_log import log_event, update_peak_watch
 
         last_closed: dict[tuple[str, str], int] = {}
+        watch_rows: dict[str, dict] = {}
         for m, day, utc_offset in candidates:
             day_rows = metar_rows.get((m.city_code, day)) or []
             if not day_rows:
                 continue
             peak, confirmed = detect_peak(day_rows, utc_offset_hours=utc_offset)
+            # 2026-08-19 PEAK TAKIBI (kullanici): su anki sicaklik + yon +
+            # durum (kilitli/takip/bekleme) — dashboard'da gorunur.
+            cur_t = day_rows[-1][1]
+            prev_t = day_rows[-2][1] if len(day_rows) >= 2 else None
+            if prev_t is not None:
+                direction = "UP" if cur_t > prev_t else ("DOWN" if cur_t < prev_t else "FLAT")
+            else:
+                direction = "-"
+            last_local_hour = datetime.fromtimestamp(day_rows[-1][0] + utc_offset * 3600, tz=timezone.utc).hour
+            if confirmed and peak is not None:
+                status = f"kilitli peak={peak:.1f}C"
+            elif last_local_hour >= 13:
+                status = "takip (13+ sonrasi)"
+            else:
+                status = "bekleme (13 oncesi)"
+            watch_rows[str(m.city)] = {
+                "city": str(m.city),
+                "cur": cur_t,
+                "prev": prev_t,
+                "direction": direction,
+                "status": status,
+                "peak": float(peak) if confirmed and peak is not None else None,
+            }
             if not confirmed or peak is None:
                 continue  # zirve henuz kilitlenmedi (1 dusus kurali, 2026-08-18)
             # 2026-08-18 kullanici: "20 21 22 22 21 diyorsa ikinci 21 ve altini
@@ -465,9 +489,13 @@ def run_metar_peak_bets() -> int:
                 opened += 1
                 log_event(
                     "bet_opened",
-                    m.city,
+                    str(m.city),
                     f"{winner_bucket}C giris=${bet.entry_price:.3f} stake=${bet.stake_amount:.2f}",
                 )
+
+        # 2026-08-19: peak takibi durumu tek seferde yazilir (dashboard).
+        if watch_rows:
+            update_peak_watch(list(watch_rows.values()))
 
         session.commit()
     if opened:

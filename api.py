@@ -93,6 +93,16 @@ def _recent_activity_events(limit: int = 200) -> list[dict]:
         return []
 
 
+def _peak_watch_status() -> list[dict]:
+    """Canli peak takibi durumu (sehir, sicaklik, yon, kilit durumu)."""
+    try:
+        from utils.activity_log import peak_watch_list
+
+        return peak_watch_list()
+    except Exception:  # noqa: BLE001
+        return []
+
+
 # ── Global State tracking for FastAPI Web App ───────────────────────────────
 class BotState:
     """Global bot state tracking running status, modules, and tasks."""
@@ -1658,6 +1668,7 @@ def get_health_check():
                 "count": len(edge_values),
             },
             "activity_events": _recent_activity_events(),
+            "peak_watch": _peak_watch_status(),
             "summary_all": {
                 "total_settled": total_settled,
                 "wins": wins_all,

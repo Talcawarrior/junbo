@@ -704,6 +704,16 @@ export interface HealthResponse {
     detail: string | null;
   }>;
 
+  peak_watch: Array<{
+    city: string;
+    cur: number | null;
+    prev: number | null;
+    direction: string | null;
+    status: string | null;
+    peak: number | null;
+    updated_at: string | null;
+  }>;
+
   summary_all: {
 
 

@@ -1184,6 +1184,30 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
                 ))
               )}
             </div>
+            {/* 2026-08-19: Peak Takibi — canli sicaklik + yon + kilit durumu */}
+            <div className="space-y-0.5 pt-1">
+              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: TEXT_MUTED }}>
+                Peak Takibi (canli — yon: ↑ yukseliyor / ↓ dusuyor)
+              </p>
+              {(h.peak_watch ?? []).length === 0 ? (
+                <p className="text-xs py-2" style={{ color: TEXT_MUTED }}>Kayit yok</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-x-3">
+                  {(h.peak_watch ?? []).map((w: any, i: number) => (
+                    <div key={i} className="flex items-center gap-1 text-[11px] py-0.5 border-b last:border-0" style={{ borderColor: `${BORDER}60` }}>
+                      <span className="font-mono shrink-0" style={{ color: w.direction === "UP" ? RED : w.direction === "DOWN" ? TEAL : TEXT_MUTED }}>
+                        {w.direction === "UP" ? "↑" : w.direction === "DOWN" ? "↓" : "="}
+                      </span>
+                      <span className="font-semibold shrink-0" style={{ color: TEXT_PRIMARY }}>{w.city}</span>
+                      <span className="font-mono shrink-0" style={{ color: TEXT_PRIMARY }}>{w.cur?.toFixed?.(1) ?? w.cur}°C</span>
+                      <span className="shrink-0" style={{ color: w.status?.startsWith("kilitli") ? "#f59e0b" : TEXT_MUTED }}>
+                        {w.status === "kilitli" ? `🔒${w.peak?.toFixed?.(0) ?? ""}` : w.status?.startsWith("kilitli") ? `🔒${w.status.replace("kilitli peak=", "")}` : ""}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             {/* 2026-08-19: Aktivite Akisi — peak bulundu / bet engellendi / hata */}
             <div className="space-y-0.5 pt-1">
               <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: TEXT_MUTED }}>Aktivite Akışı (peak / bet / hata)</p>
