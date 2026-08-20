@@ -674,6 +674,11 @@ def run_metar_peak_bets() -> int:
                 direction = "-"
             last_local_hour = datetime.fromtimestamp(day_rows[-1][0] + utc_offset * 3600, tz=timezone.utc).hour
             cur_max = max(t for _, t in day_rows)
+            # 2026-08-20 kullanici: "erken girise [kilit] ekleme, ne zaman
+            # peak tespit olursa KESIN o zaman kilit olsun" — detect_peak HER
+            # modda calisir; gercek 1-dusus kilidi varsa durumda KILIT gorunur,
+            # erken giris ancak kilit yokken gosterilir (aktar yine cur_max'tan).
+            pk_lock, cf_lock = detect_peak(day_rows, utc_offset_hours=utc_offset)
             if early_attempt and avg_hour is not None:
                 local_now_hr = (time.time() + utc_offset * 3600.0) % 86400.0 / 3600.0
                 if local_now_hr < avg_hour:
@@ -692,16 +697,19 @@ def run_metar_peak_bets() -> int:
                 peak = cur_max
                 confirmed = True
             else:
-                peak, confirmed = detect_peak(day_rows, utc_offset_hours=utc_offset)
-            if confirmed and peak is not None:
+                peak, confirmed = pk_lock, cf_lock
+            if cf_lock and pk_lock is not None:
                 # 2026-08-19 kullanici: "sicaklik yukseliyor ama kilitli gorunuyor"
                 # — kilitten SONRA zirve asildiysa bunu GOSTER (aktar devrede).
-                if early_attempt:
-                    status = f"erken giris (max {cur_max:.1f}C, ~{avg_hour:.0f}:00)"
-                elif cur_max > peak:
+                if cur_max > pk_lock:
                     status = f"zirve asildi -> {cur_max:.1f}C (aktar)"
                 else:
-                    status = f"kilitli peak={peak:.1f}C"
+                    status = f"kilitli peak={pk_lock:.1f}C"
+            elif confirmed and peak is not None:
+                if early_attempt:
+                    status = f"erken giris (max {cur_max:.1f}C, ~{avg_hour:.0f}:00)"
+                else:
+                    status = f"takip (peak={peak:.1f}C, kilit bekliyor)"
             elif last_local_hour >= 13:
                 status = "takip (13+ sonrasi)"
             else:
@@ -712,7 +720,10 @@ def run_metar_peak_bets() -> int:
                 "prev": prev_t,
                 "direction": direction,
                 "status": status,
-                "peak": float(peak) if confirmed and peak is not None else None,
+                # gercek kilit varsa KILITLI deger yazilir (2026-08-20)
+                "peak": float(pk_lock)
+                if cf_lock and pk_lock is not None
+                else (float(peak) if confirmed and peak is not None else None),
                 # 2026-08-19: gun kapaninca ekrandaki kilitler silinir (kullanici)
                 "day": day,
             }
@@ -821,6 +832,34 @@ def run_metar_peak_bets() -> int:
                 bucket,
             )
             log_event("bet_blocked", city_name, f"bucket={bucket}C: market DB'de yok")
+
+        # 2026-08-20 kullanici onayi: kara listedeki sehirler dongude
+        # atlandigi icin eski "kilitli" satirlari ekranda donmus kaliyordu
+        # (HK/Shenzhen/Wellington restart oncesi kilitle takili kaldi).
+        # Durust gosterim: canli sicaklik + "kara liste (bet yok)", kilit yok.
+        for m in markets:
+            if m.city_code not in METAR_PEAK_BLACKLIST:
+                continue
+            if str(m.city) in watch_rows:
+                continue
+            _lo = (
+                session.query(MetarObservation.temp_c)
+                .filter(
+                    MetarObservation.city_code == m.city_code,
+                    MetarObservation.day == today,
+                )
+                .order_by(MetarObservation.obs_time.desc())
+                .first()
+            )
+            watch_rows[str(m.city)] = {
+                "city": str(m.city),
+                "cur": float(_lo[0]) if _lo and _lo[0] is not None else None,
+                "prev": None,
+                "direction": "-",
+                "status": "kara liste (bet yok)",
+                "peak": None,
+                "day": today,
+            }
 
         # 2026-08-19: peak takibi durumu tek seferde yazilir (dashboard).
         if watch_rows:

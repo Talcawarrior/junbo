@@ -1201,7 +1201,13 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
                       <span className="font-semibold shrink-0" style={{ color: TEXT_PRIMARY }}>{w.city}</span>
                       <span className="font-mono shrink-0" style={{ color: TEXT_PRIMARY }}>{w.cur?.toFixed?.(1) ?? w.cur}°C</span>
                       <span className="shrink-0" style={{ color: w.status?.startsWith("zirve") ? RED : w.status?.startsWith("kilitli") ? "#f59e0b" : TEXT_MUTED }}>
-                        {w.status?.startsWith("zirve") ? `⚠️${w.status.replace("zirve asildi -> ", "")}` : w.status?.startsWith("kilitli") ? `🔒${w.status.replace("kilitli peak=", "")}` : ""}
+                        {w.status?.startsWith("zirve")
+                          ? `⚠️${w.status.replace("zirve asildi -> ", "")}`
+                          : w.status?.startsWith("kilitli")
+                            ? `🔒${w.status.replace("kilitli peak=", "")}`
+                            : w.status?.startsWith("kara liste")
+                              ? "🚫"
+                              : ""}
                       </span>
                     </div>
                   ))}
