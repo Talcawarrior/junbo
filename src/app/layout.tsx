@@ -15,7 +15,17 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Junbo — Dashboard",
-  description: "Polymarket Hava Ticaret Botu Dashboard",
+  description: "Polymarket Sicaklik Piyasasi Botu (PAPER) — spread + METAR-peak hibrit",
+  openGraph: {
+    title: "Junbo — Dashboard",
+    description: "Polymarket Sicaklik Piyasasi Botu (PAPER) — spread + METAR-peak hibrit",
+    type: "website",
+  },
+  twitter: {
+    card: "summary",
+    title: "Junbo — Dashboard",
+    description: "Polymarket Sicaklik Piyasasi Botu (PAPER)",
+  },
 };
 
 export default function RootLayout({

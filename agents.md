@@ -106,19 +106,24 @@ Bulunan her bug düzeltilip test edilmeli, sonra commit atılmalı.
 
 ## Botun Temel Mantığı
 
-**Bet açma stratejisi (her high/low sicaklik marketi icin):**
-1. Polymarket'ten tum acik weather marketlerini cek
-2. Her `(sehir, tarih, metric)` grubunda en yuksek `yes_price` olan marketi sec
-3. **Her zaman YES tarafina bet ac** — high/low fark etmez, sadece en yuksek fiyati sec
-4. `max_entry_price = 0.99` — 0.99 ve ustu fiyatlara bet ACILMAZ (kar marjini korumak icin, 0.99→1.00 komisyonsuz kayip ederiz)
-5. 2+ gun sonrasi betler saat 13:00'dan once acilmaz (time gate — ilk acilista belirsiz)
-6. Smart rotation: ayni grupta daha iyi fiyatli market bulunursa eski bet kapatilir, yenisi acilir
-7. Tie: ayni fiyata sahip iki market varsa ikisini de ac, birinin one gecmesini bekle, geride kalanini sat
-8. Price poller her 5 dakikada fiyat gunceller (settlement ve risk kontrolleri icin)
-9. Polymarket UI dogrulama: `scripts/verify_ui_markets.py` her 2 saatte bir DB'yi Polymarket Gamma API ile karsilastirir
-10. **Net edge kontrolu:** `should_bet` kosulunda `net_edge >= effective_min_edge` zorunlu — negatif veya cok dusuk edge varsa bet acilmaz
+**GUNCEL STRATEJI (2026-08-20, bakiniz: CLAUDE.md bolum 2 — yetkili config):**
 
-**Kasa bosluk sorunu:** Betler `open_bet_on_market` ve `place_all_pending` icinde `check_exposure_cap` ve `max_bet_cap` ile karsilanir. Kasa yetersizligi varsa bet reddedilir ve `Insufficient cash` log'u yazilir.
+**1) SPREAD modu (ana, `BETTING_STRATEGY=spread`):**
+- `spread_radius=0` (tek esik = tahminin merkezi), `spread_max_cities=15` (en az |bias| sapan sehir), `spread_max_entry=0.95`, `spread_stake_usd=2.0`, gunluk limit 120
+- Acilan betler settlement'a kadar TUTULUR (kayan pencere KAPALI); erken kapanis mekanizmalari (SL/TP/TS/time-decay/reopen) YOKTUR
+- Giris fiyati canli `weather_markets.yes_price` (5 dk); fiyat 0.01-0.95 arasi her seye bet acilir; derinlik siniri YOK (kullanici karari)
+
+**2) METAR-peak modu (HIBRIT, 2026-08-20):**
+- `_avg_peak_hour`: sehir bazli gecmis ortalama peak saati (bugun haric, >=3 gun) — saat gelmeden bet acilmaz
+- Saat gelince cur_max'a ERKEN giris adayi; bucket fiyati **0.50 ustunde** ise 1-dusus kilidi beklenir, altinda dusus beklemeden girilir
+- Aktar: zirve asilirsa (cur_max > kilitli peak) eski bet kapatilir + yenisine acilir (zincir 22->23->24)
+- `MIN_ENTRY=0.05`, stake $3, SADECE `temperature_max` + `RANGE` (tam bucket)
+- **KARA LISTE (`METAR_PEAK_BLACKLIST`):** VHHH, ZGSZ, KBKF, KATL, KSEA, KSFO, NZWN — havalimani METAR'i WU sehir verisinden sistematik sapiyor (%20-57 tutma); bu sehirlerde METAR-peak bet acilmaz (veri toplama + spread DEVAM eder)
+- Bayat METAR (>45 dk): DERHAL yeniden cekim denenir; taze gelirse devam, gelmezse atla (aktif duzeltme)
+
+**3) Korumalar:** stale fiyat guard (CLOB, %15 sapma), orderbook.db stale guard yedegi, 45dk bayat METAR, PAPER MODE kalici (`_live_allowed=False`).
+
+Eski edge-tabanli mod (`BETTING_STRATEGY=edge`) korunur ama kullanilmaz.
 
 ### 0 failed → Otomatik Bot Başlatma
 
