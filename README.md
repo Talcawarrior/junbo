@@ -197,6 +197,11 @@ python main.py bot
   duzeltme:** son gozlem esikten eski ise (30dk istasyonlarda 45dk, 60dk
   saatlik istasyonlarda 90dk — kadans-bilgili, 2026-08-20) o sehrin METAR'i DERHAL
   yeniden cekilir; taze gelirse devam, gelmezse sehir-gun basina 1 kez alarm.
+  **2026-08-21 agresif yeniden cekim (kullanici onayi):** (A) ilk paralel fetch
+  bos/hata donerse sessiz atlama YOK - o sehrin METAR'i hemen yeniden cekilir
+  (Buenos Aires 19 Agu 17:07->20:34 sessizligi). (B) bayat yeniden cekim TEK
+  deneme yerine 3 deneme (aralarda 3 sn bekleme); 3'u de bayat/basarisizsa
+  sehir-gun basina 1 kez alarm + yeni bet yok.
   **2026-08-18 audit (C1/C2/C3/M3):**
   stake artik `debit_stake` ile dusulur (onceden HIC dusulmuyordu -> kagit nakit
   yanlizdi); bucket/peak `int(x+0.5)` half-up (banker's round half-even DEGIL);

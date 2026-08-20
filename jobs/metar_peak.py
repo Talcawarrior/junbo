@@ -613,7 +613,31 @@ def run_metar_peak_bets() -> int:
         for m, day, utc_offset in candidates:
             day_rows = metar_rows.get((m.city_code, day)) or []
             if not day_rows:
-                continue
+                # 2026-08-21 (A): ilk PARALEL fetch bos/hata dondu — sessiz
+                # atlamak yerine o sehrin METAR'ini DERHAL yeniden cek
+                # (aviationweather gecikmeli yayinlar; Buenos Aires 19 Agu
+                # 17:07->20:34 sessizligi buydu — hic deneme yoktu). Yeniden
+                # cekim de bos/basarisizsa sehir-gun basina 1 kez logla + atla.
+                _fresh = fetch_metar_day(m.city_code, day, utc_offset_hours=utc_offset)
+                if _fresh:
+                    archive_metar_observations(m.city_code, m.city or "", _fresh)
+                    _merged = _merged_day_rows(m.city_code, day, utc_offset, _fresh)
+                    if _merged:
+                        day_rows = _merged
+                    else:
+                        if (m.city_code, day) not in stale_logged:
+                            stale_logged.add((m.city_code, day))
+                            log_event(
+                                "bet_blocked", str(m.city), "METAR: ilk fetch bos, yeniden cekim de bos - yeni bet yok"
+                            )
+                        continue
+                else:
+                    if (m.city_code, day) not in stale_logged:
+                        stale_logged.add((m.city_code, day))
+                        log_event(
+                            "bet_blocked", str(m.city), "METAR: ilk fetch bos, yeniden cekim basarisiz - yeni bet yok"
+                        )
+                    continue
             # 2026-08-20 BAYAT VERI KORUMASI (Toronto 19 Agu: bayat seriyle
             # 25C'ye girildi, piyasa 27'yi biliyordu, -$6 uctu): aviationweather
             # gozlemleri gecikmeli yayinlayabiliyor. Son gozlem 45dk'dan eskiyse
@@ -636,32 +660,34 @@ def run_metar_peak_bets() -> int:
                 # yerine o sehrin METAR'ini DERHAL yeniden cekmeyi dene; taze
                 # veri gelirse bet mantigi devam eder, gelmezse YENI BET yok
                 # (aviationweather istasyon yayinini geciktirebiliyor).
-                _fresh = fetch_metar_day(m.city_code, day, utc_offset_hours=utc_offset)
-                if _fresh:
-                    archive_metar_observations(m.city_code, m.city or "", _fresh)
-                    _merged = _merged_day_rows(m.city_code, day, utc_offset, _fresh)
-                    if _merged and (_time.time() - _merged[-1][0]) / 60.0 <= stale_lim:
-                        day_rows = _merged  # taze veri geldi — devam et
-                    else:
-                        stale_skip = True
-                        # yeniden cekim de bayat: sehir-gun basina 1 kez logla
-                        if key_stale not in stale_logged:
-                            stale_logged.add(key_stale)
-                            from utils.activity_log import log_event as _le
-
-                            _le(
-                                "bet_blocked",
-                                str(m.city),
-                                f"BAYAT METAR: yeniden cekim de bayat "
-                                f"({last_obs_age_min:.0f} dk >= {stale_lim:.0f}) - yeni bet yok",
-                            )
-                else:
+                # 2026-08-21 (B): 1 deneme yerine 3 deneme, aralarda 3 sn
+                # bekleme — aviationweather tek cagriyi bayat donebiliyor;
+                # kisa retry taze gozlem gelmesine yetiyor.
+                _fresh_ok = False
+                for _attempt in range(3):
+                    _fresh = fetch_metar_day(m.city_code, day, utc_offset_hours=utc_offset)
+                    if _fresh:
+                        archive_metar_observations(m.city_code, m.city or "", _fresh)
+                        _merged = _merged_day_rows(m.city_code, day, utc_offset, _fresh)
+                        if _merged and (_time.time() - _merged[-1][0]) / 60.0 <= stale_lim:
+                            day_rows = _merged  # taze veri geldi — devam et
+                            _fresh_ok = True
+                            break
+                    if _attempt < 2:
+                        _time.sleep(3)  # yeniden denemeden once kisa bekleme
+                if not _fresh_ok:
                     stale_skip = True
+                    # 3 deneme de bayat/basarisiz: sehir-gun basina 1 kez logla
                     if key_stale not in stale_logged:
                         stale_logged.add(key_stale)
                         from utils.activity_log import log_event as _le
 
-                        _le("bet_blocked", str(m.city), "BAYAT METAR: yeniden cekim basarisiz - yeni bet yok")
+                        _le(
+                            "bet_blocked",
+                            str(m.city),
+                            f"BAYAT METAR: 3 yeniden cekim de bayat "
+                            f"({last_obs_age_min:.0f} dk >= {stale_lim:.0f}) - yeni bet yok",
+                        )
             # 2026-08-20 HIBRIT (kullanici onayi): sehir bazli gecmis ortalama
             # peak saati biliniyorsa, o saatten ONCE bet acilmaz (bekleme);
             # saat gelince cur_max'a ERKEN giris adayi olur (dusus beklenmez).
