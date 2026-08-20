@@ -340,6 +340,53 @@ class TestMetarPeakStaleRefresh:
         assert called_ids == []  # tazelenemedi -> atlandi
         assert m_24 is not None
 
+    def test_bayat_veride_aktar_calisir_yeni_bet_yok(self, market_factory):
+        """2026-08-20 kullanici onayi: bayat veri YENI bet acmayi engeller
+        ama aktar (yanlis bucket kapatma) calismaya devam eder."""
+        import time as _time
+
+        from unittest.mock import patch
+
+        tgt = datetime.now(timezone.utc).replace(tzinfo=None)
+        m_24 = market_factory(
+            city="Amsterdam",
+            city_code="EHAM",
+            metric="temperature_max",
+            market_type="RANGE",
+            threshold=24.0,
+            target_date=tgt,
+            yes_price=0.30,
+        )
+        called_ids: list[str] = []
+        closed_calls: list[float] = []
+        stale = int(_time.time()) - 3600  # 60 dk eski (bayat)
+
+        def _fake_bet(*args):
+            market = args[1]
+            called_ids.append(str(market.id))
+            return None
+
+        with (
+            # yeniden cekim de bayat doner
+            patch("scrapers.metar.fetch_metar_day", return_value=[(stale, 24.0)]),
+            patch("scrapers.metar.archive_metar_observations", return_value=0),
+            patch("scrapers.metar.detect_peak", return_value=(24.0, True)),
+            patch.object(mp, "_avg_peak_hour", return_value=0.0),
+            patch.object(mp, "_open_metar_bet", side_effect=_fake_bet),
+            patch.object(
+                mp,
+                "_close_wrong_bucket_bets",
+                side_effect=lambda _s, _c, _td, bucket: closed_calls.append(bucket),
+            ),
+        ):
+            mp.run_metar_peak_bets()
+
+        # aktar CALISTI (kazanan bucket 24 ile kapatma denendi)...
+        assert closed_calls and all(c == 24.0 for c in closed_calls)
+        # ...ama bayat veri yuzunden YENI BET ACILMADI
+        assert called_ids == []
+        assert m_24 is not None
+
 
 class TestMetarPeakStaleThreshold:
     """2026-08-20 kullanici onayi: bayat esigi istasyon kadansina gore.

@@ -626,11 +626,16 @@ def run_metar_peak_bets() -> int:
             # 2026-08-20 kadans-bilgili esik: 60dk istasyonlarda 90dk,
             # 30dk istasyonlarda 45dk (saatlik istasyonlarda sahte alarm).
             stale_lim = _stale_threshold_min(session, m.city_code)
+            # 2026-08-20 kullanici onayi: bayat veri YALNIZCA yeni bet acmayi
+            # engeller; aktar (yanlis bucket kapatma) bayattan bagimsiz calisir
+            # — elimizdeki en iyi peak ile kapatmak guvenlidir (asla gozlenen
+            # max'in USTUNDE kapatmayiz).
+            stale_skip = False
             if last_obs_age_min > stale_lim:
                 # 2026-08-20 kullanici: "duzeltmeye calismadi" — pasif atlamak
                 # yerine o sehrin METAR'ini DERHAL yeniden cekmeyi dene; taze
-                # veri gelirse bet mantigi devam eder, gelmezse atla (aviation
-                # weather istasyon yayinini geciktirebiliyor — Toronto olayi).
+                # veri gelirse bet mantigi devam eder, gelmezse YENI BET yok
+                # (aviationweather istasyon yayinini geciktirebiliyor).
                 _fresh = fetch_metar_day(m.city_code, day, utc_offset_hours=utc_offset)
                 if _fresh:
                     archive_metar_observations(m.city_code, m.city or "", _fresh)
@@ -638,6 +643,7 @@ def run_metar_peak_bets() -> int:
                     if _merged and (_time.time() - _merged[-1][0]) / 60.0 <= stale_lim:
                         day_rows = _merged  # taze veri geldi — devam et
                     else:
+                        stale_skip = True
                         # yeniden cekim de bayat: sehir-gun basina 1 kez logla
                         if key_stale not in stale_logged:
                             stale_logged.add(key_stale)
@@ -647,16 +653,15 @@ def run_metar_peak_bets() -> int:
                                 "bet_blocked",
                                 str(m.city),
                                 f"BAYAT METAR: yeniden cekim de bayat "
-                                f"({last_obs_age_min:.0f} dk >= {stale_lim:.0f}) - atlandi",
+                                f"({last_obs_age_min:.0f} dk >= {stale_lim:.0f}) - yeni bet yok",
                             )
-                        continue
                 else:
+                    stale_skip = True
                     if key_stale not in stale_logged:
                         stale_logged.add(key_stale)
                         from utils.activity_log import log_event as _le
 
-                        _le("bet_blocked", str(m.city), "BAYAT METAR: yeniden cekim basarisiz - atlandi")
-                    continue
+                        _le("bet_blocked", str(m.city), "BAYAT METAR: yeniden cekim basarisiz - yeni bet yok")
             # 2026-08-20 HIBRIT (kullanici onayi): sehir bazli gecmis ortalama
             # peak saati biliniyorsa, o saatten ONCE bet acilmaz (bekleme);
             # saat gelince cur_max'a ERKEN giris adayi olur (dusus beklenmez).
@@ -776,6 +781,11 @@ def run_metar_peak_bets() -> int:
                 # (eski davranis: her dongude 0 kapatmayla da "kapatildi" yazardi).
                 if closed:
                     log_event("bet_closed", m.city, f"yanlis bucketlar kapatildi (kazanan {winner_bucket}C)")
+            # 2026-08-20 kullanici onayi: bayat veride aktar calisti ama
+            # YENI BET ACILMAZ (Toronto dersi — bayat seriyle yanlis bucket'a
+            # girmeyelim).
+            if stale_skip:
+                continue
             # half-up (2026-08-18 audit): US sehirlerinde esikler float C'dir
             # (F'den donusturulur) — int() truncate yanlis bucket uretir;
             # Austin 35.9C marketi bucket 36'ya karsilik gelir.
