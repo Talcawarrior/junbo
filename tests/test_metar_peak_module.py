@@ -173,3 +173,134 @@ class TestMetarPeakBrokenLock:
         assert 24.0 not in bet_calls
         assert m_24 is not None
         assert m_25 is not None
+
+
+class TestMetarPeakBlacklist:
+    """2026-08-20 kullanici onayi: METAR havalimani istasyonu WU sehir
+    verisinden sistematik sapan sehirler (VHHH %20, ZGSZ %29 tutma) — bu
+    sehirlerde METAR-peak bet acilmaz; veri toplama devam eder.
+    """
+
+    def test_kara_liste_sehrine_bet_acilmaz(self, market_factory):
+        import time as _time
+
+        from unittest.mock import patch
+
+        tgt = datetime.now(timezone.utc).replace(tzinfo=None)
+        m_hk = market_factory(
+            city="Hong Kong",
+            city_code="VHHH",
+            metric="temperature_max",
+            market_type="RANGE",
+            threshold=30.0,
+            target_date=tgt,
+            yes_price=0.30,
+        )
+        called_ids: list[str] = []
+
+        def _fake_bet(*args):
+            market = args[1]
+            called_ids.append(str(market.id))
+            return None
+
+        with (
+            patch(
+                "scrapers.metar.fetch_metar_day",
+                return_value=[(int(_time.time()) - 120, 30.0), (int(_time.time()) - 60, 30.0)],
+            ),
+            patch("scrapers.metar.archive_metar_observations", return_value=0),
+            patch.object(mp, "_avg_peak_hour", return_value=0.0),  # saat gelmis
+            patch.object(mp, "_open_metar_bet", side_effect=_fake_bet),
+            patch.object(mp, "_close_wrong_bucket_bets", return_value=0),
+        ):
+            mp.run_metar_peak_bets()
+
+        assert called_ids == []  # kara listede -> bet acilmaz
+        assert "VHHH" in mp.METAR_PEAK_BLACKLIST
+        assert m_hk is not None
+
+
+class TestMetarPeakStaleRefresh:
+    """2026-08-20 kullanici: "duzeltmeye calismadi" — bayat METAR gorunce
+    pasif atlamak yerine DERHAL yeniden cekim denenir; taze veri gelirse
+    bet mantigi devam eder."""
+
+    def test_bayat_metar_yeniden_cekim_taze_gelirse_bet_acilir(self, market_factory):
+        import time as _time
+
+        from unittest.mock import patch
+
+        tgt = datetime.now(timezone.utc).replace(tzinfo=None)
+        m_24 = market_factory(
+            city="London",
+            city_code="EGLC",
+            metric="temperature_max",
+            market_type="RANGE",
+            threshold=24.0,
+            target_date=tgt,
+            yes_price=0.30,
+        )
+        called_ids: list[str] = []
+        stale = int(_time.time()) - 3600  # 60 dk eski (bayat)
+
+        def _fake_bet(*args):
+            market = args[1]
+            called_ids.append(str(market.id))
+            return None
+
+        def _fetch_side(*a, **k):
+            # ilk cagri bayat seri, ikinci cagri (yeniden cekim) taze
+            if _fetch_side.n == 0:
+                _fetch_side.n += 1
+                return [(stale, 23.0), (stale + 600, 24.0)]
+            return [(stale + 3600, 24.0), (int(_time.time()), 24.0)]
+
+        _fetch_side.n = 0
+
+        with (
+            patch("scrapers.metar.fetch_metar_day", side_effect=_fetch_side),
+            patch("scrapers.metar.archive_metar_observations", return_value=0),
+            patch.object(mp, "_avg_peak_hour", return_value=0.0),
+            patch.object(mp, "_open_metar_bet", side_effect=_fake_bet),
+            patch.object(mp, "_close_wrong_bucket_bets", return_value=0),
+        ):
+            mp.run_metar_peak_bets()
+
+        # bayat -> yeniden cekim -> taze veri -> bet ACILIR
+        assert called_ids == [m_24]
+
+    def test_bayat_metar_yeniden_cekim_de_bayat_atlanir(self, market_factory):
+        import time as _time
+
+        from unittest.mock import patch
+
+        tgt = datetime.now(timezone.utc).replace(tzinfo=None)
+        m_24 = market_factory(
+            city="Paris",
+            city_code="LFPB",
+            metric="temperature_max",
+            market_type="RANGE",
+            threshold=24.0,
+            target_date=tgt,
+            yes_price=0.30,
+        )
+        called_ids: list[str] = []
+        stale = int(_time.time()) - 3600  # 60 dk eski (bayat)
+
+        def _fake_bet(*args):
+            market = args[1]
+            called_ids.append(str(market.id))
+            return None
+
+        with (
+            # iki cagri da bayat (yeniden cekim cozmedi)
+            patch("scrapers.metar.fetch_metar_day", return_value=[(stale, 24.0)]),
+            patch("scrapers.metar.archive_metar_observations", return_value=0),
+            patch.object(mp, "_avg_peak_hour", return_value=0.0),
+            patch.object(mp, "_open_metar_bet", side_effect=_fake_bet),
+            patch.object(mp, "_close_wrong_bucket_bets", return_value=0),
+        ):
+            mp.run_metar_peak_bets()
+
+        assert called_ids == []  # tazelenemedi -> atlandi
+        assert m_24 is not None

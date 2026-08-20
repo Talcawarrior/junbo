@@ -173,16 +173,30 @@ python main.py bot
   best_ask olarak arsivlenir (backtest icin kalici CLOB gecmisi, 2026-08-16).
 - **METAR zirve-tespiti (2026-08-14):** Acik marketli sehirlerin METAR canli istasyon
   sicakligi (aviationweather.gov, NOAA bedava) 30dk'da bir izlenir; sicaklik max'a
-  cikip **2 kez arka arkaya dustugunde** (YEREL saat >= 13:00) zirve kilitlenir,
+  cikip **1 kez dustugunde** (2026-08-18 kullanici: "20 21 22 22 21 diyorsa ikinci
+  21 ve altini bekleme 22 ye bet ac") (YEREL saat >= 13:00) zirve kilitlenir,
   o sehrin kazanan bucket'ina **tek esik YES** bet acilir
-  ($3, order_id `metar_*`, bias-top 40 sehir, `MIN_ENTRY=0.10`). 2026-08-17:
-  canli 30 bet NET -$32.84 — 24 longshot (entry 0.01-0.03) -$39.90 kaybetti,
-  entry>=0.10 6 bet +$7.06; MIN_ENTRY=0.10 ile 0.01-0.03'ler elendi.
+  ($3, order_id `metar_*`, tum sehirler — bias filtresi YOK, `MIN_ENTRY=0.05`
+  E config 2026-08-18). 2026-08-17: canli 30 bet NET -$32.84 — 24 longshot
+  (entry 0.01-0.03) -$39.90 kaybetti; MIN_ENTRY=0.05 ile 0.01-0.03'ler elendi.
   **2026-08-18 (kullanici "tam bucket a aciyoruz"): peak mantigi SADECE
   `metric=temperature_max` + `market_type=RANGE` (tam bucket) marketlerine bet
   acar.** Canli 11 yanlis bet (6 temperature_min + 5 HIGH/LOW, hepsi 0.01 entry)
   o yuzden acilmisti; or-above/or-below marketleri tam bucket kazananli degildir.
-  Kapanisa <2 saat kalan sehirler atlanir. **2026-08-18 audit (C1/C2/C3/M3):**
+  **2026-08-20 HIBRIT (kullanici onayi):** sehir bazli gecmis ortalama peak saati
+  (`jobs/metar_peak.py::_avg_peak_hour`, bugun haric, en az 3 gun) hesaplanir; o
+  saate kadar bet acilmaz; saat gelince cur_max'a ERKEN giris adayi olur — bucket
+  marketi fiyati **0.50'nin USTUNDEYSE** 1-dusus kilidini bekler (piyasa biliyor),
+  altindaysa dusus beklemeden girer. Aktar (zirve asilmasi -> kapat + yenisine ac)
+  her iki modda da calisir. Backtest (05-19 Agu, cap 6/gun + 30dk dongu gecikmesi):
+  hibrit compound $200 -> $4,070 (kilit $3,629, erken saf $2,973).
+  **2026-08-20 KARA LISTE:** METAR havalimani istasyonu WU sehir verisinden
+  sistematik sapan sehirler (`METAR_PEAK_BLACKLIST`): VHHH %20, ZGSZ %29, KBKF/
+  KATL %43, KSEA/KSFO/NZWN %57 tutma (diger 35 sehir %100) — bu sehirlerde
+  METAR-peak bet acilmaz, veri toplama devam eder. **BAYAT METAR'da aktif
+  duzeltme:** son gozlem >45dk ise o sehrin METAR'i DERHAL yeniden cekilir;
+  taze gelirse devam, gelmezse sehir-gun basina 1 kez alarm.
+  **2026-08-18 audit (C1/C2/C3/M3):**
   stake artik `debit_stake` ile dusulur (onceden HIC dusulmuyordu -> kagit nakit
   yanlizdi); bucket/peak `int(x+0.5)` half-up (banker's round half-even DEGIL);
   DB yes_price CLOB canli ask ile %15'ten fazla sapiyorsa bet reddedilir

@@ -19,10 +19,27 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from database.db import get_session
-from database.models import Bet, Portfolio, WeatherMarket
+from database.models import Bet, MetarObservation, Portfolio, WeatherMarket
 from config.settings import bot_config
 
 logger = logging.getLogger("SCHEDULER_METAR_PEAK")
+
+# 2026-08-20 HIBRIT (kullanici onayi): sehir bazli gecmis ortalama peak saati
+# ile ERKEN giris. Fiyat <= EARLY_MAX_PRICE ise dusus kilidi BEKLENMEDEN
+# gireriz (ucuz firsat); pahaliysa piyasa bucket'i zaten biliyor demektir,
+# 1-dusus kilidi beklenir. Backtest (05-19 Agu): hibrit 0.50 en iyi konfig —
+# flat +$363 (kilit +$327, erken saf +$316), compound $200 -> $4,070
+# (kilit $3,629, erken saf $2,973).
+EARLY_MAX_PRICE = 0.50
+# En az bu kadar gunluk gecmis veri olmadan tahmini peak saati yok (eski
+# kilit kurali calisir).
+MIN_PEAK_HISTORY_DAYS = 3
+# 2026-08-20 kara liste (kullanici onayi): METAR havalimani istasyonunun
+# Polymarket'in WU sehir istasyonundan SISTEMATIK saptigi sehirler. 13-19 Agu
+# tutma orani: VHHH %20 (1/5), ZGSZ %29 (2/7), KBKF/KATL %43, KSEA/KSFO/NZWN
+# %57 (diger 35 sehir %100). Bu sehirlerde METAR-peak bet acilmaz; veri
+# toplama (collect_metar_archive) ve spread betleri DEVAM eder.
+METAR_PEAK_BLACKLIST = {"VHHH", "ZGSZ", "KBKF", "KATL", "KSEA", "KSFO", "NZWN"}
 
 # Son tam arsiv toplama zamani (time.monotonic) — metar_loop 10 dk'ya inince
 # aviationweather.gov'u yormamak icin arsiv 25 dk'da bir toplanir.
@@ -47,6 +64,51 @@ CLOSE_HOURS = 12
 # 2026-08-18 kullanici karari: "Metar betleri acilirken bias a gerek yok,
 # nasil olsa peak tespit edilmis oluyor" -> BIAS_TOP_CITIES KALDIRILDI,
 # TUM sehirlerin acik RANGE+max marketlerine bakilir.
+
+
+def _avg_peak_hour(session, city_code: str, longitude: Optional[float]) -> Optional[float]:
+    """Sehir bazli gecmis ortalama peak saati (yerel saat 0-24).
+
+    2026-08-20 HIBRIT: ONCEKI gunlerin gercek peak saatlerinin ortalamasi
+    (bugun DAHIL DEGIL — look-ahead yok). En az MIN_PEAK_HISTORY_DAYS gun
+    veri gerekir; azsa None doner ve eski 1-dusus kilit kurali calisir.
+    """
+    from collections import defaultdict
+    from datetime import datetime as _dt, timezone as _tz
+    from scrapers.metar import city_utc_offset
+
+    rows = (
+        session.query(MetarObservation.obs_time, MetarObservation.temp_c)
+        .filter(MetarObservation.city_code == city_code)
+        .all()
+    )
+    if not rows:
+        return None
+    now_ts = time.time()
+    today_loc = _dt.fromtimestamp(now_ts, tz=_tz.utc).strftime("%Y-%m-%d")
+    by_day: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    for obs, temp in rows:
+        if obs is None or temp is None:
+            continue
+        # obs_time naive UTC DateTime'dir — .timestamp() LOKAL tz yorumlar
+        # (Istanbul +3 tuzağı, 2026-08-20), replace(tzinfo=utc) sart.
+        t = obs.replace(tzinfo=_tz.utc).timestamp()
+        off = city_utc_offset(city_code, str(obs)[:10], longitude)
+        ld = _dt.fromtimestamp(t + off * 3600, tz=_tz.utc).strftime("%Y-%m-%d")
+        if ld >= today_loc:
+            continue  # bugunun ve gelecegin verisi tahmine girmez
+        by_day[ld].append((t, float(temp)))
+    hrs: list[float] = []
+    for ld, arr in by_day.items():
+        if len(arr) < 3:
+            continue  # yarim gun veri — peak saati guvenilmez
+        ts_max = max(arr, key=lambda x: x[1])[0]
+        off = city_utc_offset(city_code, ld, longitude)
+        loc = _dt.fromtimestamp(ts_max + off * 3600, tz=_tz.utc)
+        hrs.append(loc.hour + loc.minute / 60.0)
+    if len(hrs) < MIN_PEAK_HISTORY_DAYS:
+        return None
+    return sum(hrs) / len(hrs)
 
 
 def _hours_until_close(market) -> float:
@@ -457,6 +519,13 @@ def run_metar_peak_bets() -> int:
         for m in markets:
             if _hours_until_close(m) < MIN_HOURS_BEFORE_CLOSE:
                 continue
+            if m.city_code in METAR_PEAK_BLACKLIST:
+                # 2026-08-20 kullanici onayi: VHHH/ZGSZ vb. havalimani
+                # istasyonlari WU sehir verisinden sistematik sapiyor — bu
+                # sehirlerde kilit yanlis bucket'a gidiyor (canli 20 Agu'da
+                # HK 30C 0.655 ve SZ 31C 0.225 betleri piyasa %99 kayip
+                # fiyatladi). Veri toplama ayri dongude devam eder.
+                continue
             if _existing_metar_bet(session, str(m.id)):
                 continue
             day = m.target_date.date().isoformat() if m.target_date else today
@@ -510,6 +579,9 @@ def run_metar_peak_bets() -> int:
         peaks_logged: dict[tuple[str, str], tuple[int, str]] = {}  # (code, day) -> (bucket, sehir)
         matched_markets: set[tuple[str, str]] = set()  # bucket marketi eslesen (code, day)
         watch_rows: dict[str, dict] = {}
+        # 2026-08-20: bayat-METAR alarmi sehir-gun basina 1 kez (market basina
+        # degil) — kullanici "islem yapmadi" sanmasin, log gurultusu olmasin.
+        stale_logged: set[tuple[str, str]] = set()
         for m, day, utc_offset in candidates:
             day_rows = metar_rows.get((m.city_code, day)) or []
             if not day_rows:
@@ -521,17 +593,45 @@ def run_metar_peak_bets() -> int:
             # veri gelir (kullanici: "90 cok uzun, o zamana kadar bet acar").
             import time as _time
 
+            key_stale = (m.city_code, day)
             last_obs_age_min = (_time.time() - day_rows[-1][0]) / 60.0
             if last_obs_age_min > 45.0:
-                from utils.activity_log import log_event as _le
+                # 2026-08-20 kullanici: "duzeltmeye calismadi" — pasif atlamak
+                # yerine o sehrin METAR'ini DERHAL yeniden cekmeyi dene; taze
+                # veri gelirse bet mantigi devam eder, gelmezse atla (aviation
+                # weather istasyon yayinini geciktirebiliyor — Toronto olayi).
+                _fresh = fetch_metar_day(m.city_code, day, utc_offset_hours=utc_offset)
+                if _fresh:
+                    archive_metar_observations(m.city_code, m.city or "", _fresh)
+                    _merged = _merged_day_rows(m.city_code, day, utc_offset, _fresh)
+                    if _merged and (_time.time() - _merged[-1][0]) / 60.0 <= 45.0:
+                        day_rows = _merged  # taze veri geldi — devam et
+                    else:
+                        # yeniden cekim de bayat: sehir-gun basina 1 kez logla
+                        if key_stale not in stale_logged:
+                            stale_logged.add(key_stale)
+                            from utils.activity_log import log_event as _le
 
-                _le(
-                    "bet_blocked",
-                    str(m.city),
-                    f"BAYAT METAR: son gozlem {last_obs_age_min:.0f} dk eski (>=45) - atlandi",
-                )
-                continue
-            peak, confirmed = detect_peak(day_rows, utc_offset_hours=utc_offset)
+                            _le(
+                                "bet_blocked",
+                                str(m.city),
+                                f"BAYAT METAR: yeniden cekim de bayat ({last_obs_age_min:.0f} dk) - atlandi",
+                            )
+                        continue
+                else:
+                    if key_stale not in stale_logged:
+                        stale_logged.add(key_stale)
+                        from utils.activity_log import log_event as _le
+
+                        _le("bet_blocked", str(m.city), "BAYAT METAR: yeniden cekim basarisiz - atlandi")
+                    continue
+            # 2026-08-20 HIBRIT (kullanici onayi): sehir bazli gecmis ortalama
+            # peak saati biliniyorsa, o saatten ONCE bet acilmaz (bekleme);
+            # saat gelince cur_max'a ERKEN giris adayi olur (dusus beklenmez).
+            # Fiyat EARLY_MAX_PRICE ustundeyse (piyasa bucket'i biliyor)
+            # 1-dusus kilidini bekleriz. Backtest: hibrit 0.50 en iyi.
+            avg_hour = _avg_peak_hour(session, m.city_code, m.longitude)
+            early_attempt = avg_hour is not None
             # 2026-08-19 PEAK TAKIBI (kullanici): su anki sicaklik + yon +
             # durum (kilitli/takip/bekleme) — dashboard'da gorunur.
             cur_t = day_rows[-1][1]
@@ -542,10 +642,31 @@ def run_metar_peak_bets() -> int:
                 direction = "-"
             last_local_hour = datetime.fromtimestamp(day_rows[-1][0] + utc_offset * 3600, tz=timezone.utc).hour
             cur_max = max(t for _, t in day_rows)
+            if early_attempt and avg_hour is not None:
+                local_now_hr = (time.time() + utc_offset * 3600.0) % 86400.0 / 3600.0
+                if local_now_hr < avg_hour:
+                    # tahmini peak saati henuz gelmedi: bekleriz (kilit kurali
+                    # da calismaz — erken giris saati onceliklidir).
+                    watch_rows[str(m.city)] = {
+                        "city": str(m.city),
+                        "cur": cur_t,
+                        "prev": prev_t,
+                        "direction": direction,
+                        "status": f"bekleme (peak ~{avg_hour:.0f}:00)",
+                        "peak": None,
+                        "day": day,
+                    }
+                    continue
+                peak = cur_max
+                confirmed = True
+            else:
+                peak, confirmed = detect_peak(day_rows, utc_offset_hours=utc_offset)
             if confirmed and peak is not None:
                 # 2026-08-19 kullanici: "sicaklik yukseliyor ama kilitli gorunuyor"
                 # — kilitten SONRA zirve asildiysa bunu GOSTER (aktar devrede).
-                if cur_max > peak:
+                if early_attempt:
+                    status = f"erken giris (max {cur_max:.1f}C, ~{avg_hour:.0f}:00)"
+                elif cur_max > peak:
                     status = f"zirve asildi -> {cur_max:.1f}C (aktar)"
                 else:
                     status = f"kilitli peak={peak:.1f}C"
@@ -565,6 +686,31 @@ def run_metar_peak_bets() -> int:
             }
             if not confirmed or peak is None:
                 continue  # zirve henuz kilitlenmedi (1 dusus kurali, 2026-08-18)
+            # 2026-08-20 HIBRIT ESIGI: erken giris adayi PAHALI ise (bu
+            # bucket'in piyasa fiyati > EARLY_MAX_PRICE) piyasa bucket'i zaten
+            # fiyatlamis demektir -> 1-dusus kilidini bekle. Backtest: ucuz
+            # fiyatta erken giris, pahali fiyatta kilit kesinligi.
+            if early_attempt:
+                _bkt = next(
+                    (
+                        mm
+                        for mm in markets
+                        if mm.city_code == m.city_code
+                        and mm.metric == "temperature_max"
+                        and mm.market_type == "RANGE"
+                        and mm.target_date is not None
+                        and mm.target_date.date().isoformat() == day
+                        and mm.threshold is not None
+                        and int(float(mm.threshold) + 0.5) == int(cur_max + 0.5)
+                    ),
+                    None,
+                )
+                _mkt_price = float(_bkt.yes_price) if _bkt is not None and _bkt.yes_price is not None else 0.0
+                if _mkt_price > EARLY_MAX_PRICE:
+                    pk_l, cf_l = detect_peak(day_rows, utc_offset_hours=utc_offset)
+                    if not cf_l or pk_l is None:
+                        continue  # pahali + kilit yok -> bekle
+                    peak = pk_l
             # 2026-08-18 kullanici: "20 21 22 22 21 diyorsa ikinci 21 ve altini
             # bekleme 22 ye bet ac, daha sonra 23 e cikarsa 22 yi kapa 23 e ac."
             # Zirve ASILDIYSA (cur_max > kilitli peak) eski bucket betleri

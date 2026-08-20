@@ -56,7 +56,11 @@ _PRICE_POLL_INTERVAL = 300  # 5 dakika
 _WEATHER_FETCH_INTERVAL = 3600  # 1 saat
 
 # METAR canli sicaklik dongusu — aviationweather.gov 30dk'da bir guncellenir
-_METAR_POLL_INTERVAL = 1800  # 30 dakika
+# 2026-08-19 kullanici karari: 1800 -> 600 (10 dakika). Peak kilitlendiginde
+# piyasa fiyati dakikalar icinde 1.00'a cekiyor; 30 dk poll tespiti cok
+# geciktiriyordu. METAR yayinlari ~30 dk'da bir olsa da aktar penceresi
+# (yeni max) daha erken yakalanir.
+_METAR_POLL_INTERVAL = 600  # 10 dakika
 
 
 def _get_price_poll_interval(state, now: datetime) -> int:
@@ -268,7 +272,11 @@ async def metar_loop(state):
     logger.info("METAR loop basladi (interval=%ds)", _METAR_POLL_INTERVAL)
     while state.is_running:
         try:
-            await asyncio.wait_for(asyncio.to_thread(run_metar_peak_bets), timeout=_FETCH_TIMEOUT)
+            # 2026-08-19: timeout 60s -> 900s. Run gercekte dakikalar suruyor
+            # (24 saat arsiv toplayici + aksam aviationweather yavasligi); 60s
+            # asilinca thread arka planda yasamaya devam edip loop her 5 dk'da
+            # YENI run baslatiyordu -> cakisan paralel run'lar, fazla event.
+            await asyncio.wait_for(asyncio.to_thread(run_metar_peak_bets), timeout=900)
         except asyncio.CancelledError:
             logger.info("METAR loop cancelled")
             break

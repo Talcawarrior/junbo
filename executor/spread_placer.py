@@ -334,18 +334,10 @@ def _place_spread_bets_inner(session, target_day) -> dict:
                 )
                 skipped += 1
                 continue
-            # 2026-08-19 DERINLIK SINIRI: CLOB ask derinliginin %30'undan
-            # fazlasi tek emirde alinmaz (fiyat ittirir); CLOB yoksa sinirsiz.
-            try:
-                from utils.clob_live import extract_yes_token_id, max_stake_by_depth
-
-                tok = extract_yes_token_id(mkt.raw_data)
-                if tok:
-                    depth_limit = max_stake_by_depth(tok, entry)
-                    if depth_limit is not None:
-                        use_stake = min(use_stake, depth_limit)
-            except Exception:  # noqa: BLE001 — derinlik siniri beti engellemez
-                pass
+            # 2026-08-19 kullanici karari: DERINLIK SINIRI KALDIRILDI.
+            # CLOB ask derinligine gore stake kucultme 0.00/0.40 USD'lik cop
+            # betler uretiyordu (bos defter -> limit 0). Betler her zaman
+            # SABIT stake (2.0 USD) ile acilir.
 
             from utils.formulas import bet_shares, polymarket_fee_from_stake
 

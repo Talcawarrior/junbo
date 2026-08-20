@@ -1229,7 +1229,20 @@ def cmd_metar_peak_live(args) -> int:
     min_entry = args.min_entry
 
     bets: list[dict] = []
-    for (code, day), rows in day_rows.items():
+    # 2026-08-20 ERKEN GIRIS (kullanici: "o saate gelince ilk peak e basariz,
+    # sonra duzeltme olursa aktar yapariz"): kilit (1 dusus) BEKLENMEZ;
+    # tahmini peak saatine gelindiginde o anki max'a bet acilir, max yukselirse
+    # mevcut aktar (peak_break) devreye girer. Sehir bazli tahmin: onceki
+    # gunlerin ortalama peak saati (kumulatif, bugun HARIC — look-ahead yok).
+    city_hist: dict[str, list[float]] = {}
+    # 2026-08-20 canli uyumu: gunluk bet sayisi cap. Canli 18 Agu'da 49
+    # sehirden sadece ~4-6 bet acilabildi (fiyat 0.99+/market yok/<0.10);
+    # backtest tum sehirlere bet actigi icin abartiyor.
+    max_bpd = int(getattr(args, "max_bets_per_day", 0) or 0)
+    day_counts: defaultdict[str, int] = defaultdict(int)  # TAKVIM gunu basina bet sayisi
+    # gun oncelikli sira: cap gun bazinda isler (canli gibi) — sehir bazli
+    # siralama ayni gunun diger sehirlerini atliyordu.
+    for (code, day), rows in sorted(day_rows.items(), key=lambda kv: (kv[0][1], kv[0][0])):
         if day not in days_set:
             continue
         city = code_name.get(code)
@@ -1239,10 +1252,32 @@ def cmd_metar_peak_live(args) -> int:
         utc_off = city_utc_offset(code, day, lon.get(code))
         # max: zirve kilidi (yerel 13:00+ + 2 dusus); min: dip kilidi
         # (yerel 06:00+ + 2 yukselis) — 2026-08-18 low-temperature deneyi.
-        if is_min:
+        eh = getattr(args, "early_hour", None)
+        if eh is None and getattr(args, "early_city_avg", False) and not is_min:
+            _hrs = city_hist.get(code, [])
+            if len(_hrs) >= 3:  # en az 3 gun gecmis olsun
+                eh = sum(_hrs) / len(_hrs)
+        if eh is not None and not is_min:
+            # erken giris: yerel saat >= tahmini peak saati olan ilk gozlemde
+            # o ana kadarki max (ilk peak) kilitlenmis sayilir.
+            pk = None
+            lock_epoch = None
+            cur_max = -999.0
+            for _t, _c in rows:
+                if _c > cur_max:
+                    cur_max = _c
+                if ((_t + utc_off * 3600.0) % 86400.0) >= eh * 3600.0:
+                    pk, lock_epoch = cur_max, _t
+                    break
+        elif is_min:
             pk, lock_epoch = trough_lock(rows, utc_off, getattr(args, "min_lock_hour", 6))
         else:
             pk, lock_epoch = peak_lock(rows, utc_off)
+        # bu gunun peak saati gelecek gunlerin tahminine eklenir
+        if getattr(args, "early_city_avg", False) and not is_min:
+            _tm = max(rows, key=lambda x: x[1])[0]
+            _hr = ((_tm + utc_off * 3600.0) % 86400.0) / 3600.0
+            city_hist.setdefault(code, []).append(_hr)
         if pk is None or lock_epoch is None:
             continue  # zirve/dip henuz kilitlenmemis -> bet yok
         B = int(pk + 0.5) if pk >= 0 else int(pk - 0.5)  # half-up (C2)
@@ -1285,7 +1320,35 @@ def cmd_metar_peak_live(args) -> int:
         seri = ask_series.get(mid)
         if not seri:
             continue
-        entry = ask_at_or_after(seri, lock_epoch)
+        # 2026-08-20 GERCEKCI: bot 30 dk dongude calisir — peak kilitlendigi
+        # ANDA degil, sonraki dongude bet acar. --entry-delay-min o gecikmeyi
+        # simule eder (0 = clairvoyance, aninda giris).
+        delay_sec = float(getattr(args, "entry_delay_min", 0.0) or 0.0) * 60.0
+        entry = ask_at_or_after(seri, lock_epoch + delay_sec)
+        # 2026-08-20 HIBRIT (--early-threshold): erken giris on adayi PAHALI
+        # ise (piyasa zaten bucket'i fiyatlamis) dusus kilidini bekleyip ona
+        # gore gir — ucuzsa erken gir. Boylece ucuz firsatlar + kesin kilidler.
+        if eh is not None and not is_min:
+            _thr_h = float(getattr(args, "early_threshold", 0.0) or 0.0)
+            if _thr_h > 0 and (entry is None or entry > _thr_h):
+                pk_k, lock_k = peak_lock(rows, utc_off)
+                if pk_k is not None and lock_k is not None:
+                    pk, lock_epoch = pk_k, lock_k
+                    B = int(pk + 0.5) if pk >= 0 else int(pk - 0.5)
+                    m, B = _pick_mkt(code, day, B)
+                    if m is None:
+                        continue
+                    mid, tgt, outcome, mtype = m
+                    if mtype != m_mtype:
+                        continue
+                    if tgt is None or outcome is None:
+                        continue
+                    if tgt - lock_epoch < MIN_HOURS_BEFORE_CLOSE * 3600:
+                        continue
+                    seri = ask_series.get(mid)
+                    if not seri:
+                        continue
+                    entry = ask_at_or_after(seri, lock_epoch + delay_sec)
         if entry is None or not (min_entry <= entry < MAX_ENTRY):
             continue
         entry_eff = entry + slippage
@@ -1331,13 +1394,22 @@ def cmd_metar_peak_live(args) -> int:
             won = False
             sl_hit = True
         else:
-            per = (
-                (1.0 / entry_eff - 1.0 - FEE_RATE * (1.0 - entry_eff))
-                if outcome
-                else (-1.0 - FEE_RATE * (1.0 - entry_eff))
-            )
+            per_win = 1.0 / entry_eff - 1.0 - FEE_RATE * (1.0 - entry_eff)
+            per_loss = -1.0 - FEE_RATE * (1.0 - entry_eff)
+            per = per_win if outcome else per_loss
             won = outcome
+            # 2026-08-20 GERCEKCI: outcome clairvoyance'i yerine ampirik
+            # isabet ile beklenen deger (--realistic-winrate 0.79 =
+            # metar_vs_settlement ~%79). Kilitli bucket canlida HER ZAMAN
+            # kazanmaz (METAR gecikmeli yayin -> yanlis bucket, Toronto olayi).
+            wr = float(getattr(args, "realistic_winrate", 0.0) or 0.0)
+            if wr > 0.0:
+                # kazandi kolonu GERCEK sonucu (geriye donuk) gosterir;
+                # NET$ ampirik isabet ile beklenen degerdir (per).
+                per = wr * per_win + (1.0 - wr) * per_loss
         pnl = stake * per - GAS
+        if max_bpd > 0 and day_counts[day] >= max_bpd:
+            continue  # gunluk cap dolu, bu sehir atlanir (canli: yeni bet yok)
         bets.append(
             {
                 "day": day,
@@ -1355,12 +1427,13 @@ def cmd_metar_peak_live(args) -> int:
                 "would_win": outcome,
             }
         )
+        day_counts[day] += 1
         # 2026-08-18 kullanici: "23 e ciktiginda 1 adet dusmesini beklemeyecek
         # hemen acacak, cunku 21 den 23 e cikti" — kilit bozulduysa bk aninda
         # eski bet KAPATILIR (yukarida) VE yeni zirvenin bucket'ina TEKRAR bet
         # acilir (dusus beklenmeden, bk degeri kazanan sayilir; zincir 1 adim).
         # NOT: stop-loss ile kapatilan bette aktar YAPILMAZ (use_bk kosulu).
-        if use_bk and not is_min and not is_high:
+        if use_bk and not is_min and not is_high and not (max_bpd > 0 and day_counts[day] >= max_bpd):
             B2 = int(bk[1] + 0.5)
             m2, _ = _pick_mkt(code, day, B2)
             if m2 is not None:
@@ -1368,7 +1441,7 @@ def cmd_metar_peak_live(args) -> int:
                 if tgt2 is not None and out2 is not None and tgt2 - bk[0] >= MIN_HOURS_BEFORE_CLOSE * 3600:
                     seri2 = ask_series.get(mid2)
                     if seri2:
-                        e2 = ask_at_or_after(seri2, bk[0])
+                        e2 = ask_at_or_after(seri2, bk[0] + delay_sec)
                         if e2 is not None and min_entry <= e2 < MAX_ENTRY:
                             e2eff = e2 + slippage
                             if e2eff < 1.0:
@@ -1407,6 +1480,7 @@ def cmd_metar_peak_live(args) -> int:
                                         "per": per2,
                                     }
                                 )
+                                day_counts[day] += 1
 
     print("=== METAR-PEAK BACKTEST (sadece orderbook + METAR; forecast/bias YOK) ===")
     print(
@@ -1416,6 +1490,21 @@ def cmd_metar_peak_live(args) -> int:
         f"  giris: kilitlenme sonrasi ilk gercek ask; maliyet: slippage +${slippage:.2f}, "
         f"fee %{FEE_RATE * 100:.0f}, gas ${GAS:.2f}"
     )
+    wr = float(getattr(args, "realistic_winrate", 0.0) or 0.0)
+    dly = float(getattr(args, "entry_delay_min", 0.0) or 0.0)
+    if wr > 0.0 or dly > 0.0:
+        print(
+            f"  GERCEKCI: bet gecikmesi {dly:.0f} dk (bot dongusu), ampirik winrate %{wr * 100:.0f} "
+            "(outcome clairvoyance yerine beklenen deger)"
+        )
+    eh = getattr(args, "early_hour", None)
+    _thr_h = float(getattr(args, "early_threshold", 0.0) or 0.0)
+    if _thr_h > 0 and (getattr(args, "early_city_avg", False) or eh is not None):
+        print(f"  HIBRIT: erken giris fiyati ${_thr_h:.2f} ustunde ise dusus kilidini bekle")
+    elif getattr(args, "early_city_avg", False) and eh is None:
+        print("  ERKEN GIRIS: kilit yok, sehir bazinda ONCEKI gunlerin ortalama peak saati (kumulatif)")
+    elif eh is not None:
+        print(f"  ERKEN GIRIS: kilit yok, yerel saat {eh:g}'de o anki max'a bet + aktar")
     if days_all:
         print(f"  pencere: {min(days_all)} .. {max(days_all)}  (min-entry={min_entry:.2f}, max-entry={MAX_ENTRY})")
     print()
@@ -1460,6 +1549,19 @@ def cmd_metar_peak_live(args) -> int:
         print(f"  fee + gas toplami     : ${tot_cost:.2f}")
         print(f"  NET (slippage dahil)  : ${tot_pnl:+.2f}")
         print(f"  [slippage etkisi]     : slippage'siz NET ${tot_ideal:+.2f}  ->  fark ${tot_ideal - tot_pnl:+.2f}")
+        # 2026-08-20: giris fiyat araligina gore GERCEK tutma istatistigi —
+        # kullanici: "git sonuclara bak, hangisi tutuyor bak". Ucuz giris mi
+        # pahali giris mi kazandiriyor.
+        bands = [(0.05, 0.20), (0.20, 0.40), (0.40, 0.60), (0.60, 0.80), (0.80, 0.95)]
+        print()
+        print(f"  {'giris araligi':16s} {'bet':>4s} {'kazandi':>8s} {'win%':>6s} {'NET$':>9s}")
+        for lo, hi in bands:
+            bb = [b for b in bets if lo <= b["entry"] < hi]
+            if not bb:
+                continue
+            wb = sum(1 for b in bb if b["won"])
+            nb = sum(b["pnl"] for b in bb)
+            print(f"  {lo:.2f}-{hi:.2f}            {len(bb):>4d} {wb:>8d} %{wb / len(bb) * 100:>5.1f} {nb:>+9.2f}")
         # STOP-LOSS analizi (2026-08-19): SL'ye takilan betlerin kaci kalsaydi
         # kazanacakti — kullanici: "%50 stop loss kayiplari yariya indirir mi?"
         sl_hits = [b for b in bets if b.get("sl_hit")]
@@ -2405,6 +2507,41 @@ def _build_parser() -> argparse.ArgumentParser:
         help="flat=$3 sabit, kelly=fiyata gore, compound=kazanci bankroll'e ekle",
     )
     pl.add_argument("--bankroll", type=float, default=100.0, help="compound baslangic bankroll'u (USD)")
+    pl.add_argument(
+        "--entry-delay-min",
+        type=float,
+        default=0.0,
+        help="GERCEKCI: peak kilitlenme anindan bet acilisina gecikme (dk; 30=bot dongusu, 0=clairvoyance)",
+    )
+    pl.add_argument(
+        "--realistic-winrate",
+        type=float,
+        default=0.0,
+        help="GERCEKCI: ampirik winrate (0.0=outcome clairvoyance, 0.79=metar_vs_settlement isabeti)",
+    )
+    pl.add_argument(
+        "--early-hour",
+        type=float,
+        default=None,
+        help="ERKEN GIRIS: kilit (1 dusus) yerine bu yerel saatte o anki max'a bet (ornek 14)",
+    )
+    pl.add_argument(
+        "--early-city-avg",
+        action="store_true",
+        help="ERKEN GIRIS: sehir bazinda ONCEKI gunlerin ortalama peak saati (kumulatif, look-ahead yok)",
+    )
+    pl.add_argument(
+        "--max-bets-per-day",
+        type=int,
+        default=0,
+        help="GERCEKCI: gunluk bet sayisi cap (0=sinirsiz; canli 18 Agu'da ~4-6 bet acildi)",
+    )
+    pl.add_argument(
+        "--early-threshold",
+        type=float,
+        default=0.0,
+        help="HIBRIT: erken giris fiyati bu esigin USTUNDEYSE dusus kilidini bekle (0=kapali)",
+    )
     pl.add_argument(
         "--max-bet-stake", type=float, default=0.0, help="bet basina max stake (orderbook derinlik; 0=sinirsiz)"
     )

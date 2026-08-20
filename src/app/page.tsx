@@ -1194,7 +1194,7 @@ function HealthTab({ health, kpiData }: { health: HealthResponse | null; kpiData
               ) : (
                 <div className="grid grid-cols-2 gap-x-3">
                   {(h.peak_watch ?? []).map((w: any, i: number) => (
-                    <div key={i} className="flex items-center gap-1 text-[11px] py-0.5 border-b last:border-0" style={{ borderColor: `${BORDER}60` }}>
+                    <div key={i} className="flex items-center gap-1 text-[13px] py-0.5 border-b last:border-0" style={{ borderColor: `${BORDER}60` }}>
                       <span className="font-mono shrink-0" style={{ color: w.direction === "UP" ? RED : w.direction === "DOWN" ? TEAL : TEXT_MUTED }}>
                         {w.direction === "UP" ? "↑" : w.direction === "DOWN" ? "↓" : "="}
                       </span>
