@@ -194,8 +194,9 @@ python main.py bot
   sistematik sapan sehirler (`METAR_PEAK_BLACKLIST`): VHHH %20, ZGSZ %29, KBKF/
   KATL %43, KSEA/KSFO/NZWN %57 tutma (diger 35 sehir %100) — bu sehirlerde
   METAR-peak bet acilmaz, veri toplama devam eder. **BAYAT METAR'da aktif
-  duzeltme:** son gozlem >45dk ise o sehrin METAR'i DERHAL yeniden cekilir;
-  taze gelirse devam, gelmezse sehir-gun basina 1 kez alarm.
+  duzeltme:** son gozlem esikten eski ise (30dk istasyonlarda 45dk, 60dk
+  saatlik istasyonlarda 90dk — kadans-bilgili, 2026-08-20) o sehrin METAR'i DERHAL
+  yeniden cekilir; taze gelirse devam, gelmezse sehir-gun basina 1 kez alarm.
   **2026-08-18 audit (C1/C2/C3/M3):**
   stake artik `debit_stake` ile dusulur (onceden HIC dusulmuyordu -> kagit nakit
   yanlizdi); bucket/peak `int(x+0.5)` half-up (banker's round half-even DEGIL);

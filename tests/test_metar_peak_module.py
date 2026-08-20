@@ -11,7 +11,7 @@ import sys
 
 sys.path.insert(0, r"C:\Users\fdemir\Documents\New project\junbo")
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import jobs.metar_peak as mp
 
@@ -304,3 +304,57 @@ class TestMetarPeakStaleRefresh:
 
         assert called_ids == []  # tazelenemedi -> atlandi
         assert m_24 is not None
+
+
+class TestMetarPeakStaleThreshold:
+    """2026-08-20 kullanici onayi: bayat esigi istasyon kadansina gore.
+    60dk (saatlik) istasyonlarda 90dk — 45dk esigi her saat tetikleniyordu
+    (Wuhan/Chongqing/Qingdao/Busan); 30dk istasyonlarda 45dk kalir."""
+
+    def test_saatlik_istasyonda_90dk_esik(self):
+        from database.db import get_session
+        from database.models import MetarObservation
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        with get_session() as s:
+            for i in range(10):
+                obs = now - timedelta(hours=10 - i)
+                s.add(
+                    MetarObservation(
+                        city_code="ZHHH",
+                        city="Wuhan",
+                        temp_c=30.0,
+                        obs_time=obs,
+                        day=obs.strftime("%Y-%m-%d"),
+                    )
+                )
+            s.commit()
+            # 60dk araliklar -> medyan >= 55 -> 90dk esik
+            assert mp._stale_threshold_min(s, "ZHHH") == 90.0
+
+    def test_30dk_istasyonda_45dk_esik(self):
+        from database.db import get_session
+        from database.models import MetarObservation
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        with get_session() as s:
+            for i in range(10):
+                obs = now - timedelta(minutes=30 * (10 - i))
+                s.add(
+                    MetarObservation(
+                        city_code="EGLC",
+                        city="London",
+                        temp_c=20.0,
+                        obs_time=obs,
+                        day=obs.strftime("%Y-%m-%d"),
+                    )
+                )
+            s.commit()
+            # 30dk araliklar -> 45dk esik (varsayilan)
+            assert mp._stale_threshold_min(s, "EGLC") == 45.0
+
+    def test_veri_yoksa_45dk_varsayilan(self):
+        from database.db import get_session
+
+        with get_session() as s:
+            assert mp._stale_threshold_min(s, "BILINMEYEN") == 45.0

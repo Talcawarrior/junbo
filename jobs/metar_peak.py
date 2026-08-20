@@ -111,6 +111,34 @@ def _avg_peak_hour(session, city_code: str, longitude: Optional[float]) -> Optio
     return sum(hrs) / len(hrs)
 
 
+def _stale_threshold_min(session, city_code: str) -> float:
+    """Istasyon yayin kadansina gore bayat esigi (2026-08-20 kullanici onayi).
+
+    30dk istasyonlar: 45dk (bir yayin kacirmak = gercek bayat — Toronto).
+    60dk (saatlik) istasyonlar: 90dk — 45dk esigi saatlik istasyonlarda HER
+    SAAT tetikleniyordu (Wuhan/Chongqing/Qingdao/Busan 60dk kadans; 75dk eski
+    gozlem normal, 11:00 yayini henuz yok). Kadans metar_observations'taki
+    gozlem araliklarinin medyanindan cikarilir.
+    """
+    rows = [
+        r[0].replace(tzinfo=timezone.utc).timestamp()
+        for r in session.query(MetarObservation.obs_time)
+        .filter(MetarObservation.city_code == city_code)
+        .order_by(MetarObservation.obs_time.desc())
+        .limit(40)
+        .all()
+        if r[0] is not None
+    ]
+    if len(rows) < 4:
+        return 45.0
+    rows.sort()
+    gaps = sorted(b - a for a, b in zip(rows, rows[1:]) if b - a >= 300.0)
+    if not gaps:
+        return 45.0
+    median_min = gaps[len(gaps) // 2] / 60.0
+    return 90.0 if median_min >= 55.0 else 45.0
+
+
 def _hours_until_close(market) -> float:
     """Kapanis (target+12h) ile simdi arasindaki saat."""
     if not market or not market.target_date:
@@ -595,7 +623,10 @@ def run_metar_peak_bets() -> int:
 
             key_stale = (m.city_code, day)
             last_obs_age_min = (_time.time() - day_rows[-1][0]) / 60.0
-            if last_obs_age_min > 45.0:
+            # 2026-08-20 kadans-bilgili esik: 60dk istasyonlarda 90dk,
+            # 30dk istasyonlarda 45dk (saatlik istasyonlarda sahte alarm).
+            stale_lim = _stale_threshold_min(session, m.city_code)
+            if last_obs_age_min > stale_lim:
                 # 2026-08-20 kullanici: "duzeltmeye calismadi" — pasif atlamak
                 # yerine o sehrin METAR'ini DERHAL yeniden cekmeyi dene; taze
                 # veri gelirse bet mantigi devam eder, gelmezse atla (aviation
@@ -604,7 +635,7 @@ def run_metar_peak_bets() -> int:
                 if _fresh:
                     archive_metar_observations(m.city_code, m.city or "", _fresh)
                     _merged = _merged_day_rows(m.city_code, day, utc_offset, _fresh)
-                    if _merged and (_time.time() - _merged[-1][0]) / 60.0 <= 45.0:
+                    if _merged and (_time.time() - _merged[-1][0]) / 60.0 <= stale_lim:
                         day_rows = _merged  # taze veri geldi — devam et
                     else:
                         # yeniden cekim de bayat: sehir-gun basina 1 kez logla
@@ -615,7 +646,8 @@ def run_metar_peak_bets() -> int:
                             _le(
                                 "bet_blocked",
                                 str(m.city),
-                                f"BAYAT METAR: yeniden cekim de bayat ({last_obs_age_min:.0f} dk) - atlandi",
+                                f"BAYAT METAR: yeniden cekim de bayat "
+                                f"({last_obs_age_min:.0f} dk >= {stale_lim:.0f}) - atlandi",
                             )
                         continue
                 else:
