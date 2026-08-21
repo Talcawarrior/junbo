@@ -440,3 +440,160 @@ class TestMetarPeakStaleThreshold:
 
         with get_session() as s:
             assert mp._stale_threshold_min(s, "BILINMEYEN") == 45.0
+
+
+class TestMetarPeakDailyCap:
+    """2026-08-21 kullanici karari: gunluk METAR-peak bet cap'i
+    (METAR_PEAK_MAX_BETS_PER_DAY=12, backtest cap12 en karli +$834 %82.6).
+    Cap dolunca YENI bet acilmaz; aktar kapatma cap'tan bagimsiz devam eder."""
+
+    def test_cap_dolunca_bir_market_disari_kalir(self, market_factory):
+        """cap=1 iken 2 uygun marketten SADECE 1'i bet acar (ikisi de ayni
+        bucket 24C — ikisi qualify olur, cap ikincisini keser)."""
+        import time as _time
+
+        from unittest.mock import patch
+
+        from config.settings import bot_config
+        from database.db import get_session
+        from database.models import Bet
+
+        # 2026-08-21: conftest temp DB session-scoped (paylasimli) — onceki
+        # testlerin biraktigi bet/archive satirlari cap sayacini veya bucket'i
+        # kirletir. Temiz defter ile basla (TestCloseWrongBucketBets deseni).
+        from database.models import MetarObservation, WeatherMarket
+
+        with get_session() as s:
+            s.query(Bet).delete()
+            s.query(MetarObservation).delete()
+            s.query(WeatherMarket).delete()
+            s.commit()
+
+        tgt = datetime.now(timezone.utc).replace(tzinfo=None)
+        market_factory(
+            city="London",
+            city_code="EGLC",
+            metric="temperature_max",
+            market_type="RANGE",
+            threshold=24.0,
+            target_date=tgt,
+            yes_price=0.30,
+        )
+        market_factory(
+            city="Paris",
+            city_code="LFPG",
+            metric="temperature_max",
+            market_type="RANGE",
+            threshold=24.0,
+            target_date=tgt,
+            yes_price=0.30,
+        )
+        called_ids: list[str] = []
+
+        def _fake_bet(*args):
+            market = args[1]
+            called_ids.append(str(market.id))
+            # basarili acilis simule et (None donerse cap sayaci artmaz)
+            from types import SimpleNamespace
+
+            return SimpleNamespace(entry_price=0.5, stake_amount=3.0)
+
+        bot_config.strategy.metar_peak_max_bets_per_day = 1  # test: cap=1
+        try:
+            with (
+                patch(
+                    "scrapers.metar.fetch_metar_day",
+                    return_value=[(int(_time.time()) - 120, 23.0), (int(_time.time()) - 60, 24.0)],
+                ),
+                patch("scrapers.metar.archive_metar_observations", return_value=0),
+                patch.object(mp, "_avg_peak_hour", return_value=0.0),  # saat gelmis
+                patch.object(mp, "_open_metar_bet", side_effect=_fake_bet),
+                patch.object(mp, "_close_wrong_bucket_bets", return_value=0),
+            ):
+                mp.run_metar_peak_bets()
+        finally:
+            bot_config.strategy.metar_peak_max_bets_per_day = 12
+        assert len(called_ids) == 1, f"cap=1 iken yalnizca 1 bet acilmali: {called_ids}"
+
+    def test_cap_mevcut_gunluk_betlerle_birlikte_sayilir(self, market_factory):
+        """Gun icinde acilan metar beti cap'e sayilir — bugun zaten 1 metar bet
+        varsa cap=1 iken YENI bet acilmaz."""
+        import time as _time
+
+        from unittest.mock import patch
+
+        from config.settings import bot_config
+        from database.db import get_session
+        from database.models import Bet
+
+        # 2026-08-21: paylasimli temp DB temiz defter (onceki test kirliligi).
+        from database.models import MetarObservation, WeatherMarket
+
+        with get_session() as s:
+            s.query(Bet).delete()
+            s.query(MetarObservation).delete()
+            s.query(WeatherMarket).delete()
+            s.commit()
+
+        tgt = datetime.now(timezone.utc).replace(tzinfo=None)
+        # qualify olan market (RANGE temp_max)
+        market_factory(
+            city="London",
+            city_code="EGLC",
+            metric="temperature_max",
+            market_type="RANGE",
+            threshold=24.0,
+            target_date=tgt,
+            yes_price=0.30,
+        )
+        # qualify OLMAYAN market (HIGH — run_metar_peak_bets'de aday degil);
+        # bu markete bugun acilmis metar beti cap sayacina girer.
+        m_high = market_factory(
+            city="Paris",
+            city_code="LFPG",
+            metric="temperature_max",
+            market_type="HIGH",
+            threshold=24.0,
+            target_date=tgt,
+            yes_price=0.30,
+        )
+        called_ids: list[str] = []
+
+        def _fake_bet(*args):
+            market = args[1]
+            called_ids.append(str(market.id))
+            from types import SimpleNamespace
+
+            return SimpleNamespace(entry_price=0.5, stake_amount=3.0)
+
+        with get_session() as s:
+            # bugun acilmis 1 metar beti zaten var (status bagimsiz sayilir)
+            s.add(
+                Bet(
+                    market_id=m_high,
+                    order_id="metar_prev_1",
+                    status="placed",
+                    placed_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    city="Paris",
+                    stake_amount=3.0,
+                    entry_price=0.3,
+                )
+            )
+            s.commit()
+
+        bot_config.strategy.metar_peak_max_bets_per_day = 1
+        try:
+            with (
+                patch(
+                    "scrapers.metar.fetch_metar_day",
+                    return_value=[(int(_time.time()) - 120, 24.0), (int(_time.time()) - 60, 24.0)],
+                ),
+                patch("scrapers.metar.archive_metar_observations", return_value=0),
+                patch.object(mp, "_avg_peak_hour", return_value=0.0),  # saat gelmis
+                patch.object(mp, "_open_metar_bet", side_effect=_fake_bet),
+                patch.object(mp, "_close_wrong_bucket_bets", return_value=0),
+            ):
+                mp.run_metar_peak_bets()
+        finally:
+            bot_config.strategy.metar_peak_max_bets_per_day = 12
+        assert called_ids == [], f"cap zaten dolu -> yeni bet acilmamali: {called_ids}"

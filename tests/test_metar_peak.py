@@ -252,3 +252,89 @@ class TestCloseWrongBucketBets:
         assert statuses[1] == "closed", "32C beti kapanmali"
         assert statuses[2] in ("placed", "open"), "34C kazanan bucket TUTULMALI"
         assert statuses[3] in ("placed", "open"), "temperature_min beti KAPATILMAMALI (M12)"
+
+
+class TestMetarPeakDailyCap:
+    """2026-08-21 kullanici karari: gunluk METAR-peak cap (METAR_PEAK_MAX_BETS_PER_DAY).
+    Backtest cap-sweep'inde cap12 en karli (+$834 %82.6) -> cap=12 .env'de.
+    Sayac semantigi: bugunku (UTC) acilan tum metar_% betleri — status bagimsiz
+    (gun icinde kapanan/settled olan da cap'e sayilir, backtest ile ayni)."""
+
+    def test_sayac_bugunun_metar_betlerini_sayar(self):
+        from datetime import datetime, timedelta
+        from database.db import get_session
+        from database.models import Bet, Portfolio, WeatherMarket
+        from jobs.metar_peak import _metar_bets_opened_today
+
+        today = datetime(2026, 8, 21, 12, 0)
+        with get_session() as s:
+            s.query(Bet).delete()
+            s.query(WeatherMarket).delete()
+            s.query(Portfolio).delete()
+            s.add(Portfolio(id=1, cash_balance=100.0, total_value=100.0))
+            wm = WeatherMarket(
+                id="C1",
+                city="Test",
+                city_code="TST",
+                question="Test temperature",
+                threshold=25.0,
+                target_date=today,
+                status="open",
+                yes_price=0.5,
+                latitude=1.0,
+                longitude=1.0,
+                metric="temperature_max",
+                market_type="RANGE",
+            )
+            s.add(wm)
+            # bugun acilan, hala acik metar beti -> sayilir
+            s.add(
+                Bet(
+                    market_id="C1",
+                    order_id="metar_C1_1",
+                    status="placed",
+                    placed_at=today,
+                    city="Test",
+                    stake_amount=3.0,
+                    entry_price=0.5,
+                )
+            )
+            # bugun acilan ama kapanmis metar beti -> YINE sayilir (status bagimsiz)
+            s.add(
+                Bet(
+                    market_id="C1",
+                    order_id="metar_C1_2",
+                    status="settled",
+                    placed_at=today,
+                    city="Test",
+                    stake_amount=3.0,
+                    entry_price=0.5,
+                )
+            )
+            # dun acilan metar beti -> SAYILMAZ (gunluk pencere)
+            s.add(
+                Bet(
+                    market_id="C1",
+                    order_id="metar_C1_3",
+                    status="placed",
+                    placed_at=today - timedelta(days=1),
+                    city="Test",
+                    stake_amount=3.0,
+                    entry_price=0.5,
+                )
+            )
+            # metar_% olmayan (spread) bet -> SAYILMAZ (sadece METAR-peak cap'i)
+            s.add(
+                Bet(
+                    market_id="C1",
+                    order_id="spread_C1_1",
+                    status="placed",
+                    placed_at=today,
+                    city="Test",
+                    stake_amount=2.0,
+                    entry_price=0.3,
+                )
+            )
+            s.commit()
+            n = _metar_bets_opened_today(s, today)
+        assert n == 2, f"Bugun acilan 2 metar beti sayilmali (kapali olan da): {n}"

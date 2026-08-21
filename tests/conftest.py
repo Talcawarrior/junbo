@@ -186,6 +186,7 @@ def _reset_strategy_params():
     original_strategy_flat_bet = bot_config.strategy.flat_bet_usd
     original_config_kelly = Config.KELLY_FRACTION
     original_config_max_bet_pct = Config.MAX_BET_PCT
+    original_metar_cap = bot_config.strategy.metar_peak_max_bets_per_day
 
     bot_config.strategy.kelly_fraction = 0.15
     bot_config.strategy.min_edge = 0.05
@@ -200,3 +201,4 @@ def _reset_strategy_params():
     bot_config.strategy.flat_bet_usd = original_strategy_flat_bet
     Config.KELLY_FRACTION = original_config_kelly
     Config.MAX_BET_PCT = original_config_max_bet_pct
+    bot_config.strategy.metar_peak_max_bets_per_day = original_metar_cap

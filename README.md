@@ -211,6 +211,13 @@ python main.py bot
   every30m->every10m. Backtest `metar_peak_live` cikis (break/rotation) da
   `--entry-delay-min` gecikmesine tabi artik (once break anindaki bayat fiyati
   okuyordu). Cap taramasi (hibrit + cikis gecikmeli): cap6 +$444 / cap12 +$834.
+  **2026-08-21 GUNLUK CAP (kullanici onayi):** `METAR_PEAK_MAX_BETS_PER_DAY=12`
+  eklendi (`.env` -> `config/settings.py` -> `jobs/metar_peak.py`). Backtest cap
+  sweep'inde cap12 en karli (+$834, %82.6 winrate; cap7 +$539 ROI en yuksek ama
+  cap nadiren dolu — canli 18 Agu'da ~4 bet). Cap, gunluk (UTC) acilan `metar_%`
+  betlerini sayar (status bagimsiz: gun icinde kapanan da cap'e sayilir — backtest
+  semantigi); cap dolunca YENI bet acilmaz, yanlis-bucket kapatma (aktar/zincir)
+  cap'tan bagimsiz devam eder.
   **2026-08-18 audit (C1/C2/C3/M3):**
   stake artik `debit_stake` ile dusulur (onceden HIC dusulmuyordu -> kagit nakit
   yanlizdi); bucket/peak `int(x+0.5)` half-up (banker's round half-even DEGIL);

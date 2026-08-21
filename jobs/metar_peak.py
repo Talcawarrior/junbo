@@ -164,6 +164,22 @@ def _existing_metar_bet(session, market_id: str) -> Optional[Bet]:
     )
 
 
+def _metar_bets_opened_today(session, now: datetime) -> int:
+    """Bugunku (UTC) acilan METAR-peak bet sayisi.
+
+    2026-08-21 cap semantigi: status bagimsiz — gun icinde kapanan/settled
+    olan da cap'e sayilir ("gunluk acilan bet sayisi", backtest ile ayni).
+    """
+    return (
+        session.query(Bet)
+        .filter(
+            Bet.order_id.like("metar_%"),
+            Bet.placed_at >= datetime(now.year, now.month, now.day, 0, 0, 0),
+        )
+        .count()
+    )
+
+
 def _close_wrong_bucket_bets(session, city_code: str, target_date, winning_bucket: float) -> int:
     """Kazanan bucket belli oldugunda, o sehrin o gunu icin kazanan bucket
     DISINDAKI tum acik betleri canli fiyattan kapatir.
@@ -504,6 +520,18 @@ def run_metar_peak_bets() -> int:
         # bet acma mantigindan bagimsiz (aksam kesilmesi duzeltildi).
         collect_metar_archive(session)
 
+        # 2026-08-21 kullanici karari: gunluk METAR-peak bet cap'i.
+        # Backtest cap-sweep (canli hibrit + cikis gecikmeli): cap7 +$539
+        # (%78.5), cap12 +$834 (%82.6) — cap arttikca profit ve winrate
+        # birlikte yukseldi, cap12 EN KARLI. Bugunku (UTC) acilan METAR
+        # betleri sayilir — status bagimsiz: gun icinde kapanan/settled olan
+        # da cap'e sayilir (backtest semantigi: "gunluk acilan bet sayisi").
+        # Cap dolunca YENI bet acilmaz; yanlis-bucket kapatma (aktar/zincir)
+        # cap'tan bagimsiz devam eder.
+        metar_max_bets = int(getattr(bot_config.strategy, "metar_peak_max_bets_per_day", 12) or 12)
+        metar_opened_today = _metar_bets_opened_today(session, now)
+        cap_logged = False
+
         # 2026-08-18 kullanici karari: "Metar betleri acilirken bias a gerek
         # yok, nasil olsa peak tespit edilmis oluyor" -> bias-top sehir
         # filtresi KALDIRILDI, TUM sehirlerin acik marketlerine bakilir.
@@ -818,9 +846,23 @@ def run_metar_peak_bets() -> int:
             if int(float(m.threshold) + 0.5) != winner_bucket:
                 continue  # bu market kazanan bucket degil — diger marketler denenir
             matched_markets.add(key)
+            # 2026-08-21 kullanici karari: gunluk METAR-peak cap. Cap dolunca
+            # YENI bet acilmaz; aktar/zincir kapatma cap'tan bagimsiz devam
+            # eder (yukarida zaten calisti). matched_markets add'den SONRA —
+            # market DB'de var, "market yok" uyarisi tetiklenmemeli.
+            if metar_opened_today >= metar_max_bets:
+                if not cap_logged:
+                    cap_logged = True
+                    logger.info(
+                        "metar_peak: gunluk cap doldu (%d/%d) - yeni bet acilmayacak",
+                        metar_opened_today,
+                        metar_max_bets,
+                    )
+                continue
             bet = _open_metar_bet(session, m, winner_val)
             if bet:
                 opened += 1
+                metar_opened_today += 1
                 log_event(
                     "bet_opened",
                     str(m.city),

@@ -178,6 +178,7 @@ class StrategyConfig:
     spread_max_entry: float = 0.95  # ust sinir: 0.95 ve alti her fiyata acilir (2026-08-16)
     spread_stake_usd: float = 2.0  # esik basina stake
     spread_max_bets_per_day: int = 120  # gunluk limit: 3 gun x 40 (2026-08-17 kullanici karari: "Toplam 120")
+    metar_peak_max_bets_per_day: int = 12  # METAR-peak gunluk cap (2026-08-21: cap12 en karli)
 
     # ── Daily rotation limit: gunde max N rotasyon ───────────────────
     max_daily_rotations: int = 3  # gunde en fazla 3 rotasyon (maliyet kontrolu)
@@ -243,14 +244,14 @@ _ICAO_COORDS = {
     "LPPT": (38.7750, -9.1354),
     # Polymarket cozum istasyonlari (resolutionSource) — bot bunlardan veri almali
     # (2026-08-13: marketler bu ICAO'larla cozuluyor, city_code'dan farkli olabiliyor)
-    "UUWW": (55.5915, 37.2615),   # Moscow Vnukovo (cozum) vs UUEE Sheremetyevo (bot)
-    "EGLC": (51.5053, 0.0553),    # London City (cozum) vs EGLL Heathrow (bot)
-    "LFPB": (48.9694, 2.4414),    # Paris Le Bourget (cozum) vs LFPG CDG (bot)
+    "UUWW": (55.5915, 37.2615),  # Moscow Vnukovo (cozum) vs UUEE Sheremetyevo (bot)
+    "EGLC": (51.5053, 0.0553),  # London City (cozum) vs EGLL Heathrow (bot)
+    "LFPB": (48.9694, 2.4414),  # Paris Le Bourget (cozum) vs LFPG CDG (bot)
     "RKSI": (37.4492, 126.4510),  # Seoul Incheon (cozum) vs RKSS Gimpo (bot)
-    "KBKF": (39.7056, -104.7551), # Denver Buckley AFB (cozum) vs KDEN (bot)
+    "KBKF": (39.7056, -104.7551),  # Denver Buckley AFB (cozum) vs KDEN (bot)
     "KHOU": (29.6524, -95.2772),  # Houston Hobby (cozum) vs KIAH Bush (bot)
     "RCSS": (25.0641, 121.5502),  # Taipei Songshan (cozum) vs RCTP Taoyuan (bot)
-    "MPMG": (8.9733, -79.5556),   # Panama City Albrook (cozum) vs MPTO (bot)
+    "MPMG": (8.9733, -79.5556),  # Panama City Albrook (cozum) vs MPTO (bot)
     # Middle East (3)
     "OMDB": (25.2532, 55.3657),
     "LLBG": (32.0114, 34.8867),
@@ -541,6 +542,9 @@ class BotConfig:
         s.spread_max_entry = float(os.getenv("SPREAD_MAX_ENTRY", str(s.spread_max_entry)))
         s.spread_stake_usd = float(os.getenv("SPREAD_STAKE_USD", str(s.spread_stake_usd)))
         s.spread_max_bets_per_day = int(os.getenv("SPREAD_MAX_BETS_PER_DAY", str(s.spread_max_bets_per_day)))
+        s.metar_peak_max_bets_per_day = int(
+            os.getenv("METAR_PEAK_MAX_BETS_PER_DAY", str(s.metar_peak_max_bets_per_day))
+        )
 
 
 # ── Config backward-compatibility proxy ────────────────────────────────────
