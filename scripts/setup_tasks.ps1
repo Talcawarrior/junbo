@@ -3,7 +3,7 @@ $P = "C:\Users\fdemir\AppData\Local\Programs\Python\Python312\python.exe"
 $W = "C:\Users\fdemir\Documents\New project\junbo"
 
 $tasks = @(
-    @{Name="Junbo-OrderbookCollect"; Script="collect_orderbook.py"; Trigger="every30m"},
+    @{Name="Junbo-OrderbookCollect"; Script="collect_orderbook.py"; Trigger="every10m"},
     @{Name="Junbo-ActualsCollect"; Script="collect_actuals.py"; Trigger="every6h"},
     @{Name="Junbo-BackupDatabases"; Script="backup_databases.py"; Trigger="every6h"},
     @{Name="Junbo-SyncBacktest"; Script="sync_backtest_db.py"; Trigger="every6h"},
@@ -27,6 +27,9 @@ foreach ($t in $tasks) {
         switch ($t.Trigger) {
             "every1m" {
                 $trig = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 1)
+            }
+            "every10m" {
+                $trig = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 10)
             }
             "every30m" {
                 $trig = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 30)

@@ -5,7 +5,7 @@ Her veri kaynaginin tazeligini kontrol eder; bayat ise ilgili toplayiciyi
 KENDI kendine baslatir (kullanici mudahalesi gerekmez):
 
   - market_snapshots (bot.db)  : son kayit > 40dk -> snapshot_only.py
-  - orderbook_snapshots        : son kayit > 40dk -> collect_orderbook.py
+  - orderbook_snapshots        : son kayit > 10dk -> collect_orderbook.py
   - actuals (actuals.db)       : son kayit > 7 saat -> collect_actuals.py
   - backtest.db sync           : son sync > 7 saat -> sync_backtest_db.py
   - backups                    : son backup > 7 saat -> backup_databases.py
@@ -27,7 +27,7 @@ PY = r"C:\Users\fdemir\AppData\Local\Programs\Python\Python312\python.exe"
 LOG = REPO / "data" / "logs" / "data_watchdog.log"
 
 SNAPSHOT_MAX_AGE = 40 * 60  # saniye
-ORDERBOOK_MAX_AGE = 45 * 60
+ORDERBOOK_MAX_AGE = 10 * 60  # 2026-08-21: 45dk -> 10dk (paralel collect ~4dk'ya indi)
 ACTUALS_MAX_AGE = 7 * 3600
 SYNC_MAX_AGE = 7 * 3600
 BACKUP_MAX_AGE = 7 * 3600

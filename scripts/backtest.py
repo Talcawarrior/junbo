@@ -1401,7 +1401,12 @@ def cmd_metar_peak_live(args) -> int:
         per_win: float | None = None
         per_loss: float | None = None
         if use_bk and bk_t is not None:
-            bk_ask = ask_at_or_after(seri, bk_t)
+            # 2026-08-21 CIKIS GERCEKCI: kilit bozulma ANINDA degil, botun
+            # sonraki dongusunde (ayni delay_sec) okunan fiyattan kapanir.
+            # Canli bot break'i kendi 30dk dongusunde fark eder; o sirada
+            # exact-bucket piyasa coktan cokmustur -> tam kayip. Onceden break
+            # anindaki bayat snapshot fiyati okunuyor, kayip hafif gosteriliyordu.
+            bk_ask = ask_at_or_after(seri, bk_t + delay_sec)
             if bk_ask is not None and 0 < bk_ask <= 1:
                 per = (bk_ask - entry_eff) / entry_eff - FEE_RATE * (1.0 - bk_ask)
                 won = bk_ask > entry_eff
@@ -1487,7 +1492,9 @@ def cmd_metar_peak_live(args) -> int:
                 pern_win: float | None = None
                 pern_loss: float | None = None
                 if bkn is not None:
-                    bn_ask = ask_at_or_after(serin, bkn[0])
+                    # 2026-08-21 CIKIS GERCEKCI: zincir (aktar) adimi da break
+                    # aninda degil, botun sonraki dongusunde (delay_sec) kapanir.
+                    bn_ask = ask_at_or_after(serin, bkn[0] + delay_sec)
                     if bn_ask is not None and 0 < bn_ask <= 1:
                         pern = (bn_ask - eneff) / eneff - FEE_RATE * (1.0 - bn_ask)
                         wonn = bn_ask > eneff
@@ -2643,7 +2650,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "--entry-delay-min",
         type=float,
         default=0.0,
-        help="GERCEKCI: peak kilitlenme anindan bet acilisina gecikme (dk; 30=bot dongusu, 0=clairvoyance)",
+        help="GERCEKCI: bot dongu gecikmesi (dk; 30=bot dongusu, 0=clairvoyance). "
+        "GIRIS'te peak kilitlenme anindan bet acilisina, CIKIS'ta break/rotation "
+        "kapanisina da AYNI gecikme uygulanir (2026-08-21)",
     )
     pl.add_argument(
         "--realistic-winrate",

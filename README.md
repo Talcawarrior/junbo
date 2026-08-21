@@ -56,7 +56,7 @@ Backtest icin kesintisiz veri toplama esastir. Asagidaki sistem 2026-08-08'de ku
 | # | Veri | Kaynak | DB | Cadence |
 |---|---|---|---|---|
 | 1 | Price snapshots | Polymarket Gamma | `bot.db` → `market_snapshots` | **30 dk** (24/7) |
-| 2 | Orderbook depth | CLOB API | `orderbook.db` | **30 dk** |
+| 2 | Orderbook depth | CLOB API | `orderbook.db` | **10 dk** (paralel, 2026-08-21) |
 | 3 | Actual temperatures | Open-Meteo Archive | `actuals.db` | 6 saat |
 | 4 | Backtest kopyasi | bot.db'den kopya | `backtest.db` | 6 saat (sync) |
 | 5 | Backup | 4 DB yedekleri | `data/backups/` | 6 saat |
@@ -66,7 +66,7 @@ Backtest icin kesintisiz veri toplama esastir. Asagidaki sistem 2026-08-08'de ku
 | Gorev | Script | Interval | Not |
 |---|---|---|---|
 | `JunboSnapshot` | `snapshot_only.py` (30dk bucket dedup) | 30 dk | bot kapali olsa da alir |
-| `Junbo-OrderbookCollect` | `scripts/collect_orderbook.py` | 30 dk | |
+| `Junbo-OrderbookCollect` | `scripts/collect_orderbook.py` | 10 dk | paralel fetch (15 worker) + lock |
 | `Junbo-ActualsCollect` | `scripts/collect_actuals.py` | 6 saat | gercek sicaklik |
 | `Junbo-SyncBacktest` | `scripts/sync_backtest_db.py` | 6 saat | |
 | `Junbo-BackupDatabases` | `scripts/backup_databases.py` | 6 saat | |
@@ -202,6 +202,15 @@ python main.py bot
   (Buenos Aires 19 Agu 17:07->20:34 sessizligi). (B) bayat yeniden cekim TEK
   deneme yerine 3 deneme (aralarda 3 sn bekleme); 3'u de bayat/basarisizsa
   sehir-gun basina 1 kez alarm + yeni bet yok.
+  **2026-08-21 orderbook kayit sikligi + backtest cikis gercekciligi (kullanici onayi):**
+  `collect_orderbook.py` serial cekim (~2000 market ~20dk) yuzunden 30dk'da bir
+  ornekliyordu; watchdog sonraki tick'lerde DB kilitli gorup ust uste collect
+  baslatiyordu ("database is locked" seli). Cozum: `ThreadPoolExecutor(15)` paralel
+  fetch (dongu ~4dk) + `.orderbook_collect.lock` (cakisan run'i durdurur);
+  `data_watchdog.py` `ORDERBOOK_MAX_AGE` 45dk->10dk; `Junbo-OrderbookCollect` task
+  every30m->every10m. Backtest `metar_peak_live` cikis (break/rotation) da
+  `--entry-delay-min` gecikmesine tabi artik (once break anindaki bayat fiyati
+  okuyordu). Cap taramasi (hibrit + cikis gecikmeli): cap6 +$444 / cap12 +$834.
   **2026-08-18 audit (C1/C2/C3/M3):**
   stake artik `debit_stake` ile dusulur (onceden HIC dusulmuyordu -> kagit nakit
   yanlizdi); bucket/peak `int(x+0.5)` half-up (banker's round half-even DEGIL);

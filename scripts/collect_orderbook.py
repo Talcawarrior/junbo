@@ -15,6 +15,7 @@ Does NOT touch bot.db — fully independent data collection.
 """
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import sqlite3
 import sys
@@ -27,6 +28,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 ORDERBOOK_DB = ROOT / "data" / "orderbook.db"
+LOCK_FILE = ROOT / "data" / ".orderbook_collect.lock"
+LOCK_MAX_AGE = 30 * 60  # saniye; bayat lock = cokmus run, calmak guvenli
 LOG_DIR = ROOT / "data" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -41,10 +44,43 @@ logging.basicConfig(
 )
 logger = logging.getLogger("collect_orderbook")
 
+
+def acquire_lock() -> bool:
+    """Tek seferde tek collector calissin diye lock dosyasi.
+
+    2026-08-21: serial collect ~20dk surdugu icin watchdog'un sonraki
+    tick'lerinde ust uste collect'ler basliyordu (orderbook.db 'database is
+    locked' -> rc=1). Lock, cakisan run'lari daha baslamadan durdurur; bayat
+    lock (cokmus run) calmak guvenli.
+    """
+    if LOCK_FILE.exists():
+        try:
+            age = time.time() - LOCK_FILE.stat().st_mtime
+            if age < LOCK_MAX_AGE:
+                logger.info("Baska bir collector calisiyor (lock age=%.0fs) - atlaniyor", age)
+                return False
+            logger.warning("Bayat lock (age=%.0fs) - caliniyor", age)
+        except OSError:
+            pass
+    try:
+        LOCK_FILE.write_text(str(time.time()), encoding="utf-8")
+    except OSError:
+        pass
+    return True
+
+
+def release_lock() -> None:
+    try:
+        LOCK_FILE.unlink()
+    except OSError:
+        pass
+
+
 # ── Constants ─────────────────────────────────────────────────────────────
 TIMEOUT = 60  # seconds per HTTP request
 MAX_RETRIES = 3  # retry count on failure
 RETRY_DELAY = 20  # seconds between retries
+MAX_WORKERS = 15  # paralel HTTP cekim (CLOB fetch dar bogaz: ~2000 market)
 CLOB_BASE = "https://clob.polymarket.com"
 GAMMA_BASE = "https://gamma-api.polymarket.com"
 USER_AGENT = (
@@ -153,8 +189,7 @@ def fetch_active_markets_from_gamma() -> list[dict[str, Any]]:
         return None
 
     for r in db.execute(
-        "SELECT id, city, city_code, threshold, target_date, raw_data FROM weather_markets "
-        "WHERE status='open'"
+        "SELECT id, city, city_code, threshold, target_date, raw_data FROM weather_markets WHERE status='open'"
     ):
         tok = _yes_token(r["raw_data"])
         if not tok:
@@ -285,56 +320,68 @@ def save_snapshot(
     )
 
 
-def collect_once() -> int:
-    """Run one collection cycle. Returns number of markets processed."""
+def _fetch_one(market: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Bir marketin orderbook'unu cek. (market, raw_or_None) doner."""
+    return market, fetch_orderbook(market["token_id"])
+
+
+def collect_once(workers: int = MAX_WORKERS) -> int:
+    """Run one collection cycle. Returns number of markets processed.
+
+    2026-08-21 PARALEL: HTTP fetch (dar bogaz) ThreadPoolExecutor ile es
+    zamanli; SQLite yazimi ana thread'de siralidir (tek conn, thread-safe).
+    Seri cekim ~2000 market icin ~20dk suruyordu -> watchdog'un 45dk esigi
+    icinde bitmiyor, sonraki tick'lerde DB kilitli gorunup ust uste collect
+    birikiyordu. Paralel ile dongu ~3-4dk'ya iner.
+    """
     markets = fetch_active_markets_from_gamma()
     if not markets:
         logger.info("No open weather markets in bot.db")
         return 0
 
-    logger.info("Found %d weather markets, fetching orderbooks...", len(markets))
+    logger.info("Found %d weather markets, fetching orderbooks (%d workers)...", len(markets), workers)
     snapshot_time = datetime.now(timezone.utc).isoformat()
 
     conn = sqlite3.connect(str(ORDERBOOK_DB))
     processed = 0
     errors = 0
 
-    for market in markets:
-        raw = fetch_orderbook(market["token_id"])
-        if raw is None:
-            errors += 1
-            continue
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = [ex.submit(_fetch_one, m) for m in markets]
+            for fut in as_completed(futures):
+                market, raw = fut.result()
+                if raw is None:
+                    errors += 1
+                    continue
 
-        metrics = parse_orderbook(raw)
-        save_snapshot(
-            conn,
-            market["id"],
-            market["token_id"],
-            market.get("city"),
-            market.get("metric"),
-            market.get("target_date"),
-            metrics,
-            snapshot_time,
-            threshold=market.get("threshold"),
-        )
-        processed += 1
+                metrics = parse_orderbook(raw)
+                save_snapshot(
+                    conn,
+                    market["id"],
+                    market["token_id"],
+                    market.get("city"),
+                    market.get("metric"),
+                    market.get("target_date"),
+                    metrics,
+                    snapshot_time,
+                    threshold=market.get("threshold"),
+                )
+                processed += 1
 
-        if processed <= 10 or processed % 200 == 0:
-            logger.info(
-                "  [%d/%d] %s: bid=$%.1f ask=$%.1f spread=%.4f",
-                processed,
-                len(markets),
-                (market.get("city") or market["id"][:12]),
-                metrics["bid_depth_usd"],
-                metrics["ask_depth_usd"],
-                metrics["spread"] or 0,
-            )
-
-        # API'ye kibar ol
-        time.sleep(0.1)
-
-    conn.commit()
-    conn.close()
+                if processed <= 10 or processed % 500 == 0:
+                    logger.info(
+                        "  [%d/%d] %s: bid=$%.1f ask=$%.1f spread=%.4f",
+                        processed,
+                        len(markets),
+                        (market.get("city") or market["id"][:12]),
+                        metrics["bid_depth_usd"],
+                        metrics["ask_depth_usd"],
+                        metrics["spread"] or 0,
+                    )
+    finally:
+        conn.commit()
+        conn.close()
     logger.info("Collection complete: %d/%d markets processed, %d errors", processed, len(markets), errors)
     return processed
 
@@ -344,23 +391,41 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Collect orderbook for ALL active weather markets")
     parser.add_argument("--loop", action="store_true", help="run forever (for bot integration)")
     parser.add_argument("--interval", type=int, default=900, help="loop interval seconds (default 900)")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=MAX_WORKERS,
+        help="paralel HTTP worker sayisi (default %(default)s)",
+    )
     args = parser.parse_args()
 
-    logger.info("=== Orderbook collection started (loop=%s, interval=%ds) ===", args.loop, args.interval)
-    init_orderbook_db()
+    logger.info(
+        "=== Orderbook collection started (loop=%s, interval=%ds, workers=%d) ===",
+        args.loop,
+        args.interval,
+        args.workers,
+    )
 
-    if not args.loop:
-        count = collect_once()
-        logger.info("=== Done: %d markets ===", count)
+    if not acquire_lock():
         return
 
-    while True:
-        try:
-            count = collect_once()
-            logger.info("=== Cycle done: %d markets, next in %ds ===", count, args.interval)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Cycle error: %s", exc)
-        time.sleep(args.interval)
+    try:
+        init_orderbook_db()
+
+        if not args.loop:
+            count = collect_once(args.workers)
+            logger.info("=== Done: %d markets ===", count)
+            return
+
+        while True:
+            try:
+                count = collect_once(args.workers)
+                logger.info("=== Cycle done: %d markets, next in %ds ===", count, args.interval)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Cycle error: %s", exc)
+            time.sleep(args.interval)
+    finally:
+        release_lock()
 
 
 if __name__ == "__main__":

@@ -466,6 +466,8 @@ ALLOWED_DEAD = {
     "save_snapshot",
     "extract_city_from_question",
     "collect_once",
+    "acquire_lock",
+    "release_lock",
     "init_actuals_db",
     "get_cities",
     "get_last_fetched_date",
