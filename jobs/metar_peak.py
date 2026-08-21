@@ -66,6 +66,29 @@ CLOSE_HOURS = 12
 # TUM sehirlerin acik RANGE+max marketlerine bakilir.
 
 
+def _city_lon(m) -> Optional[float]:
+    """Sehir boylami (peak_watch dogu->bati siralama, 2026-08-21).
+
+    Oncelik market kaydindaki longitude; bos/sifir ise config'deki
+    _ICAO_COORDS (ICAO->koordinat) tablosundan. Bilinmiyorsa None doner
+    (siralamada en sona duser).
+    """
+    lon = getattr(m, "longitude", None)
+    if lon:
+        return float(lon)
+    code = getattr(m, "city_code", None)
+    if code:
+        try:
+            from config.settings import _ICAO_COORDS
+
+            c = _ICAO_COORDS.get(str(code))
+            if c:
+                return float(c[1])
+        except Exception:  # noqa: BLE001 — gorunum yardimcisi, botu durdurmaz
+            pass
+    return None
+
+
 def _avg_peak_hour(session, city_code: str, longitude: Optional[float]) -> Optional[float]:
     """Sehir bazli gecmis ortalama peak saati (yerel saat 0-24).
 
@@ -751,6 +774,8 @@ def run_metar_peak_bets() -> int:
                         "status": f"bekleme (peak ~{avg_hour:.0f}:00)",
                         "peak": None,
                         "day": day,
+                        # 2026-08-21 kullanici: peak_watch dogu->bati (lon DESC)
+                        "lon": _city_lon(m),
                     }
                     continue
                 peak = cur_max
@@ -786,7 +811,7 @@ def run_metar_peak_bets() -> int:
                 # 2026-08-19: gun kapaninca ekrandaki kilitler silinir (kullanici)
                 "day": day,
                 # 2026-08-21 kullanici: peak_watch dogu->bati siralanir (lon DESC)
-                "lon": float(m.longitude or 0.0),
+                "lon": _city_lon(m),
             }
             if not confirmed or peak is None:
                 continue  # zirve henuz kilitlenmedi (1 dusus kurali, 2026-08-18)
@@ -940,7 +965,7 @@ def run_metar_peak_bets() -> int:
                 "peak": None,
                 "day": today,
                 # 2026-08-21 kullanici: peak_watch dogu->bati siralanir (lon DESC)
-                "lon": float(m.longitude or 0.0),
+                "lon": _city_lon(m),
             }
 
         # 2026-08-19: peak takibi durumu tek seferde yazilir (dashboard).

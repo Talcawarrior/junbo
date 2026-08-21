@@ -660,3 +660,34 @@ class TestPeakWatchOrdering:
         finally:
             al._DB_PATH = original
         assert cities == ["Wellington", "London", "Los Angeles", "EskiSehir"], cities
+
+
+class TestCityLonFallback:
+    """2026-08-21: peak_watch lon bos marketlerde _ICAO_COORDS fallback'i.
+
+    Kullanici: "kilit takibi sehir isimlerini utc ye gore sirala" — market
+    kaydinda longitude 0/None olan sehirler (bazilari weather_markets'ta
+    bos kaliyor) _ICAO_COORDS (ICAO->koordinat) tablosundan doldurulur.
+    """
+
+    def test_lon_bos_ise_icao_fallback(self):
+        from types import SimpleNamespace
+
+        from config.settings import _ICAO_COORDS
+        from jobs.metar_peak import _city_lon
+
+        # longitude bos (None) -> ICAO tablosundan (London EGLL)
+        m = SimpleNamespace(city_code="EGLL", longitude=None)
+        assert _city_lon(m) == _ICAO_COORDS["EGLL"][1]
+
+        # longitude 0.0 (0 == False) -> ICAO tablosundan
+        m0 = SimpleNamespace(city_code="KLAX", longitude=0.0)
+        assert _city_lon(m0) == _ICAO_COORDS["KLAX"][1]
+
+        # longitude dolu -> market onceliklidir (ICAO'ya bakilmaz)
+        m_dolu = SimpleNamespace(city_code="EGLL", longitude=-0.055)
+        assert _city_lon(m_dolu) == -0.055
+
+        # ICAO'da da yok -> None (siralamada en sona duser)
+        m_yer = SimpleNamespace(city_code="XXXX", longitude=None)
+        assert _city_lon(m_yer) is None
