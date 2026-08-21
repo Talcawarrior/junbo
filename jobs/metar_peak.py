@@ -785,6 +785,8 @@ def run_metar_peak_bets() -> int:
                 else (float(peak) if confirmed and peak is not None else None),
                 # 2026-08-19: gun kapaninca ekrandaki kilitler silinir (kullanici)
                 "day": day,
+                # 2026-08-21 kullanici: peak_watch dogu->bati siralanir (lon DESC)
+                "lon": float(m.longitude or 0.0),
             }
             if not confirmed or peak is None:
                 continue  # zirve henuz kilitlenmedi (1 dusus kurali, 2026-08-18)
@@ -937,6 +939,8 @@ def run_metar_peak_bets() -> int:
                 "status": "kara liste (bet yok)",
                 "peak": None,
                 "day": today,
+                # 2026-08-21 kullanici: peak_watch dogu->bati siralanir (lon DESC)
+                "lon": float(m.longitude or 0.0),
             }
 
         # 2026-08-19: peak takibi durumu tek seferde yazilir (dashboard).

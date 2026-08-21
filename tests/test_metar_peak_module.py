@@ -597,3 +597,66 @@ class TestMetarPeakDailyCap:
         finally:
             bot_config.strategy.metar_peak_max_bets_per_day = 12
         assert called_ids == [], f"cap zaten dolu -> yeni bet acilmamali: {called_ids}"
+
+
+class TestPeakWatchOrdering:
+    """2026-08-21 kullanici: "kilit takibi sehir isimlerini utc ye gore
+    sirala, en doguda sehir en basta en batidaki en sonda" — peak_watch_list
+    lon (boylam) DESC doner; lon'suz eski kayitlar sona gider."""
+
+    def test_peak_watch_dogu_bati_sirali(self, tmp_path):
+        import utils.activity_log as al
+
+        db = tmp_path / "peakwatch_test.db"
+        original = al._DB_PATH
+        al._DB_PATH = str(db)
+        try:
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            al.update_peak_watch(
+                [
+                    {
+                        "city": "Los Angeles",
+                        "cur": 33.0,
+                        "prev": 33.0,
+                        "direction": "FLAT",
+                        "status": "kilitli peak=33.0",
+                        "peak": 33.0,
+                        "day": today,
+                        "lon": -118.2,
+                    },
+                    {
+                        "city": "Wellington",
+                        "cur": 20.0,
+                        "prev": 19.0,
+                        "direction": "UP",
+                        "status": "takip",
+                        "peak": None,
+                        "day": today,
+                        "lon": 174.8,
+                    },
+                    {
+                        "city": "London",
+                        "cur": 24.0,
+                        "prev": 23.0,
+                        "direction": "UP",
+                        "status": "erken giris",
+                        "peak": 24.0,
+                        "day": today,
+                        "lon": -0.1,
+                    },
+                    # lon'suz eski kayit (r.get("lon") -> None) sona gider
+                    {
+                        "city": "EskiSehir",
+                        "cur": 20.0,
+                        "prev": None,
+                        "direction": "-",
+                        "status": "takip",
+                        "peak": None,
+                        "day": today,
+                    },
+                ]
+            )
+            cities = [r["city"] for r in al.peak_watch_list()]
+        finally:
+            al._DB_PATH = original
+        assert cities == ["Wellington", "London", "Los Angeles", "EskiSehir"], cities

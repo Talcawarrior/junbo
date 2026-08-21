@@ -711,6 +711,7 @@ export interface HealthResponse {
     direction: string | null;
     status: string | null;
     peak: number | null;
+    lon: number | null; // 2026-08-21: dogu->bati siralama (boylam)
     updated_at: string | null;
   }>;
 
