@@ -57,7 +57,7 @@ TR_MONTHS = {
 }
 
 
-# ── API Key Authentication ──────────────────────────────────────────────────
+# -- API Key Authentication --------------------------------------------------
 # Protects sensitive POST endpoints (reset, start, stop, cleanup).
 # JUNBO_API_KEY MUST be set. If not set, a random key is generated at startup
 # and printed to console. Destructive endpoints are NEVER open.
@@ -86,7 +86,7 @@ async def verify_api_key(x_api_key: str = Header(default="")):
 def _code_version() -> str:
     """Calisan kodun git commit hash'i (yoksa dosya mtime'i).
 
-    2026-08-19: restart dogrulamasi icin — eski surec tuzağina bir daha
+    2026-08-19: restart dogrulamasi icin - eski surec tuzagina bir daha
     dusmemek icin /api/status'ta gorunur.
     """
     import subprocess
@@ -126,7 +126,7 @@ def _peak_watch_status() -> list[dict]:
         return []
 
 
-# ── Global State tracking for FastAPI Web App ───────────────────────────────
+# -- Global State tracking for FastAPI Web App -------------------------------
 class BotState:
     """Global bot state tracking running status, modules, and tasks."""
 
@@ -201,7 +201,7 @@ async def lifespan(_app: FastAPI):
         state.tasks.clear()
 
 
-app = FastAPI(title="aš¡ Junbo - Self-Evolving Predictor", lifespan=lifespan)
+app = FastAPI(title="Junbo - Self-Evolving Predictor", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -280,7 +280,7 @@ def get_status():
             db.query(func.coalesce(func.sum(Bet.unrealized_pnl), 0.0)).filter(Bet.status.in_(open_statuses)).scalar()
         ) or 0.0
 
-        # 3. Counts a€” win/loss based on PnL (includes closed_early)
+        # 3. Counts - win/loss based on PnL (includes closed_early)
         _all_closed = db.query(Bet.realized_pnl).filter(Bet.status.in_(_closed_statuses)).all()
         win_count = sum(1 for b in _all_closed if (b.realized_pnl or 0) > 0)
         loss_count = sum(1 for b in _all_closed if (b.realized_pnl or 0) <= 0)
@@ -453,7 +453,7 @@ def get_status():
 
         return {
             "is_running": state.is_running,
-            # 2026-08-19: hangi KOD calisiyor — restart dogrulamasinin tek kaynagi.
+            # 2026-08-19: hangi KOD calisiyor - restart dogrulamasinin tek kaynagi.
             # (Ders: 18 saatlik eski surec portu tuttu, yeni kod hic yuklenmedi,
             # "is_running True" eski surecin yanitiydi.)
             "code_version": _code_version(),
@@ -559,7 +559,7 @@ def get_markets(limit: int = 200):
     try:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        # 1. Missed signals — SADECE son `limit` kadari (dashboard icin)
+        # 1. Missed signals - SADECE son `limit` kadari (dashboard icin)
         # 15k satirin tamami serialized edilince 4.7MB / timeout oluyordu.
         missed_signals = (
             db.query(Analysis, WeatherMarket)
@@ -813,12 +813,12 @@ def get_signals():
 
 @app.get("/api/city-bets")
 def get_city_bets():
-    """Active bets grouped by city — for first-page dashboard."""
+    """Active bets grouped by city - for first-page dashboard."""
     from collections import defaultdict
     from datetime import datetime, timezone, timedelta
 
     def _resolve_icao(city: str) -> str | None:
-        """City name → ICAO code via WeatherMarket."""
+        """City name -> ICAO code via WeatherMarket."""
         row = (
             db.query(WeatherMarket.city_code)
             .filter(WeatherMarket.city.ilike(city), WeatherMarket.city_code.isnot(None))
@@ -936,7 +936,7 @@ def get_history():
         from sqlalchemy import case, func
 
         # True settlement stats: won+lost+settled+closed_early+closed
-        # closed_early bets are real exits — their PnL is realized cash.
+        # closed_early bets are real exits - their PnL is realized cash.
         # closed bets (rotation) are also real exits.
         # Excluding them from stats gives a misleadingly small picture.
         real_settled_statuses = ["settled", "won", "lost", "closed_early", "closed"]
@@ -1061,7 +1061,7 @@ def get_history():
             wins = sum(1 for b in in_band if (b.pnl if b.pnl is not None else b.realized_pnl or 0.0) > 0)
             roi_by_price_band.append(
                 {
-                    "band": f"{band_min:.2f}–{band_max:.2f}",
+                    "band": f"{band_min:.2f}-{band_max:.2f}",
                     "min_price": band_min,
                     "max_price": band_max,
                     "trades": len(in_band),
@@ -1204,7 +1204,7 @@ def get_slippage():
         for analysis, city, _bet_side, entry_price, bet_pnl, _bet_status in rows:
             # Use Analysis fields for expected values, Bet fields for actuals
             expected_price = round(float(analysis.market_implied_prob or 0), 4)
-            side = analysis.recommended_side or "a€”"
+            side = analysis.recommended_side or "-"
             # entry_price: 0 if no bet placed (frontend expects number)
             entry_price_val = round(float(entry_price), 4) if entry_price is not None else 0.0
             # result: PENDING if no bet, WIN/LOSS if bet settled
@@ -1215,7 +1215,7 @@ def get_slippage():
             entries.append(
                 {
                     "id": str(analysis.id),
-                    "city": city or "a€”",
+                    "city": city or "-",
                     "side": side,
                     "expected_price": expected_price,
                     "entry_price": entry_price_val,
@@ -1294,7 +1294,7 @@ async def stop_bot(_key: str = Depends(verify_api_key)):
 
 @app.post("/api/restart")
 async def restart_bot(_key: str = Depends(verify_api_key)):
-    """Kod guncelleme restart'i — islem kasitli olarak exit(1) ile cikar.
+    """Kod guncelleme restart'i - islem kasitli olarak exit(1) ile cikar.
 
     Windows servis yoneticisinin (SCM) JunboBot failure-recovery ayari
     (RESTART 5s/10s/30s, `sc qfailure JunboBot`) sayesinde surec beklenmedik
@@ -1313,7 +1313,7 @@ async def restart_bot(_key: str = Depends(verify_api_key)):
 @app.post("/api/reset")
 async def reset_bot(_key: str = Depends(verify_api_key)):
     """Reset the bot state and clear in-flight DB rows WITHOUT auto-restart."""
-    # Silmeden ONCE backup al — asla veri kaybi olmasin
+    # Silmeden ONCE backup al - asla veri kaybi olmasin
     try:
         from db_backup import create_backup
 
@@ -1471,7 +1471,7 @@ def get_health_check():
         max_net_edge = max(net_edges) if net_edges else 0
 
         # 4. All-Time Closed Bets Summary (settled + closed_early)
-        # 2026-08-19 tutarlilik: KPI ile ayni tanim — TUM sonuclanmis (closed
+        # 2026-08-19 tutarlilik: KPI ile ayni tanim - TUM sonuclanmis (closed
         # DAHIL), win = realized_pnl > 0. Eski: closed haric + pnl sutunu.
         settled_all = (
             db.query(Bet)
@@ -1513,10 +1513,10 @@ def get_health_check():
             else:
                 losses_by_exit[code] = losses_by_exit.get(code, 0) + 1
 
-        # 5. Red Flags a€” son 48 saatlik verilere gÃ¶re
+        # 5. Red Flags - son 48 saatlik verilere gore
         red_flags = []
 
-        # Son 48 saatteki kayÄ±plarÄ± say
+        # Son 48 saatteki kayiplari say
         recent_losses = sum(
             1
             for b in settled_all
@@ -1541,8 +1541,8 @@ def get_health_check():
                 {
                     "severity": "critical",
                     "message": (
-                        f"Son 48 saatte {recent_losses} kayÄ±p "
-                        f"(toplam {recent_total} sonuÃ§lanan). "
+                        f"Son 48 saatte {recent_losses} kayip "
+                        f"(toplam {recent_total} sonuclanan). "
                         f"Calibration bozuk olabilir."
                     ),
                     "action": "Botu durdur ve kalibrasyonu kontrol et.",
@@ -1556,19 +1556,19 @@ def get_health_check():
                     {
                         "severity": "warning",
                         "message": (
-                            f"Son 24 saatte {any_analyses} analiz yapÄ±ldÄ±"
-                            f" ama hiÃ§ bet aÃ§Ä±lmadÄ±."
-                            f" Edge threshold Ã§ok yÃ¼ksek olabilir."
+                            f"Son 24 saatte {any_analyses} analiz yapildi"
+                            f" ama hic bet acilmadi."
+                            f" Edge threshold cok yuksek olabilir."
                         ),
-                        "action": "min_edge'i dÃ¼ÅŸÃ¼r veya marketleri kontrol et.",
+                        "action": "min_edge'i dusur veya marketleri kontrol et.",
                     }
                 )
             else:
                 red_flags.append(
                     {
                         "severity": "info",
-                        "message": ("Son 24 saatte hiÃ§ analiz yapÄ±lmadÄ±. Market taramasÄ± Ã§alÄ±ÅŸÄ±yor mu?"),
-                        "action": "Market taramasÄ±nÄ± kontrol et.",
+                        "message": ("Son 24 saatte hic analiz yapilmadi. Market taramasi calisiyor mu?"),
+                        "action": "Market taramasini kontrol et.",
                     }
                 )
 
@@ -1577,9 +1577,9 @@ def get_health_check():
                 {
                     "severity": "critical",
                     "message": (
-                        f"TÃ¼m net edge'ler %2.5 altÄ±nda (ortalama: %{avg_net_edge:.1f}). Maliyeti karÅŸÄ±lamÄ±yor."
+                        f"Tum net edge'ler %2.5 altinda (ortalama: %{avg_net_edge:.1f}). Maliyeti karsilamiyor."
                     ),
-                    "action": ("Botu durdur. min_edge veya kalibrasyon ayarlarÄ±nÄ± gÃ¶zden geÃ§ir."),
+                    "action": ("Botu durdur. min_edge veya kalibrasyon ayarlarini gozden gecir."),
                 }
             )
 
@@ -1587,8 +1587,8 @@ def get_health_check():
             red_flags.append(
                 {
                     "severity": "critical",
-                    "message": (f"Win rate %{win_rate_all:.1f} (5+ sonuÃ§lanmÄ±ÅŸ bet). Model tahminleri gÃ¼venilmez."),
-                    "action": "Kalibrasyon verisini kontrol et, evrim Ã§alÄ±ÅŸtÄ±r.",
+                    "message": (f"Win rate %{win_rate_all:.1f} (5+ sonuclanmis bet). Model tahminleri guvenilmez."),
+                    "action": "Kalibrasyon verisini kontrol et, evrim calistir.",
                 }
             )
 
@@ -1598,10 +1598,9 @@ def get_health_check():
                 {
                     "severity": "warning",
                     "message": (
-                        f"AÅŸÄ±rÄ± bahis: 24s'de {bets_opened_24h} aÃ§Ä±lan, "
-                        f"{open_total} aÃ§Ä±k. Risk yÃ¶netimi aÅŸÄ±lÄ±yor."
+                        f"Asiri bahis: 24s'de {bets_opened_24h} acilan, {open_total} acik. Risk yonetimi asiliyor."
                     ),
-                    "action": "min_edge'i yÃ¼kselt, Kelly fraction'Ä± dÃ¼ÅŸÃ¼r.",
+                    "action": "min_edge'i yukselt, Kelly fraction'i dusur.",
                 }
             )
 
@@ -1615,11 +1614,11 @@ def get_health_check():
                 {
                     "severity": "warning",
                     "message": (f"Son 48 saatte PnL negatif: ${recent_pnl:.2f}. Zarar trendi devam ediyor."),
-                    "action": "Botu izlemeye devam et. 3 gÃ¼n sonunda karar ver.",
+                    "action": "Botu izlemeye devam et. 3 gun sonunda karar ver.",
                 }
             )
 
-        # 6. Daily PnL Timeline — every day the bot has been running, up to today.
+        # 6. Daily PnL Timeline - every day the bot has been running, up to today.
         # Previously this only looked 1 day into the past (yesterday) plus 29
         # days into the future, so any day older than yesterday (e.g. 16/07,
         # 17/07) never appeared. Now it anchors at the first bet and stops at
