@@ -34,12 +34,12 @@ EARLY_MAX_PRICE = 0.50
 # En az bu kadar gunluk gecmis veri olmadan tahmini peak saati yok (eski
 # kilit kurali calisir).
 MIN_PEAK_HISTORY_DAYS = 3
-# 2026-08-20 kara liste (kullanici onayi): METAR havalimani istasyonunun
-# Polymarket'in WU sehir istasyonundan SISTEMATIK saptigi sehirler. 13-19 Agu
-# tutma orani: VHHH %20 (1/5), ZGSZ %29 (2/7), KBKF/KATL %43, KSEA/KSFO/NZWN
-# %57 (diger 35 sehir %100). Bu sehirlerde METAR-peak bet acilmaz; veri
-# toplama (collect_metar_archive) ve spread betleri DEVAM eder.
-METAR_PEAK_BLACKLIST = {"VHHH", "ZGSZ", "KBKF", "KATL", "KSEA", "KSFO", "NZWN"}
+# 2026-08-21 kullanici karari: TUM kara liste KALDIRILDI (VHHH/ZGSZ/KBKF/
+# KATL/KSEA/KSFO/NZWN). Denver (KBKF) sorgusu sonrasi kullanici riski kabul
+# etti — bu sehirlerde METAR-peak bet yeniden acilir. Gecmis tutma orani
+# (13-19 Agu): VHHH %20, ZGSZ %29, KBKF/KATL %43, KSEA/KSFO/NZWN %57, diger
+# 35 sehir %100. Ileride tekrar kisitlamak istenirse bu set doldurulur.
+METAR_PEAK_BLACKLIST: set[str] = set()
 
 # Son tam arsiv toplama zamani (time.monotonic) — metar_loop 10 dk'ya inince
 # aviationweather.gov'u yormamak icin arsiv 25 dk'da bir toplanir.
@@ -598,13 +598,9 @@ def run_metar_peak_bets() -> int:
         for m in markets:
             if _hours_until_close(m) < MIN_HOURS_BEFORE_CLOSE:
                 continue
-            if m.city_code in METAR_PEAK_BLACKLIST:
-                # 2026-08-20 kullanici onayi: VHHH/ZGSZ vb. havalimani
-                # istasyonlari WU sehir verisinden sistematik sapiyor — bu
-                # sehirlerde kilit yanlis bucket'a gidiyor (canli 20 Agu'da
-                # HK 30C 0.655 ve SZ 31C 0.225 betleri piyasa %99 kayip
-                # fiyatladi). Veri toplama ayri dongude devam eder.
-                continue
+            # 2026-08-21: kara liste KALDIRILDI (METAR_PEAK_BLACKLIST bos) —
+            # tum sehirler adaydir. (2026-08-20'de VHHH/ZGSZ/KBKF/KATL/KSEA/
+            # KSFO/NZWN burada atlaniyordu; kullanici riski kabul etti.)
             if _existing_metar_bet(session, str(m.id)):
                 continue
             day = m.target_date.date().isoformat() if m.target_date else today
@@ -937,36 +933,6 @@ def run_metar_peak_bets() -> int:
                 bucket,
             )
             log_event("bet_blocked", city_name, f"bucket={bucket}C: market DB'de yok")
-
-        # 2026-08-20 kullanici onayi: kara listedeki sehirler dongude
-        # atlandigi icin eski "kilitli" satirlari ekranda donmus kaliyordu
-        # (HK/Shenzhen/Wellington restart oncesi kilitle takili kaldi).
-        # Durust gosterim: canli sicaklik + "kara liste (bet yok)", kilit yok.
-        for m in markets:
-            if m.city_code not in METAR_PEAK_BLACKLIST:
-                continue
-            if str(m.city) in watch_rows:
-                continue
-            _lo = (
-                session.query(MetarObservation.temp_c)
-                .filter(
-                    MetarObservation.city_code == m.city_code,
-                    MetarObservation.day == today,
-                )
-                .order_by(MetarObservation.obs_time.desc())
-                .first()
-            )
-            watch_rows[str(m.city)] = {
-                "city": str(m.city),
-                "cur": float(_lo[0]) if _lo and _lo[0] is not None else None,
-                "prev": None,
-                "direction": "-",
-                "status": "kara liste (bet yok)",
-                "peak": None,
-                "day": today,
-                # 2026-08-21 kullanici: peak_watch dogu->bati siralanir (lon DESC)
-                "lon": _city_lon(m),
-            }
 
         # 2026-08-19: peak takibi durumu tek seferde yazilir (dashboard).
         if watch_rows:

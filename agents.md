@@ -118,7 +118,7 @@ Bulunan her bug düzeltilip test edilmeli, sonra commit atılmalı.
 - Saat gelince cur_max'a ERKEN giris adayi; bucket fiyati **0.50 ustunde** ise 1-dusus kilidi beklenir, altinda dusus beklemeden girilir
 - Aktar: zirve asilirsa (cur_max > kilitli peak) eski bet kapatilir + yenisine acilir (zincir 22->23->24)
 - `MIN_ENTRY=0.05`, stake $3, SADECE `temperature_max` + `RANGE` (tam bucket)
-- **KARA LISTE (`METAR_PEAK_BLACKLIST`):** VHHH, ZGSZ, KBKF, KATL, KSEA, KSFO, NZWN — havalimani METAR'i WU sehir verisinden sistematik sapiyor (%20-57 tutma); bu sehirlerde METAR-peak bet acilmaz (veri toplama + spread DEVAM eder)
+- **KARA LISTE KALDIRILDI (2026-08-21):** `METAR_PEAK_BLACKLIST` bos — TUM sehirlerde METAR-peak bet acilir (eski liste VHHH, ZGSZ, KBKF, KATL, KSEA, KSFO, NZWN %20-57 tutma oraniyla kullanici riski kabul etti; veri toplama + spread zaten devam ediyordu). Ileride tekrar kisitlamak icin set doldurulur
 - Bayat METAR (>45 dk): DERHAL yeniden cekim denenir; taze gelirse devam, gelmezse atla (aktif duzeltme)
 
 **3) Korumalar:** stale fiyat guard (CLOB, %15 sapma), orderbook.db stale guard yedegi, 45dk bayat METAR, PAPER MODE kalici (`_live_allowed=False`).

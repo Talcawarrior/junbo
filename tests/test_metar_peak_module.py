@@ -175,13 +175,18 @@ class TestMetarPeakBrokenLock:
         assert m_25 is not None
 
 
-class TestMetarPeakBlacklist:
-    """2026-08-20 kullanici onayi: METAR havalimani istasyonu WU sehir
-    verisinden sistematik sapan sehirler (VHHH %20, ZGSZ %29 tutma) — bu
-    sehirlerde METAR-peak bet acilmaz; veri toplama devam eder.
-    """
+class TestBlacklistRemoved:
+    """2026-08-21 kullanici karari: METAR_PEAK_BLACKLIST tamamen kaldirildi.
+    Denver (KBKF) sorgusu sonrasi kullanici riski kabul etti — tum sehirlerde
+    (eski kara liste VHHH/ZGSZ/KBKF/KATL/KSEA/KSFO/NZWN dahil) METAR-peak bet
+    acilir."""
 
-    def test_kara_liste_sehrine_bet_acilmaz(self, market_factory):
+    def test_blacklist_bos(self):
+        assert mp.METAR_PEAK_BLACKLIST == set()
+
+    def test_eski_kara_liste_sehri_bet_acilir(self, market_factory):
+        """2026-08-20'de VHHH kara listedeydi ve bet acilmazdi; kara liste
+        kaldirildigi icin VHHH artik normal akisla _open_metar_bet'e gider."""
         import time as _time
 
         from unittest.mock import patch
@@ -215,44 +220,8 @@ class TestMetarPeakBlacklist:
         ):
             mp.run_metar_peak_bets()
 
-        assert called_ids == []  # kara listede -> bet acilmaz
-        assert "VHHH" in mp.METAR_PEAK_BLACKLIST
-        assert m_hk is not None
-
-    def test_kara_liste_sehri_peak_watch_satiri_durust(self, market_factory):
-        """2026-08-20 kullanici: donmus "kilitli" satir yerine kara listedeki
-        sehir "kara liste (bet yok)" statüsüyle yazilir (peak=None)."""
-        import time as _time
-
-        from unittest.mock import patch
-
-        tgt = datetime.now(timezone.utc).replace(tzinfo=None)
-        market_factory(
-            city="Hong Kong",
-            city_code="VHHH",
-            metric="temperature_max",
-            market_type="RANGE",
-            threshold=30.0,
-            target_date=tgt,
-            yes_price=0.30,
-        )
-        with (
-            patch(
-                "scrapers.metar.fetch_metar_day",
-                return_value=[(int(_time.time()) - 120, 30.0), (int(_time.time()) - 60, 30.0)],
-            ),
-            patch("scrapers.metar.archive_metar_observations", return_value=0),
-            patch.object(mp, "_open_metar_bet", return_value=None),
-            patch.object(mp, "_close_wrong_bucket_bets", return_value=0),
-            patch("utils.activity_log.update_peak_watch") as _uw,
-        ):
-            mp.run_metar_peak_bets()
-
-        rows = _uw.call_args[0][0] if _uw.call_args else []
-        hk = [r for r in rows if r["city"] == "Hong Kong"]
-        assert hk, "kara listedeki sehrin peak_watch satiri olmali"
-        assert hk[0]["status"] == "kara liste (bet yok)"
-        assert hk[0]["peak"] is None  # kilit YOK
+        assert called_ids == [m_hk], f"kara liste kaldirildi -> bet acilmali: {called_ids}"
+        assert "VHHH" not in mp.METAR_PEAK_BLACKLIST
 
 
 class TestMetarPeakStaleRefresh:

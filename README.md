@@ -190,10 +190,10 @@ python main.py bot
   altindaysa dusus beklemeden girer. Aktar (zirve asilmasi -> kapat + yenisine ac)
   her iki modda da calisir. Backtest (05-19 Agu, cap 6/gun + 30dk dongu gecikmesi):
   hibrit compound $200 -> $4,070 (kilit $3,629, erken saf $2,973).
-  **2026-08-20 KARA LISTE:** METAR havalimani istasyonu WU sehir verisinden
-  sistematik sapan sehirler (`METAR_PEAK_BLACKLIST`): VHHH %20, ZGSZ %29, KBKF/
-  KATL %43, KSEA/KSFO/NZWN %57 tutma (diger 35 sehir %100) — bu sehirlerde
-  METAR-peak bet acilmaz, veri toplama devam eder. **BAYAT METAR'da aktif
+  **2026-08-21 KARA LISTE KALDIRILDI:** `METAR_PEAK_BLACKLIST` bosaltildi
+  (kullanici karari) — eski listedeki sehirlerde (VHHH %20, ZGSZ %29, KBKF/KATL
+  %43, KSEA/KSFO/NZWN %57 tutma) METAR-peak bet yeniden acilir. Gecmis karar
+  kaydi: GELISTIRICI_NOTLARI.md. **BAYAT METAR'da aktif
   duzeltme:** son gozlem esikten eski ise (30dk istasyonlarda 45dk, 60dk
   saatlik istasyonlarda 90dk — kadans-bilgili, 2026-08-20) o sehrin METAR'i DERHAL
   yeniden cekilir; taze gelirse devam, gelmezse sehir-gun basina 1 kez alarm.
