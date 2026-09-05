@@ -175,10 +175,13 @@ class StrategyConfig:
     # 2026-08-14: 12 sehir (en az sapan). Backtest: bias-top 12 en karli (+$41.9).
     # 2026-08-16: "ilk 40 markete ac" -> max_cities 40 (23 marketli sehir de degerlendirilir).
     spread_max_cities: int = 40  # tahmini en yuksek ilk N sehir
-    spread_max_entry: float = 0.95  # ust sinir: 0.95 ve alti her fiyata acilir (2026-08-16)
+    spread_max_entry: float = 0.50  # ust sinir (2026-09-06: 0.95->0.50, backtest -58% kayip azaldi)
     spread_stake_usd: float = 2.0  # esik basina stake
     spread_max_bets_per_day: int = 120  # gunluk limit: 3 gun x 40 (2026-08-17 kullanici karari: "Toplam 120")
-    metar_peak_max_bets_per_day: int = 12  # METAR-peak gunluk cap (2026-08-21: cap12 en karli)
+    # 2026-09-06 backtest: Amsterdam/HK/Seoul/Moscow/Paris spread'te -68$/15gun kaybettiriyor
+    spread_blacklist: str = "Amsterdam,Hong Kong,Seoul,Moscow,Paris"
+    metar_peak_max_bets_per_day: int = 15  # METAR-peak gunluk cap (2026-09-06: 12->15, backtest $285)
+    metar_stake_usd: float = 5.0  # METAR tek bet stake (2026-09-06: 3->5, backtest $285)
 
     # ── Daily rotation limit: gunde max N rotasyon ───────────────────
     max_daily_rotations: int = 3  # gunde en fazla 3 rotasyon (maliyet kontrolu)
@@ -542,9 +545,11 @@ class BotConfig:
         s.spread_max_entry = float(os.getenv("SPREAD_MAX_ENTRY", str(s.spread_max_entry)))
         s.spread_stake_usd = float(os.getenv("SPREAD_STAKE_USD", str(s.spread_stake_usd)))
         s.spread_max_bets_per_day = int(os.getenv("SPREAD_MAX_BETS_PER_DAY", str(s.spread_max_bets_per_day)))
+        s.spread_blacklist = os.getenv("SPREAD_BLACKLIST", s.spread_blacklist)
         s.metar_peak_max_bets_per_day = int(
             os.getenv("METAR_PEAK_MAX_BETS_PER_DAY", str(s.metar_peak_max_bets_per_day))
         )
+        s.metar_stake_usd = float(os.getenv("METAR_STAKE_USD", str(s.metar_stake_usd)))
 
 
 # ── Config backward-compatibility proxy ────────────────────────────────────

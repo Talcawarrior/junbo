@@ -162,6 +162,10 @@ def _place_spread_bets_inner(session, target_day) -> dict:
     max_entry = float(getattr(s, "spread_max_entry", 0.30) or 0.30)
     stake = float(getattr(s, "spread_stake_usd", 2.0) or 2.0)
     max_bets = int(getattr(s, "spread_max_bets_per_day", 30) or 30)
+    min_entry = float(getattr(s, "min_entry_price", 0.10) or 0.10)
+    # 2026-09-06: blacklist — Amsterdam/HK/Seoul/Moscow/Paris spread'te -68$/15gun
+    _bl = getattr(s, "spread_blacklist", "") or ""
+    spread_blacklist: set[str] = {c.strip() for c in _bl.split(",") if c.strip()}
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     today = now.date()
@@ -200,6 +204,14 @@ def _place_spread_bets_inner(session, target_day) -> dict:
     if not candidates:
         logger.info("spread: bias verisi olan sehir yok, bet acilmiyor (yeni sehirler atlanir)")
         return {"placed": 0, "closed": 0, "skipped": 0, "cities": []}
+
+    # 2026-09-06: blacklist filtresi — spread'te surekli kaybettiren sehirler
+    if spread_blacklist:
+        before = len(candidates)
+        candidates = [(kv, a) for kv, a in candidates if code_name.get(kv[0][0], "") not in spread_blacklist]
+        bl_count = before - len(candidates)
+        if bl_count > 0:
+            logger.info("spread: blacklist %d sehir elendi (%s)", bl_count, ", ".join(sorted(spread_blacklist)))
 
     # Siralama: EN AZ SAPAN (dusuk |bias|) once; esitse daha SICAK (yuksek mean) once.
     candidates.sort(key=lambda kv_acc: (kv_acc[1], -kv_acc[0][1][0]))
@@ -283,7 +295,7 @@ def _place_spread_bets_inner(session, target_day) -> dict:
                 skipped += 1
                 continue
             entry = float(mkt.yes_price)
-            if not (0 < entry < max_entry):
+            if not (min_entry <= entry < max_entry):
                 skipped += 1
                 continue
 

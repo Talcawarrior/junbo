@@ -57,8 +57,9 @@ MIN_HOURS_BEFORE_CLOSE = 0
 MIN_ENTRY = 0.05
 # METAR stake (kullanici karari 2026-08-16: 1 -> 2 -> 3 USD optimum.
 # Backtest: bias-top 40 + tek esik, $3 stake = %91.7, +$120, maxDD $3.2.
-# ROI stake'ten bagimsiz ama mutlak kazanc ve risk dengede $3 en iyi.)
-METAR_STAKE = 3.0
+# ROI stake'ten bagimsiz ama mutlak kazanc ve risk dengede $3 en iyi.
+# 2026-09-06: 3->5, backtest $285/10gun — METAR tek karli strateji)
+METAR_STAKE = 3.0  # fallback, bot_config.strategy.metar_stake_usd'den okunur
 # Kapanis = target_date + 12h (24:00 UTC)
 CLOSE_HOURS = 12
 # 2026-08-18 kullanici karari: "Metar betleri acilirken bias a gerek yok,
@@ -363,7 +364,8 @@ def _open_metar_bet(session, market: WeatherMarket, peak_temp: float) -> Optiona
 
     pf = session.query(Portfolio).filter(Portfolio.id == 1).first()
     cash = float(pf.cash_balance) if pf else 0.0
-    use_stake = min(METAR_STAKE, max(0.0, cash))
+    _metar_stake = float(getattr(bot_config.strategy, "metar_stake_usd", METAR_STAKE) or METAR_STAKE)
+    use_stake = min(_metar_stake, max(0.0, cash))
     if use_stake <= 0:
         logger.warning("metar_peak: %s %sC nakit yetersiz (cash=%.2f)", market.city, market.threshold, cash)
         return None
