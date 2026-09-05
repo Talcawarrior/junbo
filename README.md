@@ -2,7 +2,7 @@
 
 **Port: 8093** | **Framework: FastAPI + Next.js** | **Dry-Run Mode: KALICI (DRY_RUN=true)**
 
-**Son guncelleme:** 2026-08-08 | **Konum:** `C:\Users\fdemir\Documents\New project\junbo`
+**Son guncelleme:** 2026-09-06 | **Konum:** `C:\Users\fdemir\Documents\New project\junbo`
 
 ---
 
@@ -60,6 +60,12 @@ Backtest icin kesintisiz veri toplama esastir. Asagidaki sistem 2026-08-08'de ku
 | 3 | Actual temperatures | Open-Meteo Archive | `actuals.db` | 6 saat |
 | 4 | Backtest kopyasi | bot.db'den kopya | `backtest.db` | 6 saat (sync) |
 | 5 | Backup | 4 DB yedekleri | `data/backups/` | 6 saat |
+| 6 | Backtest fiyatlari | Orderbook + CLOB | `backtest_prices.db` | 6 saat (replay icin) |
+| 7 | Snapshot arsivi | Market snapshotlar | `snapshots.db` | 30 dk (replay icin) |
+| 8 | Polymarket gecmis | Gamma API | `poly_history.db` | 6 saat (analiz icin) |
+| 9 | Evolution deneyleri | ASI/bias deneyleri | `asi_evolve_experiments.db` | gunde 1 (03:00 UTC) |
+
+> **Not:** `actuals.db`, `backtest.db`, `backtest_prices.db`, `snapshots.db` gunluk sync task'lari henüz dolmamışsa 0 byte görünebilir; `scripts/sync_backtest_db.py` + `scripts/collect_actuals.py` + `scripts/collect_orderbook.py` çalıştıktan sonra dolar.
 
 ### Task Scheduler Gorevleri (SYSTEM, WakeToRun=True, StartWhenAvailable=True)
 
@@ -262,6 +268,74 @@ python main.py bot
 
 ---
 
+## 4c. TIPA-TIPA Replay Backtest Motoru (replay/)
+
+**Anayasa geregi** (CLAUDE.md §7): tum backtestler botun GERCEK kodunu arsivlenmis
+veriye karsi calistirir — `scripts/backtest.py` (yeniden yazim modeli) DEGIL.
+
+`replay/` paketi bot'un gercek fonksiyonlarini
+(`executor/spread_placer.py::place_spread_bets`, `jobs/metar_peak.py::run_metar_peak_bets`,
+`executor/settler.py::SettlementEngine.settle_all`) arsivlenmis 2026-08-04 → 08-22
+verisine karsi, kontrol edilebilir saat (`ReplayClock`) + arsiv mock'lari ile calistirir.
+**Look-ahead YASAKTIR**: her T aninda yalnizca T'den once var olan veri gorunur
+(forecast `fetched_at<=T`, METAR `obs_time<=T`, market `first_seen<=T`, fiyat
+zaman-pencereli, settlement yalnizca D+1 00:00 UTC'de).
+
+> **2026-08-23 Fidelity duzeltmeleri** (spread fidelity 0/1079 -> duzeldi):
+> 1. **Look-ahead (replay/archive.py):** naive `.timestamp()` makine saatini (UTC+3)
+>    varsaydigi icin forecast/market/calibration ~3 saat ERKEN gorunuyordu; artik
+>    `_epoch()` (UTC-epok) — replay canliyla ayni zamanda gorur.
+> 2. **Retry kadansi (replay/scheduler.py):** 0-13 UTC geceyarisi penceresinde
+>    spread retry HER tick'te calisir (canlinin ~1 sn taramasi; eski saatlik retry
+>    40 dk gec kaliyordu); yeni veri yoksa cagri atlanir. Fidelity tanimi:
+>    market_id esit + `|placed_at|<=15dk` + `|entry|<=0.05`.
+> 3. **Fiyat kaynagi (replay/price_index.py):** `entry_price` gamma/snapshot
+>    ONCELIKLI (canli yes_price `outcomePrices[0]` kaynagi); orderbook best_ask
+>    ikincil; `_seed` look-ahead (zaman-penceresiz ilk-gamma kacagi) KALDIRILDI.
+>    Eski orderbook-onceligi replay'i canlidan 30-90 dk ERKEN bet actiriyordu
+>    (orderbook ask'i gamma'dan once dusuk gosteriyor) — canli giris fiyati her
+>    ornekte gamma'ya esit. Artik market fiyat verisi gelene kadar bet acilmaz.
+> 4. **Config drift override (replay/main.py):** `--spread-max-cities N` —
+>    canli bot 08-21/22'de eski `max_cities=40` ile calisiyordu (proses 08-22
+>    22:04'e kadar restart edilmedi); replay bu donemi 40 ile, gunceli 15 ile
+>    uretir (`bot_config.strategy.spread_max_cities` override).
+
+**SAHTE VERI YOK**: tum girdiler arsivden gelir (`data/*.db` 6 DB + `unified/markets.parquet`
++ 30 kalibrasyon parquet). Arsiv DB'leri `mode=ro` ile okunur; bot kendi temp DB'sine yazar.
+Production DB'lere HICBIR yazi yok. Market `city_code`'u bot.db'den gelir (canli botun
+kullandigi ICAO kodlari) — arsivdeki eski backtest.db kodlari (EGLL/LFPG vb.) METAR'siz
+oldugundan replay bunlari islemez.
+
+```powershell
+# Tam pencere: her iki strateji + her iki stake modu
+#   fixed: $2 spread / $3 metar   compound: bankroll*0.03
+python -m replay.main --strategy both --stake-mode both --fidelity `
+  --window 2026-08-04..2026-08-22 --tick-minutes 5 --out-dir reports/replay/final
+
+# Eski donem fidelity (canli 08-21/22 max_cities=40 idi) vs guncel (15):
+python -m replay.main --strategy spread --stake-mode fixed --fidelity `
+  --window 2026-08-19..2026-08-22 --spread-max-cities 40 --out-dir reports/replay/mc40_old
+python -m replay.main --strategy spread --stake-mode fixed --fidelity `
+  --window 2026-08-20..2026-08-23 --spread-max-cities 15 --out-dir reports/replay/mc15_cur
+```
+
+Ciktilari (`reports/replay/<run>/<mode>/`):
+- `rapor.md` — gun-gun ledger: acilan/kazanan/kaybeden bet, PnL, nakit, toplam deger
+- `ledger_bets.csv` — bet-bet: acilis zamani, strateji, sehir, esik, entry, stake, kapanis sekli (rotation/settlement), pnl
+- `mechanism_trace.csv` — mekanizma izi: T-2 acilis, sehir secimi (bias siralamasi), peak kilidi/erken giris, rotation, blok nedenleri
+- `activity_events.csv` — bot'un `log_event` ciktisi
+- `fidelity.md` — replay-vs-canli karsilastirma (market_id esit + `|placed_at|<=15dk` + `|entry|<=0.05`)
+
+**Dogruluk kaniti**: replay betleri canli `bot.db.bets` ile birebir karsilastirilir
+(precision = eslesen replay / toplam replay; recall = eslesen canli / toplam canli).
+
+Test: `python -m pytest tests/test_replay_engine.py tests/test_replay_fidelity.py -q`.
+
+Not: bot su an CALISIYOR olsa da replay guvenlidir — arsivler `mode=ro`, bot yalnizca
+kendi temp DB'sine yazar.
+
+---
+
 ## 5. Bot Loops (bot_loop.py)
 
 | Loop | Interval | Gorevi |
@@ -345,27 +419,52 @@ python main.py reset     # SIFIRLA (backup alir)
 - Her degisiklik yeni branch: `fix/...`, `feature/...`.
 - Once unit + E2E testler, sonra commit.
 - **Push kurallari:** `restore/05-clean-state` ana is akisi; ornegin dogrudan itmek yok.
+- **Codegraph sync:** Kod degisikliginden sonra `codegraph sync` (veya MCP `codegraph-plugin-sync`) — index guncel kalsin.
+- **Bot Restart (Full suite 0 failed ise ZORUNLU):**
+  1. Mevcut bot'u durdur: `GET /api/stop` veya `python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8093/stop')"`
+  2. Bekle: `timeout /t 3 /nobreak >nul`
+  3. Baslat: `start /B python main.py bot`
+  4. Dogrula: `GET /api/status` → `is_running=true`
 
 ---
 
 ## 10. Test
 
+### Test Paketleri (AGENTS.md zorunlu sırası)
+
+| Kategori | Test Dosyaları | Ne Zaman Çalıştırılır |
+|---|---|---|
+| **1. Latent Bug** | `test_latent_bugs.py` | **Her değişiklikte ÖNCE** (import, dead-code, calibration crash) |
+| **2. Lint + Type** | `python quick_check.py --fast` (ruff + mypy) | Her değişiklikte |
+| **3. Core Engine** | `test_calculator.py`, `test_calibration_engine.py`, `test_probability_market_types.py` | Calculator/calibration/probability değişikliklerinde |
+| **4. Config + Strateji** | `test_faz25_35.py`, `test_strategy_selection.py`, `test_days_ahead_regression.py` | `settings.py` / `strategy.py` / `bet_placer.py` / `spread_placer.py` değişikliklerinde |
+| **5. E2E + Liveliness** | `test_e2e_system.py`, `test_integration_e2e.py`, `test_faz2_e2e_mock.py`, `test_liveliness_audit.py` | Her değişiklikte (bot uç-uça akış) |
+| **6. Muhasebe + Settlement** | `test_accounting.py`, `test_settler_polymarket.py`, `test_betting_idempotency.py`, `test_signals_active_positions.py` | DRY_RUN / muhasebe / settlement / debit_stake değişikliklerinde |
+| **7. METAR / Spread** | `test_metar_peak.py`, `test_metar_peak_module.py`, `test_metar_peak_config.py`, `test_spread_placer.py` | METAR-peak / spread strateji değişikliklerinde |
+| **8. Replay / Backtest** | `test_replay_engine.py`, `test_replay_fidelity.py`, `test_realistic_backtest.py` | Replay motoru / backtest scripti değişikliklerinde |
+| **9. Regression** | `test_regression_fixes.py`, `test_bugfix_coverage.py` | Bugfix sonrası |
+| **10. Full Suite (Push Öncesi)** | `pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q` | **Push öncesi — 0 failed hedefi** |
+
+### Komut Özet
+
 ```powershell
-# FULL suite (0 failed hedefi)
-python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q
-# -> "667 passed, 8 skipped, 0 failed" (2026-08-16 durumda; tsc --noEmit 0 hata)
-
-# Davranis testleri (gercek DB, mock'suz — modul etkilesim bug'lari icin)
-python -m pytest tests/test_settlement_chain.py tests/test_bet_behavior.py -q
-
-# Latent bug (once)
+# 1. Latent bug (ÖNCE)
 python -m pytest tests/test_latent_bugs.py -v --tb=long
 
-# Hizli lint + import
+# 2. Lint + Type
 python quick_check.py --fast
+# veya ayrı:
+ruff check . --fix
+mypy . --ignore-missing-imports
+
+# 3-9. İlgili paket (değişen modüle göre yukarıdaki tablodan seç)
+
+# 10. Full suite (push öncesi ZORUNLU)
+python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q
+# -> "667 passed, 8 skipped, 0 failed" (2026-09-06 durumda)
 ```
 
-Detaylar icin `GELISTIRICI_NOTLARI.md`'ya bakin (bolum 12: dogrulanmis davranis kurallari — eski docs/ANAYASA.md; bolum 13: ariza senaryolari).
+> **Not:** `test_betting_idempotency.py` ve `test_comprehensive.py` flaky/uzun olduğu için ignore edilir. Detaylı test stratejisi için `GELISTIRICI_NOTLARI.md` Bölüm 12-13'e bakın.
 
 ---
 
@@ -420,6 +519,11 @@ Detaylar icin `GELISTIRICI_NOTLARI.md`'ya bakin (bolum 12: dogrulanmis davranis 
 - **2026-08-18:** **METAR 24 SAAT TOPLAMA + BACKFILL.** Kullanici: "24 saat veri topla bundan sonra ve backfill ile eksik gunleri tamamla." Sorun: METAR toplama yalnizca acik marketi olan (kapanisa >2h kalan) sehirlere bagliydi -> aksam ~22:00'den sonra duruyordu; 14 Agu arsivi sadece 1 sehir, 15-17 Agu akşam kesik. Cozum: `jobs/metar_peak.py::collect_metar_archive()` — metar_loop (30dk) icinden bet mantigindan bagimsiz, TUM sehirlerin bugunku METAR'ini idempotent arsivler (bot restart gerektirir — admin). Backfill: `scripts/backfill_metar_history.py` ile 14-17 Agu dolduruldu (14 Agu 1->49 sehir; tum gunler 23:58'e kadar tam). `metar_peak_live` backtest etkisi: 153->168 bet, NET **+$275.75 -> +$304.83**.
 - **2026-08-18:** **SAF METAR-PEAK BACKTEST (`metar_peak_live`).** Kullanici: "sadece order book ve metar ile backtest yap, hic 2 gun onceden bet acma, metar ile peak takibi yap, tespit ettiginde 3 usd bet ac sehire ve bir adet; slippage, fee, gas koy; gunluk kazanc raporu ver." Yeni subcommand `python scripts/backtest.py metar_peak_live` — forecast/bias YOK (bias-top sehir filtresi uygulanmaz, tum sehirler); `detect_peak` kilitlenince sehir basina TEK $3 YES bet (sadece RANGE temperature_max); giris = kilitlenme sonrasi ilk gercek ask + slippage $0.01 + fee %5 + gas $0.10. Sonuc 03-18 Agu: MIN_ENTRY=0.10 ile **153 bet, %80.4 winrate, NET +$275.75** (stake $459, fee+gas $25.70, slippage etkisi -$23.06); saf (--min-entry 0) 241 bet %53.5 NET +$324.95. Gunluk tablo raporu komutun ciktisinda. Test: `test_latent_bugs.py` allowlist + `test_realistic_backtest.py`.
 - **2026-08-18:** **WALK-FORWARD AUDIT + DEBUG (W1-W5).** Kullanici: "walk forward neden bu kadar uzun suruyor, tum backtestleri audit ve debug et". `scripts/backtest.py walk_forward` 5 gercek ariza ile duzeltildi: (W1) sonuc kaynagi `bets` tablosu (~44 cozumlu satir) -> `parse_resolved_outcome(raw_data)` (bot.db oncelikli, 04-17 Agu tam); (W2) `snap.get("threshold", 25)` hatasi — snapshot'ta threshold kolonu yok, her bet sabit 25 esigiyle hesaplaniyordu -> model_prob 0.99'a kilitlenip sahte %100 winrate veriyordu; (W3) saatlik snapshot'ta ayni markete 11x yeniden giris -> market basina TEK bet (seen seti); (W4) her snapshot'ta 113k forecast lineer tarama (~17.5 milyar karsilastirma, saatler) -> tek seferlik indeks ile **~90 saniye**; (W5) giris fiyati snapshot artefaktindan degil orderbook+CLOB serisinden. Duzeltilmis SONUC: 1,325 bet, **%19.6 winrate, -$1,950.93, ROI -%14.7** — eski sabit edge modeli (P(max>=esik) vs fiyat) GERCEK veride kaybediyor; eski +$464.65/%100 tamamen sahteydi. NOT: walk_forward eski edge modelini test eder; botun SU ANKI stratejisi icin `gunluk` gecerlidir. Test: `test_realistic_backtest.py` + `test_latent_bugs.py` gecer.
+- **2026-08-24:** **T-1 SPREAD AÇILISI + BACKTEST GERCEK KOD CAGIRISI.** (1) `bot_loop.py` — spread botuna T-1 eklendi: `_get_t1_spread_target(today, open_dates)` yardimcisi yarin pazari aciksa `today+1`'i doner; periyodik spread retry (60dk) blogunda `place_spread_bets(tomorrow)` cagirilir. Onceden spread yalnizca `max(open_dates)` (en ileri = T+2) hedefe aciliyordu; T-1 (yarin) hic kapsanmiyordu. Ayni gunluk cap (`spread_max_bets_per_day`) T-1+T-2 paylasilir; dup-guard tekrar acmayi onler. (2) `scripts/backtest.py` — `peak_lock()` yeniden-yazimi SILINDI; artik gercek `scrapers.metar.detect_peak`'i ARTIMLI cagirir (canli botun 5dk dongusunun birebir simulasyonu, `is_confirmed=True` olan ilk an = lock_epoch). ANAYASA geregi backtest gercek kodu cagirir; sonuc birebir ayni (peak kurali zaten senkrondu). NOT: metar_peak_live T0 win-rate'i (~%97) guard eksikliginden (HIBRIT/cap/stale default kapali) hala gercek bottan yuksektir — ayri bir degerlendirme gerekli.
+
+- **2026-08-22:** **GAMMA-PROXY YOLU KENDINI-DUZELTME (kalici cozum).** 22 Agu 10:18-14:36 arasi bot her scan'de `ClientConnectorError: Cannot connect to host gamma-api.polymarket.com:443` aldi (direct egress de engelliydi; yalnizca restart duzeltiyordu). Kok neden: uzun omurlu process'te WARP SOCKS proxy yolu bozuluyor; `_afetch` her batch'te taze session kursa da ayni batch'in tum istekleri TEK connector paylasiyor ve hic retry yoktu (`fetch_many` hatalari None olarak yutuyor, `polymarket.py`'deki `@retry` HIC tetiklenmiyordu). Cozum: (1) `scrapers/async_client.py` — `_is_connection_error()` siniflandiricisi; `_afetch` baglanti-hatali item'lari `_MAX_CONN_RETRIES=1` kez TAZE session+connector'la (`_new_session`) tekrar dener; `_record_conn_outcome` surekli hata sirasinda DEGRADED (dashboard'da gorunur), duzelince RECOVERED loglar; `_ensure_session` 15dk yas siniri. (2) `scrapers/polymarket.py` — TUM gamma sorgulari None donerse `requests.ConnectionError` raise -> `@retry(3)` scan seviyesinde tekrar dener. Test: `test_scrapers_async.py` (retry + siniflandirma). Bot restart ile canliya yuklendi.
+
+- **2026-09-06:** **21 AGUSTOS'DAN ITIBAREN KARLILIK ANALIZI (Paper/DRY_RUN).** 21 Agu - 5 Eyl araliginda **543 bet** acildi: **METAR-peak 192 bet, 121W/6L (%63.0 WR), +\$92.37** (karlı); **Spread 351 bet, 55W/47L (%15.7 WR), -\$112.17** (zararli). **Toplam: -\$19.80** (hafif zarar). Gunluk detay: 21 Agu +\$34.11, 22 Agu -\$54.20, 23 Agu -\$28.48, 24 Agu +\$26.66, 25 Agu -\$37.73, 26 Agu +\$8.99, 27 Agu -\$2.17, 28 Agu +\$2.40, 29 Agu -\$3.83, 30 Agu +\$1.46, 31 Agu +\$11.35, 1 Eyl +\$12.70, 2 Eyl +\$14.76, 3 Eyl +\$3.04, 4 Eyl -\$7.71, 5 Eyl -\$1.15. **Gozlem:** METAR-peak (1-dusus kilit + aktar, cap=12, MIN_ENTRY=0.05) guclu; Spread (radius=0, bias-top 15, max_entry=0.95) dusuk winrate — entry fiyati 0.30-0.95 araligindaki betler kayip yaratiyor. Backtest (05-17 Agu, radius=0 + max_entry=0.30) +\$53k vs canli -\$112 — config farki (max_entry 0.30 vs 0.95) ve piyasa rejimi degisimi olabilir.
 
 ---
 
