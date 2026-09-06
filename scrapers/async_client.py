@@ -38,7 +38,36 @@ except ImportError:  # pragma: no cover - exercised only on minimal CI
 
 import requests  # sync fallback / non-aiohttp path
 
+try:
+    import socks  # for SOCKS proxy error classification
+    _HAS_SOCKS = True
+except ImportError:
+    socks = None  # type: ignore
+    _HAS_SOCKS = False
+
 logger = logging.getLogger("SCRAPER_ASYNC")
+
+
+# ---- Connection error classification (2026-09-06) -------------------------
+# WARP SOCKS proxy "General SOCKS server failure" gibi hatalar
+# aiohttp.ClientError olarak yakalanmıyor -> retry tetiklenmiyor.
+# Bu fonksiyon hem aiohttp hem requests hem SOCKS hatalarını sınıflandırır.
+
+def _is_connection_error(exc: BaseException) -> bool:
+    """Bağlantı seviyesinde hata mı? (retry tetikleyici)"""
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return True
+    if _HAS_AIOHTTP and isinstance(exc, aiohttp.ClientError):  # type: ignore
+        return True
+    if _HAS_SOCKS and socks and isinstance(exc, (socks.GeneralProxyError, socks.ProxyError, socks.ProxyConnectionError, socks.SOCKS4Error, socks.SOCKS5Error)):  # type: ignore
+        return True
+    # requests exceptions
+    if isinstance(exc, requests.RequestException):
+        return True
+    # asyncio exceptions
+    if isinstance(exc, asyncio.TimeoutError):
+        return True
+    return False
 
 
 # ---- Public knobs (module-level so tests can monkeypatch) -------------
@@ -156,7 +185,9 @@ async def _async_fetch_one(
                         _cache_set(cache_key, None)
                     return None
                 return await resp.json()
-        except (TimeoutError, aiohttp.ClientError) as exc:  # type: ignore
+        except BaseException as exc:  # type: ignore
+            if not _is_connection_error(exc):
+                raise
             logger.warning("async fetch %s failed: %s", url, exc)
             # 2026-08-19: teknik hata aktivite akisina (dashboard'da gorunur).
             try:
