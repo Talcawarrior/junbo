@@ -247,7 +247,8 @@ def city_utc_offset(city_code: str, day: str, fallback_lon: Optional[float] = No
 
 
 def detect_peak(
-    day_rows: list[tuple[int, float]], min_local_hour: int = 13, utc_offset_hours: float = 0.0
+    day_rows: list[tuple[int, float]], min_local_hour: int = 13, utc_offset_hours: float = 0.0,
+    confirmation_minutes: int = 30
 ) -> tuple[Optional[float], bool]:
     """Gun icinde kumulatif max'i takip eder, zirve KILITLI mi doner.
 
@@ -267,12 +268,20 @@ def detect_peak(
     saat uzerinden: utc_offset_hours ile epoch'u sehir yerel saatine cevir,
     yerel saat >= min_local_hour ise peak say.
 
+    PEAK ONAYI (2026-09-07): 1-dusus tespitinden sonra `confirmation_minutes`
+    dakika bekleriz. Bu sure icinde sicaklik tekrar cummax'in USTUNE cikarsa
+    -> peak YANLIS ALARM, kilitlenmez. Sure doldugunda ve temp < cummax ise
+    zirve KESIN kilitlenir.
+
     Returns: (kilitli_max, is_confirmed). is_confirmed=False ise henuz zirve
     teyit edilmemis (hala yukselebilir).
     """
     if len(day_rows) < 3:
         return (day_rows[-1][1] if day_rows else None, False)
     cummax = day_rows[0][1]
+    peak_candidate = None  # aday zirve (1. dusus oldugunda set edilir)
+    candidate_time = None  # aday zirvenin zaman epoch
+    confirmation_seconds = confirmation_minutes * 60
     for i in range(1, len(day_rows)):
         epoch, cur = day_rows[i]
         # Yerel saat: UTC epoch + sehir offset
@@ -283,14 +292,24 @@ def detect_peak(
             continue
         if cur > cummax:
             cummax = cur
+            # yeni max -> aday sifirla (yeni zirve adina)
+            peak_candidate = None
+            candidate_time = None
         elif cur < cummax:
-            # 2026-08-18 kullanici karari: 1 dusus YETERLI — 20 21 22 22 21
-            # orneginde 22'yi kilitler, ikinci dusus beklenmez. Erken giris:
-            # fiyat daha 0.99'a oturmadan girilir; zirve asilirsa kapat +
-            # yeni zirveye ac (jobs/metar_peak.py aktar mantigi).
-            return cummax, True
-        else:  # esit -> dusus sayilmaz
-            pass
+            if peak_candidate is None:
+                # ILK DUSUS: aday zirve = cummax, onay saati baslat
+                peak_candidate = cummax
+                candidate_time = epoch
+            else:
+                # ADAY VAR: onay suresi kontrolu
+                if epoch - candidate_time >= confirmation_seconds:
+                    # Onay suresi doldu, temp hâlâ cummax altinda -> KILIT
+                    return peak_candidate, True
+                # Hala onay sure icinde -> bekle (False don)
+        else:  # cur == cummax
+            # Esit degere donmus -> aday iptal (zirve tekrar test edildi)
+            peak_candidate = None
+            candidate_time = None
     return cummax, False
 
 

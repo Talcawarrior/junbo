@@ -758,7 +758,7 @@ def run_metar_peak_bets() -> int:
             # peak tespit olursa KESIN o zaman kilit olsun" — detect_peak HER
             # modda calisir; gercek 1-dusus kilidi varsa durumda KILIT gorunur,
             # erken giris ancak kilit yokken gosterilir (aktar yine cur_max'tan).
-            pk_lock, cf_lock = detect_peak(day_rows, utc_offset_hours=utc_offset)
+            pk_lock, cf_lock = detect_peak(day_rows, utc_offset_hours=utc_offset, confirmation_minutes=30)
             if early_attempt and avg_hour is not None:
                 local_now_hr = (time.time() + utc_offset * 3600.0) % 86400.0 / 3600.0
                 if local_now_hr < avg_hour:
@@ -834,7 +834,7 @@ def run_metar_peak_bets() -> int:
                 )
                 _mkt_price = float(_bkt.yes_price) if _bkt is not None and _bkt.yes_price is not None else 0.0
                 if _mkt_price > EARLY_MAX_PRICE:
-                    pk_l, cf_l = detect_peak(day_rows, utc_offset_hours=utc_offset)
+                    pk_l, cf_l = detect_peak(day_rows, utc_offset_hours=utc_offset, confirmation_minutes=30)
                     if not cf_l or pk_l is None:
                         continue  # pahali + kilit yok -> bekle
                     peak = pk_l
