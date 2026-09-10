@@ -1,8 +1,221 @@
 # Gelistirici Notlari — Junbo Bot
 
-**Son guncelleme:** 2026-08-08 — Turkiye karakter kurali projenin AGENTS.md'sinde; bu dosya gelistirici kurallari ve teknik referansi tek yerde tutar.
+**Son guncelleme:** 2026-09-10 — Turkiye karakter kurali projenin AGENTS.md'sinde; bu dosya gelistirici kurallari ve teknik referansi tek yerde tutar.
 
 ---
+
+## 0. BOTUN CALISMA PRENSIBI (TAM AKIS)
+
+### 0.1 Genel Bakis
+Junbo, Polymarket'te sicaklik bahisleri yapan PAPER MODE (DRY_RUN) bir b ottur. Bot, hava durumu tahminleri ve METAR (havalimani sicaklik) verisini kullanarak bahis acar.
+
+**Temel strateji: METAR-peak** — havalimani sicaklik verisinden gunluk zirveyi tespit eder, Polymarket'te dogru bucket'a YES bahsi acar.
+
+### 0.2 Veri Akisi (Sirali)
+
+```
+1. METAR VERISI (her 30 dk)
+   Kaynak: aviationweather.gov (NOAA, bedava)
+   Veri: Son 30 saatlik sicaklik gozlemleri (her 30 dk'da 1 gozlem)
+   Arsiv: metar_observations tablosu (tarih kisitli API'nin disinda kalici saklama)
+   Islem: Her sehir icin sicaklik serisi cekilir, peak tespit edilir
+
+2. HAVA DURUMU TAHMINLERI (her 30 dk)
+   Kaynak: Open-Meteo + WeatherAPI (bedava + $10/ay)
+   Veri: temperature_max/min, 8 kaynak (ECMWF, GFS, ICON, UKMO, vb.)
+   Tablo: weather_forecasts
+   Islem: Her acik market icin tahminler cekilir, kalibrasyon uygulanir
+
+3. PIYASA VERISI (surekli)
+   Kaynak: Polymarket CLOB API (WebSocket + REST)
+   Veri: Fiyatlar (yes_price/no_price), orderbook derinligi
+   Tablolar: weather_markets (fiyat), orderbook_snapshots (gecmis)
+   Islem: Canli fiyat takibi, stale fiyat kontrolu
+
+4. ANALIZ (her dongude)
+   Girdi: Tahmin + Piyasa fiyati + Kalibrasyon
+   Islem: Edge hesaplama, Kelly criterion, pozisyon buyuklugu
+   Cikti: Sinyaller (ac/kapat/hold)
+
+5. BAHIS ACMA (her dongude)
+   Girdi: Sinyaller + Risk sinirlari + Portfoy durumu
+   Islem: Paper bet acma (DRY_RUN=true)
+   Cikti: bets tablosuna yazma
+
+6. SETTLEMENT (her dongude)
+   Islem: Polymarket'ten sonuc cekme, PnL hesaplama
+   Cikti: bets tablosu guncelleme, portfolio guncelleme
+```
+
+### 0.3 METAR Peak Tespit Mekanizmasi (Detayli)
+
+```
+GIRIS: aviationweather.gov'dan her sehir icin son 30 saatlik METAR serisi
+
+ADIM 1: YEREL SAAT ESIGI
+- Peak tespiti SADECE yerel saat >= 13:00'ten sonra calisir
+- Neden: Sabah/gece sicakligi peak degildir, gunesin dogdugu saatlerde sicaklik yukselir
+- Ornegin: Hong Kong (UTC+8) -> 05:00 UTC = 13:00 HK, o saatten once peak yok
+
+ADIM 2: KUMULATIF MAX TAKIBI
+- Her gozleme gore kumulatif max guncellenir
+- Ornek: 20 -> 21 -> 22 -> 23 -> 22 (max=23, ilk dusus)
+
+ADIM 3: PEAK ADAYI (1 dusus kurali)
+- Kumulatif max'tan ilk dusus goruldu -> peak_candidate = max
+- Dusus = sicaklik onceki gozleme gore dustu (esitlik dusus sayilmaz)
+- Neden 2 degil 1: Hizli piyasada 2. dususu beklerken fiyat duser, firsat kaybolur
+
+ADIM 4: ONAY PENCERESI (30 dk)
+- Peak adayi goruldu: candidate_time = simdi
+- 30 dk boyunca sicaklik peak_candidate ALTINDA kalmali
+- Eger 30 dk icinde sicaklik tekrar peak_candidate'e cikarsa -> YANLIS ALARM
+- Ornek LA vakasi: 23.6C peak -> 1 dusus -> 30 dk icinde 27.3C'ye cikti -> KILITLENMEDI
+
+ADIM 5: KILITLENME
+- 30 dk doldu + sicaklik hala peak_candidate altinda -> peak KILITLENDI
+- Kazanan bucket = round(peak_candidate)
+- Ornegin: peak=23.6C -> round(23.6)=24 -> "Will highest be 24C?" market'ine YES
+
+ADIM 6: BAHIS ACMA
+- Polymarket'te ilgili bucket market'ini bul (temperature_max, RANGE, dogru tarih)
+- Entry fiyati = CLOB canli ask fiyati (orderbook'dan)
+- Stake = config'den (default $5)
+- Stale fiyat kontrolu: entry fiyati orderbook ask ile %10'dan fazla saparsa iptal
+
+ADIM 7: ZIRVE ASILMASI (chain)
+- Eger kilitleme sonrasi sicaklik peak'i asarsa (24 -> 25 -> 26)
+- Eski bucket bahsi KAPATILIR (rotation)
+- Yeni peak'in bucket'ina YENI bet acilir
+- Bu zincir 22->23->24->25 seklinde devam edebilir
+- Her adimda sadece 1 aktif bet olur (eski kapatilir, yeni acilir)
+```
+
+### 0.4 Sehir Ismi vs ICAO Kodu Karismasi (KRITIK BILGI)
+
+Bot 3 farkli sehir temsili kullanir:
+
+| Temsil | Ornek | Kullanan Tablo |
+|--------|-------|----------------|
+| **ICAO kodu** | KLAX, EGLL, RKSI | weather_markets.city_code, weather_forecasts.city |
+| **Sehir adi** | Los Angeles, London, Seoul | weather_markets.city, bets.city |
+| **Polymarket ID** | 3352310, 3352334 | weather_markets.id, bets.market_id |
+
+**Eslesme kurallari:**
+- `weather_markets.city_code` (ICAO) = `weather_forecasts.city` (ICAO) -> birebir eslesir
+- `weather_markets.city` (sehir adi) != `weather_forecasts.city` (ICAO) -> ESLESMEZ
+- `bets.city` (sehir adi) != `weather_markets.city_code` (ICAO) -> ESLESMEZ
+- `weather_markets` tablosu: hem `city` (sehir adi) hem `city_code` (ICAO) var
+- `weather_forecasts` tablosu: SADECE `city` (ama ICAO kodu icerir!)
+- `bets` tablosu: SADECE `sehir adi` icerir
+
+**Veri kaynaklarindaki karismasi:**
+- ASIAbot bot_backup.db: TUM forecast'larda ICAO kodlari (KLAX, EDDM, vb.)
+- ASIAbot bot_test.db: COGUNLUKLA ICAO ama BAZILAR sehir adi (London, Paris, vb.)
+- Junbo backups: ICAO kodlari
+- Open-Meteo/WeatherAPI: ICAO kodlari kullanir
+
+**Dogru eslesme icin:**
+- Sehir adi -> ICAO: `weather_markets.city_code` lookup tablosu kullanilir
+- ICAO -> sehir adi: `weather_markets.city` lookup tablosu kullanilir
+- Forecast restore ederken: source.city (ICAO veya sehir adi) -> target weather_markets.city_code eslesmeli
+
+### 0.5 Settlement (Kapanis) Mekanizmasi
+
+```
+SETTLEMENT SURECI:
+1. Polymarket'te market kapanir (target_date + 12 saat)
+2. Bot settlement dongusunde kapanis fiyati ceker
+3. YES bet icin: kapanis fiyati > 0.50 -> KAZAN (1.00 - kapanis) * stake / entry
+4. YES bet icin: kapanis fiyati <= 0.50 -> KAYBET (tum stake)
+5. realized_pnl hesaplanir, bets tablosuna yazilir
+6. Portfolio guncellenir
+
+KAPANIS TURLERI:
+- won: market settle edildi, biz kazandik
+- lost: market settle edildi, biz kaybettik
+- closed: erken kapatma (rotation, stop-loss vb.)
+- closed_early: zaman erken kapatma
+
+ROTATION KAPANIS:
+- Peak asilmasi sonrasi eski bucket beti kapatilir
+- close_reason = 'rotation'
+- settled_at = kapanis zamani (yeni eklendi, 2026-09-08)
+- realized_pnl = kapanis fiyatinin bet sonucu
+```
+
+### 0.6 Kalibrasyon ve Tahmin Agirligi
+
+```
+8 TAHMIN KAYNAGI:
+1. ecmwf_ifs025  (Avrupa Merkezi) - en iyi genel performans
+2. gfs_seamless  (ABD NOAA)
+3. icon_global   (Avrupa/Almanya)
+4. ukmo_seamless (Ingiltere)
+5. meteofrance_seamless (Fransa)
+6. jma_seamless  (Japonya)
+7. gem_global    (Kanada)
+8. cma_grapes_global (Cin)
+
+KALIBRASYON:
+- historical_calibrations tablosu: sehir x model x metric -> MBE (Mean Bias Error)
+- Kalibrasyon referansi: METAR istasyon max/min (Open-Meteo degil)
+- Fallback: bilinmeyen model/sehir icin tum modellerin ortalamasi
+- Kalibrasyon gunde 1 kez tazelenir (evolution_job.py)
+- Rolling window: 30-90 gunluk veri ile bias hesaplama
+
+DOGRU OLCUM ICIN:
+- Metarpeak kaybi: collect_settlement_temps.py -> WU gercek sicaklik + Polymarket bucket parse
+- Tahmin basarisi: compute_forecast_winners_final.py -> hangi model en yakin tutturdu
+- Bias dogrulama: backfill_calibration.py --source metar
+```
+
+### 0.7 Bot Donguleri (7 Aktif Loop)
+
+| Loop | Suresi | Is |
+|------|--------|---|
+| scan_and_bet | ~30 sn | Market tarama -> analiz -> bahis acma |
+| settlement | ~60 sn | Kapanis kontrolu, PnL guncelleme |
+| price_poller | ~30 sn | Canli fiyat guncelleme (CLOB REST) |
+| snapshot | 30 dk | Market snapshot arsivleme |
+| clob_stream | surekli | WebSocket canli fiyat |
+| metar | ~30 dk | METAR cekme, peak tespit, bet acma |
+| weather_fetch | ~30 dk | Open-Meteo tahmin cekme |
+
+### 0.8 Risk Kontrolleri
+
+- `DRY_RUN=true` kod seviyesinde sabit (canli trade ASLA)
+- `max_bet_pct=0.10` (portfoy %10'u max tek bet)
+- `total_exposure_pct=0.50` (portfoy %50'si max acik pozisyon)
+- `spread_max_entry=0.50` (0.50 ustu fiyata bet acilmaz)
+- `spread_min_entry=0.10` (0.10 alti fiyata bet acilmaz)
+- `spread_blacklist`: Amsterdam, Hong Kong, Seoul, Moscow, Paris
+- Stale fiyat guard: orderbook ask ile %10 sapma varsa bet REDDEDILIR
+- Peak onay: 30 dk confirmation window (erken kilit onlenir)
+
+### 0.9 Veri Konumlari (KONTROL ZORUNLU)
+
+Veri yok demeden once SU KONUMLARA BAKILACAK:
+
+| Konum | Icerik | Boyut |
+|-------|--------|-------|
+| `junbo\data\bot.db` | Ana veritabani (bet, forecast, metar, market) | ~700MB |
+| `junbo\data\orderbook.db` | CLOB orderbook snapshotlari | ~2.4GB |
+| `junbo\data\backups\` | Gunluk bot DB backuplari (476 dosya) | ~50GB |
+| `D:\JUNBO data\backups\` | Dis kaynak backuplari | ~100GB |
+| `D:\ASIA data\bot_backup.db` | ASIAbot forecast (390k kayit, 15-24 Agu) | 762MB |
+| `D:\ASIA data\bot_test.db` | ASIAbot forecast (153k kayit, 19-28 Agu) | 762MB |
+| `D:\ASIA data\junbo_bot.db` | Junbo eski snapshot (67k forecast, 15-24 Agu) | 316MB |
+| `D:\HEAT data\era5\` | ERA5 tarihsel veri + kalibrasyon sample | 2 dosya |
+| `D:\HEAT data\weather_data\` | Sehir listesi, NOAA istasyon verisi | 4 dosya |
+| `ASIAbot\data\bot.db` | ASIAbot ana DB (forecast yok, 23k market) | ~750MB |
+
+**MEVCUT VERI DURUMU (2026-09-10):**
+- weather_forecasts: 42,800 kayit (19 Agu - 10 Eyl)
+- metar_observations: 73,213 kayit (1 Agu - 10 Eyl)
+- bets: 2,209 kayit (6 Agu - 9 Eyl)
+- orderbook_snapshots: ~5M kayit (16 Agu - 10 Eyl)
+- weather_markets: 31,706 kayit (4 Agu - 15 Eyl)
 
 ## 1. ZORUNLU: Her Kod Degisikligi Sonrasi
 
