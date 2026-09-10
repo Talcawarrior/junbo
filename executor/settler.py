@@ -202,6 +202,20 @@ class SettlementEngine:
             bet.status = "won" if bet_won else "lost"
             bet.settled_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
+            # Poly settlement outcome: gercek sicakligi kaydet
+            try:
+                actual_temp = self._fetch_actual_temp(bet.city, bet.settled_at)
+                outcome_info = {
+                    "settlement_temp_c": actual_temp,
+                    "settlement_temp_f": actual_temp * 9/5 + 32 if actual_temp else None,
+                    "source": "wu_weather_underground",
+                    "collected_at": datetime.now(timezone.utc).isoformat(),
+                }
+                if actual_temp:
+                    bet.outcome = json.dumps(outcome_info)
+            except Exception:
+                pass
+
             stake = float(bet.amount or 0)
             entry_price = float(bet.entry_price or bet.price or 0.5)
             # Load entry_fee stored at bet placement time (default 0 for pre-migration bets)
@@ -239,6 +253,27 @@ class SettlementEngine:
             # raw_data populated inside _fetch_market_resolution
 
         return {"won": bet_won_count, "lost": bet_lost_count, "pnl": total_market_pnl}
+
+    # ── Gercek sicaklik toplama ──────────────────────────────────────────────
+
+    def _fetch_actual_temp(self, city: str, settled_at: datetime) -> float | None:
+        """Poly settlement'ta kullanilan gercek sicakligi actuals.db'den ceker."""
+        try:
+            date_str = settled_at.strftime("%Y-%m-%d") if settled_at else None
+            if not date_str or not city:
+                return None
+            import sqlite3 as _sqlite3
+            conn = _sqlite3.connect("data/actuals.db")
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT temperature_2m_max FROM actual_temperatures WHERE city = ? AND date = ?",
+                (city, date_str),
+            )
+            row = cur.fetchone()
+            conn.close()
+            return float(row[0]) if row and row[0] else None
+        except Exception:
+            return None
 
     # ── Gamma API resolution ───────────────────────────────────────────────
 

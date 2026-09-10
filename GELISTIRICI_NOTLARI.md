@@ -268,6 +268,13 @@ Test gecmeden commit/push/bot restart YOK. Basarisiz test "pre-existing" diye at
    - `D:\HEAT data\` (heat verileri: gfs_archive, weather_data, era5)
    - `D:\ASIA data\` (asia verileri: junbo_bot.db, bot_backup.db, bot_test.db)
    - Bot backup'lari (her 6 saatte 1 kayit: `bot_YYYYMMDD_HHMMSS.db`)
+9. **POLYMARKET SETTLEMENT KAYDI ZORUNLU** — Her kapanan bet icin:
+   - `outcome` kolonuna gercek sicaklik (actuals.db'den) JSON olarak kaydedilir
+   - `settled_at` kolonu Poly kapanis zamani olarak guncellenir
+   - Settlement verisi asla silinmez veya uzerine yazilmaz
+   - Bu veri, METAR basarisi analizi ve backtest icin KULLANILIR
+   - Poly settlement source: Weather Underground (WU) - resolutionSource alanindan dogrulanmistir
+   - `collect_settlement_temps.py` WU sicakligini, `settler.py` outcome kolonunu gunceller
 
 ---
 
