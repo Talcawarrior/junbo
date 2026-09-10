@@ -40,11 +40,21 @@ Test gecmeden commit/push/bot restart YOK. Basarisiz test "pre-existing" diye at
 ## 2. KRITIK YASALAR (dokunulmaz)
 
 1. **`database/db.py`'ye ASLA dokunulmaz** — engine, SessionLocal, DB_PATH kritik altyapi. Degisiklik gerekiyorsa ayni modulun disinda yap (testlerde `importlib.reload`).
-2. **Gerçek DB asla direkt SQL ile degistirilmez** — tum islemler API/uygulama katmanindan. Testler temp DB kullanir (`conftest.py`).
+2. **Gercek DB asla direkt SQL ile degistirilmez** — tum islemler API/uygulama katmanindan. Testler temp DB kullanir (`conftest.py`).
 3. **DRY_RUN=true kalici** — `executor/bet_placer.py` `_live_allowed = False` kod seviyesinde sabit. Kullaniciya canli trade onerilmez.
 4. **TURKCE KARAKTER YASAK** — kodda, yorumda, commit mesajinda, log mesajinda `ç ğ ı ö ş ü` kullanilmaz. Yerine `c g i o s u` yazilir (mojibake onleme).
 5. **Sadece istenen degisikligi yap** — hedef disindaki kodu, stili, yerlesimi EZME.
 6. **Minimal diff** — en kucuk degisimle coz.
+7. **VERI ASLA SILINMEZ, BOZULMAZ, OVERWRITE EDILMEZ** — forecast, metar, price, calibration verisi dahil tum veri kaynaklari KALICIDIR. Yeni veri SADECE INSERT ile eklenir. Eski veri query ile okunur ama ASLA guncellenmez veya silinmez.
+8. **Veri kaynagi kontrol zorunlulugu** — "veri yok" denmeden ÖNCE su konumlar kontrol edilir:
+   - `C:\Users\fdemir\Documents\New project\junbo\data\*.db` (ana proje)
+   - `C:\Users\fdemir\Documents\New project\junbo\data\backups\` (junbo backuplari)
+   - `C:\Users\fdemir\Documents\New project\ASIAbot\data\*.db` (asiabot)
+   - `C:\Users\fdemir\Documents\New project\Heat\` (heat projesi)
+   - `D:\JUNBO data\backups\` (junbo dis kaynak)
+   - `D:\HEAT data\` (heat verileri: gfs_archive, weather_data, era5)
+   - `D:\ASIA data\` (asia verileri: junbo_bot.db, bot_backup.db, bot_test.db)
+   - Bot backup'lari (her 6 saatte 1 kayit: `bot_YYYYMMDD_HHMMSS.db`)
 
 ---
 
