@@ -1,6 +1,6 @@
 # Gelistirici Notlari — Junbo Bot
 
-**Son guncelleme:** 2026-09-10 — Turkiye karakter kurali projenin AGENTS.md'sinde; bu dosya gelistirici kurallari ve teknik referansi tek yerde tutar.
+**Son guncelleme:** 2026-10-04 — Turkiye karakter kurali projenin AGENTS.md'sinde; bu dosya gelistirici kurallari ve teknik referansi tek yerde tutar.
 
 ---
 
@@ -237,7 +237,7 @@ python -m pytest tests/test_e2e_system.py tests/test_integration_e2e.py tests/te
 python -m pytest tests/test_accounting.py tests/test_settler_polymarket.py tests/test_signals_active_positions.py --tb=short -q
 
 # 6) FULL suite (push oncesi)
-python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q
+python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --ignore=tests/test_replay_engine.py --tb=short -q
 # HEDEF: "667 passed, 8 skipped, 0 failed" (2026-08-16 itibari; tsc --noEmit = 0 hata)
 
 # 7) Dokumantasyon senkronu (ZORUNLU, agents.md kurali)
@@ -396,6 +396,12 @@ Hangi dosya hangi kurali korur:
 | **REPLAY testi: production DB kopyasi (2026-08-08)** | Sentetik testler gercek DB'deki durumlari yakalayamaz. `scripts/replay_test.py` production bot.db'yi kopyalar, kopya uzerinde settle_all + reopen calistirir: kapanisi (target+12h) gecmemis market expired YAPILMAMALI + reopen crash'siz. Neden pytest DEGIL script: conftest DB_PATH'i temp DB'ye cevirir, bot_config singleton ilk importta donar — replay pytest icinde calisamaz. Kullanim: `python scripts/replay_test.py` (cikis 0=OK). 2026-08-08 dogrulama: 3064 market, 0 yanlis expired, 7 acik-bet'siz SL grubu islendi (gate reddi) **2026-08-12: `scripts/replay_test.py` KALDIRILDI (reopen mekanizmasi silindi) — kayit tarihseldir.** |
 | **`_fetch_open_meteo_model` tanimsiz idi (2026-08-09)** | `scrapers/meteo.py` `fetch_for_markets` icinde tanimsiz `self._fetch_open_meteo_model(...)` cagilisi ilk model'da `AttributeError` -> `except Exception`'a dusup SESSIZCE 0 satir uretiyordu (8-modelli per-model loop etkisiz) + ayni (lat,lon,date) icin cift istek riski. Cozum: kirlik loop ve kullanilmaz `openmeteo_models` listesi **silindi**; canli yol `fetch_all_markets` → `get_multi_model_forecast` ve aggregate `_fetch_open_meteo`/`_fetch_weatherapi` KORUNDU. Test: `test_meteo.py` |
 | **DB bakimi ANALYZE+VACUUM eksikti (2026-08-09)** | Dosya buyudukce istatistikler eskimeyor, boyut artiyordu; `ANALYZE`/`VACUUM` hic calismiyordu. Cozum: `scripts/db_maintenance.py` (wal_checkpoint(TRUNCATE) → ANALYZE → VACUUM) + `data_watchdog` icinde **gunde 1 kez 02:00-04:00 UTC** penceresinde (`data/.last_db_maintenance` marker). VACUUM canli bot ile lock riski → sessiz pencere secildi. Ilk run: bot.db 157.88MB → 146.58MB (~11.3MB save) |
+| **watchdog `_find_bot_pids` wmic Win11'de yok + ASIAbot taskkill filtresi tutmuyordu (2026-09-24)** | `wmic` Windows 11'de kaldirilmis; `subprocess.run(["wmic", ...])` exception -> except sessizce yutuyor -> `_find_bot_pids` HEP `[]` donuyordu (restart yolu sahte botlari bulamiyordu). Ayrica ASIAbot `stop_bot` `taskkill /FI "IMAGENAME eq python.exe" /FI "WINDOWTITLE eq *main.py bot*"` kullaniyordu; bot `pythonw.exe` (penceresiz, title yok) ile calistigi icin filtre HIC tutmuyor, her restart yeni kopya doguruyordu (CPU %97'ye cikmisti: 2 bot kopyasi + 1 cekirdek yiyen watchdog). COZUM: iki projede de `powershell Get-CimInstance Win32_Process + ConvertTo-Csv + csv.DictReader` (junbo `python.exe`, ASIAbot `pythonw.exe` filtresi); ASIAbot `stop_bot` PID-bazli kill'e cevrildi; yetim kopyalar olduruldu, tek bot (8092) + taze watchdog birakildi. Heat `watchdog.ps1` zaten Get-CimInstance kullaniyor (sorun yok); HORSE'ta watchdog/kill mantigi yok (tek seferlik task'lar, MultipleInstancesPolicy=IgnoreNew) — degisiklik yok. TEST: `_find_bot_pids` fonksiyonel dogrulama (ASIAbot canli [2384] buldu), `py_compile` + `ruff check --ignore F401` temiz. |
+| **MeteoConfig eksik alanlar import crash (2026-09-24)** | `utils/weather_sources.py` module-level `bot_config.meteo.iem_url/nws_url/aviation_url/vc_url` okuyordu ama `MeteoConfig`'te bu alanlar HIC yoktu -> import her zaman `AttributeError` (`test_import_all_modules` kirmizi). COZUM: `config/settings.py::MeteoConfig`'e 5 alan + `vc_api_keys` listesi + `next_vc_key()/rotate_vc_key()` eklendi; `__post_init__`'te `.env` override (`IEM_URL/NWS_URL/AVIATION_URL/VC_URL/VC_API_KEY/VC_API_KEYS`). TEST: import + deger dogrulama OK; `test_faz25_35` + `test_strategy_selection` 32 passed. |
+| **27 dead public function — yeni job/backtest/research yardimcilari (2026-09-24)** | `backtest/engine.py` (3), `backtest/run_combos.py` (1), `jobs/new_city_job.py` (3), `jobs/heat_mos_job.py` (1), `jobs/collect_settlement_temps.py` (5), `utils/weather_sources.py` (4), `research/ou_model.py` (3), `scripts/*` (7) — hepsi kendi dosyasinda kullaniliyor (wired `maybe_run`/`evaluate_all`/`__main__` uzerinden). COZUM: `test_latent_bugs.py::ALLOWED_DEAD`'e 27 + `replay/fidelity.py` icin 2 isim eklendi (gerekceli). TEST: `test_no_dead_public_functions` gecer. |
+| **46 ruff hatasi (E402/E501/E741/F841) sifirlandi (2026-09-24)** | `backtest/run*.py` E402 noqa + `l`->`ls` + SQL wrap; `main.py`, `async_client.py`, `scripts/_*.py`, `add_indexes.py`, `analyze_peak_hour.py` satir wrap (cikti birebir korundu); `test_regression_fixes.py` `engine`->`_engine`. TEST: `ruff check . --ignore F401` temiz. NOT: tumu baska oturumun kirli agacindaki pre-existing hatalardi. |
+| **`replay/fidelity.py` yazildi, `replay` engine HIC YOK (2026-09-24)** | `tests/test_replay_fidelity.py` (untracked WIP) `replay.fidelity` import ediyordu ama paket mevcut degildi -> collection ERROR. COZUM: test spesifikasyonuna sadik saf modul yazildi (`strategy_of`, `compare_replay_vs_live`: market_id + 15dk + 0.05 tolerans, float epsilon'lu; gunluk `days`, strateji kirilimi). TEST: 8 passed. ACIK: `tests/test_replay_engine.py` `replay.main`/`replay.seeding` (tam motor: ReplayClock, raporlar) istiyordu — bu kod HIC yazilmamis. KARAR (2026-09-24, kullanici): motor yazilmayacak, test ignore listesine alindi (`pytest.ini` addopts + agents/README/CI/pre-commit senkron). |
+| **Pre-existing kirmizilar — stash ile kanitlandi (2026-09-24)** | `test_real_flow.py` x2 COZULDU: `place_spread_bets`'e commit 8c2258b ile `min_entry_price=0.10` tabani gelmisti, test tohumlari 0.05'te kalmisti (7 skip) -> tohumlar 0.15 yapildi, 11/11 gecer. `test_settlement_gate.py` x2 arastirildi: (a) Panama City tek beti BUGUN acilmis + HEAT overlap SIFIR (olcumu imkansiz) -> dosyaya notr `{0.0, n:0}` girildi (backtest davranisi degismez, `normalized_heat_settlement` zaten bilinmeyene 0.0 uygular), coverage testi gecer; (b) Hong Kong -0.10 (n=34) vs taze +1.40 (n=5, aralik -1.0..+3.3) -> 34 orneklem 5 gurultulu ornekle EZILMEDI, kapi bilerek kirmizi birakildi (kullanici karari; veri birikince yeniden olcum). Yan bulgu: bu test prod `bot.db` + `D:\` yolunu direkt okur (conftest bypass) — hermetik degil. |
 | **BAYAT FİYATLA BET ACILDI (2026-08-10)** | Beijing 32°C (10 Ağu) marketine 08:59 UTC'de **0.18'e** bet acildi; gerçek CLOB book fiyati o an **~0.98** idi (Gamma `outcomePrices` ~1 saat bayat kaldi; snapshot'larda 01:42→08:54 arasi 7 saatlik bosluk vardi). Bot, bet acarken sadece DB'deki `market.yes_price`'ı (Gamma'dan) kullaniyor, gerçek işlem fiyatini CLOB'dan dogrulamiyordu → paper fill gercekte hic var olmamis fiyattan. Cozum: `utils/clob_live.py` eklendi — `raw_data`'dan `clobTokenIds[0]` (YES) cikarir, CLOB `/book`'tan canli ask/bid ceker; `bet_placer.open_bet_on_market` + `place_bet` artık bet acmadan once canli fiyatla DB fiyatini karsilastirir, sapma > %15 ise **bet reddedilir** (stale guard; CLOB erisilemezse eski davranis korunur). Test: `tests/test_clob_live.py` (12 test) |
 | **Acik betlerde bayat giris fiyati (2026-08-10, elle duzeltildi)** | Ayni bayatlik 41 acik betten **17'sini** etkilemisti (Beijing %81.5, Hong Kong %57.1, Seoul %61.2, Tokyo %76.4, KL %76.3...). `scripts/fix_stale_entry_prices.py` yazildi: her acik betin CLOB fiyat gecmisinden `placed_at` anindaki gercek fiyati ceker, %15+ sapma olanlarda entry_price/price/fair_value/shares/current_price/entry_fee/unrealized_pnl'i canli bot formulleriyle yeniden hesaplar (dry-run varsayilan, `--apply` yazar). **2026-08-10 uygulandi**: 17 bet duzeltildi, DB backup `data/backups/bot_pre_pricefix_*.db`. Kapanmis/arsiv betlere dokunulmadi (PnL gerceklesmis). Test: `tests/test_fix_stale_entry_prices.py` (9 test) — token cikarimi, düzeltme matematigi, sapma esigi |
 | **KALIBRASYON bos — model bias duzeltilmiyordu (2026-08-10)** | `historical_calibrations` tablosu **0 satir**; `jobs/evolution_job.py::_run_calibration_backfill` bos govde (sadece log). Sonuc: Busan (MBE -2.9C), Seoul (-1.5C), LA (+1.9C) gibi sistematik model sapmalari tahminlere yansimiyordu — edge hesaplari bias'li tahminlerle yapiliyordu. Cozum: (1) `scripts/backfill_calibration.py` — junbo'nun **kendi verisiyle** (`weather_forecasts` per-model × `actuals.db` Archive) `historical_calibrations`'i **58,064 satirla** doldurdu (8 model × 48 sehir × max/min, INSERT OR REPLACE, idempotent). (2) `utils/calibration.py` — ASIAbot'tan tasinan `CalibrationEngine` (sehir/model MBE map, `raw - MBE`), lazy singleton. (3) `engine/calculator.py` `latest_by_source`'ta her model tahmini kalibre edilir (bias_map yoksa eski davranis korunur). (4) `_run_calibration_backfill` artik gunde 1 kez backfill script'ini calistirir + bias map'i tazeler. Test: `tests/test_calibration_engine.py` (7 test). Dogrulama: Busan max gfs raw=30 -> 33.26, Seoul max gfs raw=31 -> 35.09, bilinmeyen sehir degismez. Ayrica `test_bot_loop.py::test_cleanup_stale_bets_cancels_only_stale` sabit tarihler (08-08) kullandigindan bugun (08-10) 48h sinirini asip flaky oluyordu — goreli tarihlerle duzeltildi **2026-08-12: `_cleanup_stale_bets` ve testi KALDIRILDI (kapanis uretmiyordu) — kayit tarihseldir.** |
@@ -431,6 +437,7 @@ Hangi dosya hangi kurali korur:
 | **3 ESIK + PEAK'TE KOMSU SATISI (2026-08-16)** | Kullanici fikri: "3'lü esik acarsak, peak yaklasirken komsu esikler de yukselir. Gercek esik bizim esiklerimizden biriyse, diger 2 komsuyu HEMEN satarsak (millet uyanmadan) onlardan da para kazaniriz." Cozum: `spread_radius` 0 -> 1 (merkez+-1; `.env` + `config/settings.py:172`). Artik T-2'de 3 esige de dusuk fiyattan girilir; peak gunu kilitlenince kazanan bucket TUTULUR, komsular `_close_wrong_bucket_bets` ile canli fiyattan satilir. Mantik: RANGE marketlerde sadece 1 bucket kazanir ama komsu esikler peak oncesi belirsizlikle degerli olur; peak kilitlenme ani ile piyasa tepkisi arasindaki pencerede satmak kar getirebilir. YARIN 17 Agu orderbook verisiyle dogrulanacak (komsu fiyatlar peak oncesi yukseliyor mu, pencere genisligi, net kar) — YAPILACAKLAR.md. Test: `test_spread_opens_three_legs_around_center` (24,25,26 esikleri acilir). Suite: 668 -> 667 passed. |
 | **METAR PARALEL FETCH + CLOB REST YEDEGI + LIMIT 120 (2026-08-17)** | (1) **METAR timeout:** `run_metar_peak_bets` 40 sehri TEK TEK `fetch_metar_day` ile cekiyordu (her biri 1-5s ag) -> toplam ~80s > `_FETCH_TIMEOUT=60` -> "METAR poll timed out" -> peak'ler kaciyordu (kullanici: "surekli sorun cikiyor"). Cozum: `ThreadPoolExecutor(max_workers=8)` ile paralel fetch (benzersiz city_code/day bazinda, cache'li), 40 sehir ~35s'de biter. `_FETCH_TIMEOUT` metar_peak.py'ye sabit olarak tanimlandi (bot_loop'tan import circular). (2) **CLOB WS proxy:** `ws-subscriptions-clob` geo-block (direct -> getaddrinfo failed) + WARP SOCKS WS desteklemiyor (`General SOCKS server failure`). aiohttp_socks kuruldu (socks5 scheme, socks5h desteklenmez). `clob_stream_loop` WS 3 kez fail edince `_clob_rest_poll_once`'e gecer: REST GET /book (proxy ile calisir) ile acik marketlerin best_ask'ini orderbook.db'ye arsivler (5dk'da bir). Orderbook verisi boylece toplanmaya devam eder (17 Agu: 23.9k satir). (3) **Gunluk limit:** `spread_max_bets_per_day` 40 -> 120 (kullanici "Toplam 120"). 40 iken 17+18 Agu'ya 46 bet acilmis, `remaining = 40-46 = 0` -> 19 Agu'ya (285 market, forecast hazir) HIC bet acilamiyordu (`skipped: 23`). 120 ile 19 Agu'ya 56 bet acildi. Suite: 667 passed. |
 | **DASHBOARD MOJIBAKE — api.py Turkce karakter bozuklugu (2026-08-21, kullanici bildirimi)** | Kullanici: "Uyarılar ve Bayraklar ... kayÄ±p ... sonuÃ§lanan ... turkce karakter sorunu". api.py icindeki 35 satir Windows-1252 mojibake (UTF-8 Turkce karakterlerin cift-encodlanmis gorunumu) idi: red-flags, bet listesi, tarih/yan/format string'leri. Cozum: `s.encode('cp1252').decode('utf-8')` ile geri cozuldu + dogrudan bozuk em-dash (`â€"`) ve hatali ceviriler (`gÃ¶re`->gore, `aš¡`->a--) elle duzeltildi. Sonuc: api.py %100 ASCII (CLAUDE.md kurali: kodda c g i o s u yasak), ruff+mypy+format temiz. NOT: `data/` altindaki eski report'lar ve log dosyalari hala mojibake olabilir — bunlar okunabilir durumda, dokunulmadi. Suite: 703 passed, 7 skipped. |
+| **API port default 8093 -> 8091 (2026-09-14, ocr incelemesi)** | `watchdog.py` 8091'e cekilmisti ama `config/settings.py` default `port` hala 8093 idi — PORT env setli degilse bot 8093'te acilip watchdog/service.ps1 (8091) ile uyusmazdi. COZUM: default `8091` (`.env` PORT=8091, `service.ps1`, `test_config_loads` ile senkron). TEST: `test_e2e_system.py::TestStep1_BotStartup::test_config_loads` + config paketi (24 passed), ruff temiz. |
 
 ---
 
@@ -581,7 +588,30 @@ iddiasi SNAPSHOT icin GECERSIZDIR. Internet retry, ingest/collector'larda gecerl
   (SQLite-safe esdeger: kapanis `> now+30dk` VE `<= now+20h`).
 - SNAPSHOT bu kuraldan ETKILENMEZ — snapshot 24/7 alinir (giris zamani analizi icin).
 
-### 12.8 Referans: Analiz Scriptleri (arsiv — SILINMEZ)
+### 12.8 Veri Kaynagi Kontrol Sirasi (2026-09-17 — "yok" demeden once bak)
+
+"Bu veri yok" denmeden once SIRAYLA kontrol edilir:
+1. Junbo `data/bot.db` + `data/orderbook.db` (canli tablolar).
+2. `D:\HEAT data\db\tempmarket-edge.sqlite` — Heat projesi DB'si:
+   `forecast_snapshots` (2021'den beri 661K tahmin, 26 kaynak),
+   `settlements` (9823), `observations` (31K), `training_pairs` (150K).
+3. `D:\HEAT data\` altindaki arsivler (`gfs_archive`, `era5`, `weather_data`).
+4. `D:\JUNBO data\backups\` (zip'li uzun sureli yedekler).
+
+Kanıt: 2026-09-17'de "7 Eylul oncesi forecast yok" iddiasi YANLIS cikti —
+junbo DB'sinde yoktu ama HEAT DB'de 2021'den beri vardi. Kural ihlali =
+dogrulamadan cevap (bolum 2'deki Kontrol-Etmeden-Cevap-Verme yasagi).
+
+2026-09-18 EK: "Yerlesim kaynagi esitligi" — backtestte kazanma SONUCU ile
+GIRIS verisi AYNI olcekten gelmeli. HEAT yerlesimleri vs bizim WU toplama
+ayni bucket'ta %25 uyuyor (medyan 0.80C fark); 4 tur backtest bu yuzden cop
+oldu. Cozum: `config/source_offsets.json` sehir medyan offsetleri +
+`backtest/engine.py::normalized_heat_settlement` + kapı testi
+`tests/test_settlement_gate.py` (duzeltmeli uyum < 0.40 ise backtest DURUR).
+Kalibrasyon: ham %25 -> duzeltmeli %47 (hala gurultulu; gecerli olcum
+walk-forward gercek-status yoludur).
+
+### 12.9 Referans: Analiz Scriptleri (arsiv — SILINMEZ)
 
 - `scripts/analyze_first_peak_climbs.py` (49 real climb; %20 takint elendi).
 - `scripts/analyze_peak_to_settle.py` (39 market; peak->settle suresi; 17:00=15, 23:00=7).
@@ -657,6 +687,23 @@ Bir ariza ile karsilasildiginda once buraya bak, sonra gerekirse kod kanitlarini
 - **Beklenen:** `collect_actuals.py` gun icinde ayni gunu tekrar ceker (archive API
   kismi saatler dondurur). `start > end` ise "already up to date, skip" — 400 hata
   OLMAZ (2026-08-08 fix).
+
+### S8. Division by zero in backtest/run_combos.py (2026-10-04)
+- **Sorun:** `backtest/run_combos.py:97` satırında `count / total` işlemi sırasında `total=0` oluyordu
+- **Çözüm:** `if total > 0:` koşulu eklendi
+- **Test:** `test_backtest_engine.py`'deki bias testleri güncellendi, mevcut kaynakları kullanacak şekilde
+
+### S9. Spread bet placement fails in test due to price filter (2026-10-04)
+- **Sorun:** Testte pazar fiyatları 0.05 iken minimum giriş fiyatı 0.1 olduğu için tüm betler atlanıyordu
+- **Çözüm:** Test pazar fiyatları 0.15'e yükseltildi, tahmin değerleri 31.5'ten 31.0'a düşürüldü
+- **Test:** `test_bot_flow.py`'deki spread bet testi artık `{'placed': 7, 'closed': 0, 'skipped': 0, 'cities': ['Testville']}` ile geçiyor
 - **Dogrula:** `data/logs/collect_actuals.log` son satirlar; `data_watchdog.log`
   `ACTUALS ok (age=...)`.
 - **Aksiyon:** 400 hatasi gorulurse tarih araligi mantigini kontrol et (start <= end).
+| **Yeni sehir proseduru (2026-09-13)** | Once: bilinmeyen sehir ingestion'da duser, spread bias yok diye atlar, ekleme manuel (map+koordinat). Simdi: `jobs/new_city_job.py` gunluk kesfeder, `city_overrides.json` yazar, spread fallback ile ilk gunden isleme alir. Test: `tests/test_new_city_job.py` (6 passed). |
+
+### S10. SADECE Turkiye sehirlerine bet (2026-10-05)
+- **Sorun:** Bot 573 betin %94'unu yabanci sehirlere acmisti (Manila 40, Tokyo 30...). Istanbul 26 + Ankara 8 bet (%5.9).
+- **Cozum:** `StrategyConfig.turkey_only=True` + `turkey_cities="Istanbul,Ankara,Izmir,Antalya"`; filtre `engine/market_selection.py::trading_city_allowed` uzerinden 3 giris noktasinda: spread (`executor/spread_placer.py` aday filtresi), edge (`executor/bet_placer.py::place_bet` guard), METAR-peak (`jobs/metar_peak.py::run_metar_peak_bets` market filtresi). `.env` override: `TURKEY_ONLY`, `TURKEY_CITIES`. Config proxy `_MAP`'e `TURKEY_ONLY`/`TURKEY_CITIES` eklendi.
+- **Test:** `tests/test_spread_placer.py::test_turkey_only_blocks_foreign_city` + `test_turkey_only_allows_turkish_city`; conftest `_reset_strategy_params` testlerde `turkey_only=False` yapar (kurgusal sehirler). Ayrica 7 kirik spread testi duzeltildi (0.05 fiyat `min_entry_price=0.10` altinda kaliyordu -> 0.15).
+- **Operasyon:** 45 yabanci acik bet `cancelled` isaretlendi; bot restart ile yeni kod canliya gecer.

@@ -108,7 +108,7 @@ def _seed_market_and_forecast(session, target_day):
                 threshold=thr,
                 target_date=datetime(target_day.year, target_day.month, target_day.day, 12, 0),
                 status="open",
-                yes_price=0.05,
+                yes_price=0.15,
                 no_price=0.95,
             )
         )
@@ -119,7 +119,7 @@ def _seed_market_and_forecast(session, target_day):
                 metric="temperature_max",
                 target_date=datetime(target_day.year, target_day.month, target_day.day, 12, 0),
                 threshold=thr,
-                yes_price=0.05,
+                yes_price=0.15,
                 no_price=0.95,
                 snapshot_time=datetime(target_day.year, target_day.month, target_day.day, 0, 1, 0),
             )

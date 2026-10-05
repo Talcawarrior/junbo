@@ -18,7 +18,7 @@ repos:
     hooks:
       - id: coverage-threshold
         name: coverage-threshold
-        entry: python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --cov=. --cov-config=.coveragerc --cov-report=term --cov-fail-under=55 -q
+        entry: python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --ignore=tests/test_replay_engine.py --cov=. --cov-config=.coveragerc --cov-report=term --cov-fail-under=55 -q
         language: system
         pass_filenames: false
         always_run: true

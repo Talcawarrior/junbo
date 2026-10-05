@@ -40,6 +40,31 @@ def select_highest_yes_candidates(markets, min_entry_price: float = 0.10, max_en
     return selected
 
 
+def _turkey_only_enabled() -> bool:
+    """Return True when betting is restricted to Turkey cities."""
+    from config.settings import bot_config
+
+    return bool(getattr(bot_config.strategy, "turkey_only", True))
+
+
+def _turkey_city_set() -> set[str]:
+    """Parse the configured Turkey city whitelist."""
+    from config.settings import bot_config
+
+    raw = getattr(bot_config.strategy, "turkey_cities", "") or ""
+    return {c.strip() for c in str(raw).split(",") if c.strip()}
+
+
+def trading_city_allowed(city_name: str | None) -> bool:
+    """Return True when a bet may be placed on this city.
+
+    2026-10-05 user decision: only Turkey cities are traded.
+    """
+    if not _turkey_only_enabled():
+        return True
+    return (city_name or "") in _turkey_city_set()
+
+
 def passes_time_gate(target_date, now: datetime | None = None, gate_hour_utc: int = 13) -> bool:
     """Allow 2+ day-ahead markets only from 13:00 UTC onward."""
     if target_date is None:

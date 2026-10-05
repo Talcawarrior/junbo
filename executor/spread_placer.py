@@ -213,6 +213,15 @@ def _place_spread_bets_inner(session, target_day) -> dict:
         if bl_count > 0:
             logger.info("spread: blacklist %d sehir elendi (%s)", bl_count, ", ".join(sorted(spread_blacklist)))
 
+    # 2026-10-05 user decision: ONLY Turkey cities get bets.
+    from engine.market_selection import trading_city_allowed
+
+    _before_tr = len(candidates)
+    candidates = [(kv, a) for kv, a in candidates if trading_city_allowed(code_name.get(kv[0][0], ""))]
+    _tr_cut = _before_tr - len(candidates)
+    if _tr_cut > 0:
+        logger.info("spread: %d non-Turkey cities filtered (Turkey-only mode)", _tr_cut)
+
     # Siralama: EN AZ SAPAN (dusuk |bias|) once; esitse daha SICAK (yuksek mean) once.
     candidates.sort(key=lambda kv_acc: (kv_acc[1], -kv_acc[0][1][0]))
     # Ayni sehir birden fazla metric ile gelirse (temperature_max/min) ilkini

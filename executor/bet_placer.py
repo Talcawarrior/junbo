@@ -96,6 +96,15 @@ class BetPlacer:
                 return None
             d.market_id = market.id
 
+            # 2026-10-05 user decision: ONLY Turkey cities get bets.
+            from engine.market_selection import trading_city_allowed
+
+            d.check("turkey_only", trading_city_allowed(market.city), city=market.city)
+            if not d.should_bet:
+                logger.info("Turkey-only guard: market %s city %s - rejected", market.id, market.city)
+                d.log(logging.INFO)
+                return None
+
             # YES-only guard: asla NO bahis acma
             side = (analysis.recommended_side or "").upper()
             d.check("yes_only", side == "YES", recommended_side=analysis.recommended_side)

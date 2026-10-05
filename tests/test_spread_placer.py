@@ -134,12 +134,10 @@ def test_spread_uses_live_market_price_not_snapshot():
         # AAA -> gercek LTAC (Ankara) bias olcumu: 0.87
         _add_calibration(s, "AAA", 0.87)
         _add_forecast(s, "AAA", "temperature_max", day, 25.0, datetime(2026, 8, 1, 10, 0))
-        # Snapshot 0.05, ama CANLI fiyat 0.05 -> canliya gore acilmali
-        # (0.05, tahmin 25C icin 22-28 esiklerinde fair degerinin altinda kalir
-        #  ve 0.10-0.20 olum bolgeye dusmez; fair-value filtresi gecirir)
+        # Snapshot 0.50, ama CANLI fiyat 0.15 -> canliya gore acilmali
         for thr in range(22, 29):
-            _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.05)
-            _add_snapshot(s, "Testville", "temperature_max", day, thr, 0.15)
+            _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.15)
+            _add_snapshot(s, "Testville", "temperature_max", day, thr, 0.50)
         s.commit()
         res = place_spread_bets(day, session=s)
         s.commit()
@@ -148,7 +146,7 @@ def test_spread_uses_live_market_price_not_snapshot():
     assert res["placed"] >= 1, "canli fiyat < max_entry ise bet acilmali"
     assert len(entries) >= 1
     for e in entries:
-        assert e == pytest.approx(0.05), f"entry canli fiyat olmali: {e}"
+        assert e == pytest.approx(0.15), f"entry canli fiyat olmali: {e}"
 
 
 def test_spread_skips_snapshot_low_but_live_high():
@@ -195,7 +193,7 @@ def test_spread_opens_three_legs_around_center():
         # forecast center = 25, radius 1 -> SADECE esikler 24,25,26
         _add_forecast(s, "AAA", "temperature_max", day, 25.0, datetime(2026, 8, 1, 10, 0))
         for thr in range(22, 29):
-            _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.05)
+            _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.15)
         s.commit()
 
         res = place_spread_bets(day, session=s)
@@ -242,8 +240,8 @@ def test_place_spread_bets_creates_portfolio_when_missing():
         _add_calibration(s, "AAA", 0.87)
         _add_forecast(s, "AAA", "temperature_max", day, 25.0, datetime(2026, 8, 1, 10, 0))
         for thr in range(22, 29):
-            _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.05)
-            _add_snapshot(s, "Testville", "temperature_max", day, thr, 0.05)
+            _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.15)
+            _add_snapshot(s, "Testville", "temperature_max", day, thr, 0.15)
         s.commit()
         res = place_spread_bets(day, session=s)
         s.commit()
@@ -269,8 +267,8 @@ def test_merkez_kayinca_betler_acik_kalir():
         _add_calibration(s, "AAA", 0.87)
         _add_forecast(s, "AAA", "temperature_max", day, 25.0, datetime(2026, 8, 1, 10, 0))
         for thr in range(22, 29):
-            _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.05)
-            _add_snapshot(s, "Testville", "temperature_max", day, thr, 0.05)
+            _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.15)
+            _add_snapshot(s, "Testville", "temperature_max", day, thr, 0.15)
         s.commit()
         # ilk run: center 25 -> window [25] (radius=0), 1 bet acilir
         place_spread_bets(day, session=s)
@@ -338,12 +336,12 @@ def test_spread_prefers_accurate_city_over_hot():
         _add_calibration(s, "ACC", 0.3)
         _add_forecast(s, "ACC", "temperature_max", day, 20.0, datetime(2026, 8, 1, 10, 0))
         for thr in range(17, 24):
-            _add_market(s, "Accville", "temperature_max", day, thr, yes_price=0.05, city_code="ACC")
+            _add_market(s, "Accville", "temperature_max", day, thr, yes_price=0.15, city_code="ACC")
         # "HOT" sicak ama SAPAN (bias 4.0) — tahmin 40C
         _add_calibration(s, "HOT", 4.0)
         _add_forecast(s, "HOT", "temperature_max", day, 40.0, datetime(2026, 8, 1, 10, 0))
         for thr in range(37, 44):
-            _add_market(s, "Hotville", "temperature_max", day, thr, yes_price=0.05, city_code="HOT")
+            _add_market(s, "Hotville", "temperature_max", day, thr, yes_price=0.15, city_code="HOT")
         s.commit()
 
         # max_cities=1 ile SADECE en dogru sehir secilir
@@ -374,7 +372,7 @@ def test_out_of_selection_bets_kept_open():
         _add_calibration(s, "ACC", 0.3)
         _add_forecast(s, "ACC", "temperature_max", day, 25.0, datetime(2026, 8, 1, 10, 0))
         for thr in range(22, 29):
-            _add_market(s, "Accville", "temperature_max", day, thr, yes_price=0.05, city_code="ACC")
+            _add_market(s, "Accville", "temperature_max", day, thr, yes_price=0.15, city_code="ACC")
         # Secilemeyecek (sapan) sehir: ZZZ bias 4.0, tahmin 40C
         _add_calibration(s, "ZZZ", 4.0)
         _add_forecast(s, "ZZZ", "temperature_max", day, 40.0, datetime(2026, 8, 1, 10, 0))
@@ -454,7 +452,7 @@ def test_open_legs_when_center_market_missing():
         _add_forecast(s, "AAA", "temperature_max", day, 25.0, datetime(2026, 8, 1, 10, 0))
         # Merkez (25) YOK; 24 ve 26 marketleri var -> bunlar acilir
         for thr in [24, 26]:
-            _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.05)
+            _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.15)
         s.commit()
         res = place_spread_bets(day, session=s)
         s.commit()
@@ -506,4 +504,59 @@ def test_spread_opens_death_zone_price():
         s.commit()
         placed = s.query(Bet).filter(Bet.status == "placed").count()
     assert res["placed"] >= 1, "0.10-0.20 arasi fiyat (olum bolge) artik acilmali"
+    assert placed >= 1
+
+
+def test_turkey_only_blocks_foreign_city():
+    """2026-10-05 user decision: ONLY Turkey cities get bets.
+
+    turkey_only=True iken yabanci sehire (Testville) bet acilmaz.
+    """
+    from database.db import get_session
+    from database.models import Bet
+    from executor.spread_placer import place_spread_bets
+
+    day = _day()
+    old = bot_config.strategy.turkey_only
+    bot_config.strategy.turkey_only = True
+    try:
+        with get_session() as s:
+            _add_portfolio(s, cash=1000.0)
+            _add_calibration(s, "AAA", 0.87)
+            _add_forecast(s, "AAA", "temperature_max", day, 25.0, datetime(2026, 8, 1, 10, 0))
+            for thr in range(22, 29):
+                _add_market(s, "Testville", "temperature_max", day, thr, yes_price=0.15)
+            s.commit()
+            res = place_spread_bets(day, session=s)
+            s.commit()
+            placed = s.query(Bet).filter(Bet.status == "placed").count()
+    finally:
+        bot_config.strategy.turkey_only = old
+    assert res["placed"] == 0, "Turkey-only modda yabanci sehire bet acilmamali"
+    assert placed == 0
+
+
+def test_turkey_only_allows_turkish_city():
+    """Turkey-only modda Istanbul'a bet acilir."""
+    from database.db import get_session
+    from database.models import Bet
+    from executor.spread_placer import place_spread_bets
+
+    day = _day()
+    old = bot_config.strategy.turkey_only
+    bot_config.strategy.turkey_only = True
+    try:
+        with get_session() as s:
+            _add_portfolio(s, cash=1000.0)
+            _add_calibration(s, "IST", 0.87)
+            _add_forecast(s, "IST", "temperature_max", day, 25.0, datetime(2026, 8, 1, 10, 0))
+            for thr in range(22, 29):
+                _add_market(s, "Istanbul", "temperature_max", day, thr, yes_price=0.15, city_code="IST")
+            s.commit()
+            res = place_spread_bets(day, session=s)
+            s.commit()
+            placed = s.query(Bet).filter(Bet.status == "placed").count()
+    finally:
+        bot_config.strategy.turkey_only = old
+    assert res["placed"] >= 1, "Turkey-only modda Istanbul'a bet acilmali"
     assert placed >= 1

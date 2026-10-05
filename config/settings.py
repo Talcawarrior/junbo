@@ -180,6 +180,9 @@ class StrategyConfig:
     spread_max_bets_per_day: int = 120  # gunluk limit: 3 gun x 40 (2026-08-17 kullanici karari: "Toplam 120")
     # 2026-09-06 backtest: Amsterdam/HK/Seoul/Moscow/Paris spread'te -68$/15gun kaybettiriyor
     spread_blacklist: str = "Amsterdam,Hong Kong,Seoul,Moscow,Paris"
+    # 2026-10-05 user decision: ONLY Turkey cities get bets.
+    turkey_only: bool = True
+    turkey_cities: str = "Istanbul,Ankara,Izmir,Antalya"
     metar_peak_max_bets_per_day: int = 15  # METAR-peak gunluk cap (2026-09-06: 12->15, backtest $285)
     metar_stake_usd: float = 5.0  # METAR tek bet stake (2026-09-06: 3->5, backtest $285)
 
@@ -546,6 +549,8 @@ class BotConfig:
         s.spread_stake_usd = float(os.getenv("SPREAD_STAKE_USD", str(s.spread_stake_usd)))
         s.spread_max_bets_per_day = int(os.getenv("SPREAD_MAX_BETS_PER_DAY", str(s.spread_max_bets_per_day)))
         s.spread_blacklist = os.getenv("SPREAD_BLACKLIST", s.spread_blacklist)
+        s.turkey_only = os.getenv("TURKEY_ONLY", str(s.turkey_only)).lower() == "true"
+        s.turkey_cities = os.getenv("TURKEY_CITIES", s.turkey_cities)
         s.metar_peak_max_bets_per_day = int(
             os.getenv("METAR_PEAK_MAX_BETS_PER_DAY", str(s.metar_peak_max_bets_per_day))
         )
@@ -601,6 +606,8 @@ class _ConfigProxy:
         "MIN_ENTRY_PRICE": ("strategy", "min_entry_price"),
         "ROTATION_THRESHOLD": ("strategy", "rotation_threshold"),
         "DAILY_ROTATION_LIMIT": ("strategy", "daily_rotation_limit"),
+        "TURKEY_ONLY": ("strategy", "turkey_only"),
+        "TURKEY_CITIES": ("strategy", "turkey_cities"),
     }
 
     def _resolve(self, name: str):

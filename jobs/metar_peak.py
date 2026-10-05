@@ -587,6 +587,10 @@ def run_metar_peak_bets() -> int:
             )
             .all()
         )
+        # 2026-10-05 user decision: ONLY Turkey cities get bets.
+        from engine.market_selection import trading_city_allowed
+
+        markets = [m for m in markets if trading_city_allowed(m.city)]
         if not markets:
             return 0
 
