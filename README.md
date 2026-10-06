@@ -169,11 +169,10 @@ python main.py bot
     **Sehir secimi SADECE yeni gun acilisinda kullanilir; sehir secilmeden dusse bile
     acik betleri KAPATILMAZ (2026-08-12 kullanici karari).**
    - Gunluk **max 120 bet** (2026-08-16 kullanici karari: "Toplam 120").
-   - **SADECE TURKIYE (2026-10-05 kullanici karari):** spread + edge + METAR-peak
-     yalnizca `turkey_cities` listesindeki sehirlerde (Istanbul, Ankara, Izmir,
-     Antalya) bet acar. Yabanci sehir adayliktan elenir (`TURKEY_ONLY=true`,
-     `engine/market_selection.py::trading_city_allowed`). Acik yabancı betler
-     iptal edildi (45 adet); yeni yabancı bet acilmaz.
+   - **WORLDWIDE (2026-10-06 kullanici karari):** 2026-10-05'teki Turkey-only
+     kisitlamasi KALDIRILDI — spread + edge + METAR-peak tum dunyada bet acar
+     (`turkey_only=false`). Filtre kodu (`trading_city_allowed`) duruyor,
+     `TURKEY_ONLY=true` ile istenirse yeniden acilabilir.
 - **ERKEN GIRIS (0-13 UTC hafif probe):** Snapshot analizi ilk market acilislarinin
   04:00-12:30 UTC'ye yayildigini gosterdi. 00:00-13:00 UTC penceresinde bot her ~1 sn
   Polymarket Gamma'ya TEK hafif sorgu atar (public-search limit 5); DB'deki max acik

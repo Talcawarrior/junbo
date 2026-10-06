@@ -180,8 +180,8 @@ class StrategyConfig:
     spread_max_bets_per_day: int = 120  # gunluk limit: 3 gun x 40 (2026-08-17 kullanici karari: "Toplam 120")
     # 2026-09-06 backtest: Amsterdam/HK/Seoul/Moscow/Paris spread'te -68$/15gun kaybettiriyor
     spread_blacklist: str = "Amsterdam,Hong Kong,Seoul,Moscow,Paris"
-    # 2026-10-05 user decision: ONLY Turkey cities get bets.
-    turkey_only: bool = True
+    # 2026-10-06 user decision: worldwide trading (Turkey-only OFF).
+    turkey_only: bool = False
     turkey_cities: str = "Istanbul,Ankara,Izmir,Antalya"
     metar_peak_max_bets_per_day: int = 15  # METAR-peak gunluk cap (2026-09-06: 12->15, backtest $285)
     metar_stake_usd: float = 5.0  # METAR tek bet stake (2026-09-06: 3->5, backtest $285)
