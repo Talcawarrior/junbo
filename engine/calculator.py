@@ -476,7 +476,13 @@ class WeatherEngine:
             }
 
             try:
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                # trust_env=False: settings.py ALL_PROXY=socks5://127.0.0.1:40000
+                # (WARP) ortam degiskenini yok say. aiohttp trust_env=True iken
+                # SOCKS proxy'yi desteklemez ve open-meteo'ya
+                # "Cannot connect to host ... [Semaphore timeout]" hatasi verir
+                # (2026-11-09: 00:09'dan beri her fetch FAILED, requests yolu
+                # proxies=None ile calisirken async yolu kilitleniyordu).
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30), trust_env=False) as session:
                     async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                         if resp.status == 429:
                             # Global rate-limit: tum dongu boyunca API'yi engelle

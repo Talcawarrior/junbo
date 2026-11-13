@@ -14,18 +14,25 @@ Run periodically (every 6 hours) to keep backtest.db in sync.
 """
 
 import logging
+import os
 import sqlite3
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import sys as _sys
+from pathlib import Path as _Path
 
-# ── Paths ─────────────────────────────────────────────────────────────────
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+from utils.db_paths import get_db_path  # noqa: E402
+
+# Paths: consolidated data root. Override with env for tests.
+DATA_DIR = Path(os.getenv("JUNBO_DATA_DIR", r"D:\JUNBO data"))
 ROOT = Path(__file__).resolve().parent.parent
-BOT_DB = ROOT / "data" / "bot.db"
-BACKTEST_DB = ROOT / "data" / "backtest.db"
-LOG_DIR = ROOT / "data" / "logs"
+BOT_DB = Path(os.getenv("JUNBO_BOT_DB", get_db_path()))
+BACKTEST_DB = Path(os.getenv("JUNBO_BACKTEST_DB", str(DATA_DIR / "backtest.db")))
+LOG_DIR = DATA_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Logging ───────────────────────────────────────────────────────────────
@@ -44,13 +51,13 @@ TIMEOUT = 180  # 3 minutes
 MAX_RETRIES = 5
 RETRY_DELAY = 60
 
-# Tables to sync from bot.db → backtest.db
-# (table_name, primary_key, order_by)
+# Tables to sync from bot.db -> backtest.db.
+# Forecast history is archived daily by scripts/archive_forecasts.py; copying
+# weather_forecasts by id is unsafe because bot.db was reset and its id space
+# is lower than the old backtest archive. Bets are preserved in bot backups.
 TABLES_TO_SYNC = [
     ("weather_markets", "id", "id"),
     ("market_snapshots", "id", "id"),
-    ("weather_forecasts", "id", "id"),
-    ("bets", "id", "id"),
 ]
 
 
@@ -118,15 +125,16 @@ def get_max_pk(
 
 
 def sync_table(table: str, pk_column: str, order_by: str) -> dict[str, int]:
-    """Sync one table from bot.db to backtest.db. Returns stats."""
+    """Sync one table from bot.db to backtest.db with a bulk ATTACH copy."""
     stats = {"inserted": 0, "updated": 0, "skipped": 0, "errors": 0}
 
     for attempt in range(1, MAX_RETRIES + 1):
+        backtest_conn = None
+        attached = False
         try:
             bot_conn = get_bot_connection()
             backtest_conn = get_backtest_connection()
 
-            # Get columns from bot.db
             columns = get_table_columns(bot_conn, table)
             if not columns:
                 logger.warning("Table %s not found in bot.db, skipping", table)
@@ -134,52 +142,27 @@ def sync_table(table: str, pk_column: str, order_by: str) -> dict[str, int]:
                 backtest_conn.close()
                 return stats
 
-            # Ensure table exists in backtest.db
             ensure_table_exists(backtest_conn, table, columns)
-
-            # Get column names (excluding rowid)
             col_names = [c[0] for c in columns]
             col_list = ", ".join(f'"{c}"' for c in col_names)
-            placeholders = ", ".join(["?"] * len(col_names))
-
-            # Get max PK in backtest.db (for incremental sync)
             max_pk = get_max_pk(backtest_conn, table, pk_column)
 
-            # Fetch all records from bot.db
-            if max_pk is not None:
-                cursor = bot_conn.execute(
-                    f'SELECT {col_list} FROM "{table}" WHERE "{pk_column}" > ? ORDER BY "{order_by}"',
-                    (max_pk,),
-                )
-            else:
-                cursor = bot_conn.execute(f'SELECT {col_list} FROM "{table}" ORDER BY "{order_by}"')
-
-            rows = cursor.fetchall()
-            if not rows:
-                logger.info("  %s: no new records", table)
-                bot_conn.close()
-                backtest_conn.close()
-                return stats
-
-            # Insert into backtest.db (INSERT OR REPLACE for upsert)
-            insert_sql = f'INSERT OR REPLACE INTO "{table}" ({col_list}) VALUES ({placeholders})'
-            for row in rows:
-                try:
-                    backtest_conn.execute(insert_sql, row)
-                    stats["inserted"] += 1
-                except sqlite3.Error as exc:
-                    stats["errors"] += 1
-                    if stats["errors"] <= 5:
-                        logger.warning("    Error inserting into %s: %s", table, exc)
-
+            # Bulk copy inside SQLite: much faster than one INSERT per row for
+            # market_snapshots (millions of rows).
+            backtest_conn.execute("ATTACH DATABASE ? AS srcdb", (str(BOT_DB),))
+            attached = True
+            where = f'WHERE "{pk_column}" > ?' if max_pk is not None else ""
+            sql = f'INSERT INTO main."{table}" ({col_list}) SELECT {col_list} FROM srcdb."{table}" {where}'
+            before = backtest_conn.total_changes
+            params = (max_pk,) if max_pk is not None else ()
+            backtest_conn.execute(sql, params)
             backtest_conn.commit()
-            bot_conn.close()
-            backtest_conn.close()
+            stats["inserted"] = backtest_conn.total_changes - before
 
             logger.info("  %s: %d new records synced", table, stats["inserted"])
             return stats
 
-        except sqlite3.OperationalError as exc:
+        except sqlite3.Error as exc:
             logger.warning(
                 "Attempt %d/%d failed for table %s: %s",
                 attempt,
@@ -193,6 +176,14 @@ def sync_table(table: str, pk_column: str, order_by: str) -> dict[str, int]:
                 logger.error("All %d attempts failed for table %s", MAX_RETRIES, table)
                 stats["errors"] += 1
                 return stats
+        finally:
+            if backtest_conn is not None:
+                if attached:
+                    try:
+                        backtest_conn.execute("DETACH DATABASE srcdb")
+                    except sqlite3.Error:
+                        pass
+                backtest_conn.close()
 
     return stats
 

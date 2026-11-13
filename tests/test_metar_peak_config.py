@@ -71,11 +71,13 @@ class TestSpreadConfigLocked:
     def test_spread_radius_0(self):
         assert _env_value("SPREAD_RADIUS") == "0", "radius=0 (tek esik) — backtest en iyi config"
 
-    def test_spread_max_cities_15(self):
-        assert _env_value("SPREAD_MAX_CITIES") == "15", "bias-top 15"
+    def test_spread_max_cities_40(self):
+        # 2026-09-06 config karari: bias-top 40 (commit aa94ca5).
+        assert _env_value("SPREAD_MAX_CITIES") == "40", "bias-top 40"
 
-    def test_spread_max_entry_095(self):
-        assert _env_value("SPREAD_MAX_ENTRY") == "0.95"
+    def test_spread_max_entry_050(self):
+        # 2026-09-06: 0.95 -> 0.50 (commit 8c2258b, backtest -58% kayip azaldi).
+        assert _env_value("SPREAD_MAX_ENTRY") == "0.50"
 
     def test_spread_stake_2(self):
         # .env'de SPREAD_STAKE_USD anahtari YOK — deger settings default'undan
@@ -105,10 +107,14 @@ class TestKilitKuraliBirDusus:
         return [(int(base.replace(hour=h).timestamp()), t) for h, t in pairs]
 
     def test_kullanici_ornegi_22_kilitler(self):
-        """20 21 22 22 21 -> 22 kilitlenir (esitlik dusus sayilmaz)."""
+        """20 21 22 22 21 -> 22 kilitlenir (esitlik dusus sayilmaz).
+
+        2026-09-07 onay penceresi (commit 05159a9): 1. dusus aday yaratir,
+        kilit icin 30 dk beklenir -> dususten 30+ dk sonra bir gozlem eklenir.
+        """
         from scrapers.metar import detect_peak
 
-        rows = self._rows([(13, 20.0), (14, 21.0), (15, 22.0), (16, 22.0), (17, 21.0)])
+        rows = self._rows([(13, 20.0), (14, 21.0), (15, 22.0), (16, 22.0), (17, 21.0), (18, 20.0)])
         peak, confirmed = detect_peak(rows)
         assert confirmed is True
         assert peak == 22.0
@@ -117,9 +123,30 @@ class TestKilitKuraliBirDusus:
         """scripts/backtest.py peak_lock detect_peak ile BIREBIR olmali."""
         from scripts.backtest import peak_lock
 
-        rows = self._rows([(13, 20.0), (14, 21.0), (15, 22.0), (16, 22.0), (17, 21.0)])
+        rows = self._rows([(13, 20.0), (14, 21.0), (15, 22.0), (16, 22.0), (17, 21.0), (18, 20.0)])
         peak, _lock = peak_lock(rows, 0.0)
         assert peak == 22.0
+
+    def test_peak_lock_detect_peak_ayni_kural(self):
+        """2026-10-22: backtest peak_lock, canli detect_peak ile ayni sonucu vermeli.
+
+        Onceden backtest 1. dususta kilitliyordu (canli 30 dk onay istiyor) ->
+        backtest canli bot'tan ERKEN kilitliyor, sonucu gercekci degildi.
+        """
+        from scrapers.metar import detect_peak
+        from scripts.backtest import peak_lock
+
+        diziler = [
+            [(13, 28.0), (14, 30.0), (15, 31.0), (16, 30.0), (17, 29.0)],
+            [(13, 20.0), (14, 21.0), (15, 22.0), (16, 22.0), (17, 21.0), (18, 20.0)],
+            [(13, 25.0), (14, 26.0), (15, 27.0), (16, 26.0)],  # onay suresi dolmadi
+            [(6, 30.0), (7, 29.0), (8, 28.0)],  # sabah -> kilit yok
+        ]
+        for dizi in diziler:
+            rows = self._rows(dizi)
+            live_peak, live_conf = detect_peak(rows)
+            bt_peak, _bt_lock = peak_lock(rows, 0.0)
+            assert (live_peak if live_conf else None) == bt_peak, f"kural ayrisiyor: {dizi}"
 
     def test_sabah_dususu_kilit_sayilmaz(self):
         """Yerel 13:00 oncesi dususler zirve sayilmaz (regresyon korumasi)."""

@@ -4,6 +4,7 @@
 
 import json
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 
 import requests  # pylint: disable=import-error
@@ -13,11 +14,15 @@ from sqlalchemy import func
 from database.db import get_session
 from database.models import OPEN_BET_STATUSES, Bet, Portfolio, WeatherMarket
 from engine.strategy import RiskManager
+from utils.db_paths import get_data_dir
 from utils.formulas import portfolio_total_value, settlement_payout, settlement_pnl
 
 logger = logging.getLogger("EXECUTOR_SETTLER")
 
 GAMMA_API_BASE = "https://gamma-api.polymarket.com"
+
+# Gamma istek deneme sayisi (403/429 ve baglanti hatalari icin).
+_GAMMA_MAX_ATTEMPTS = 3
 
 
 class SettlementEngine:
@@ -69,7 +74,36 @@ class SettlementEngine:
                 logger.info("Settlement: No markets to settle")
                 return {"win": 0, "loss": 0, "pending": 0, "total_pnl": 0.0}
 
-            for market in markets_to_settle:
+            # 2026-10-22: Sadece ACIK BETI OLAN marketler Gamma'ya sorgulanir.
+            # Onceki davranista her turda hedef tarihi gecmis TUM marketler
+            # (~945 adet) isleniyordu. Beti olmayan marketler Gamma'ya hic
+            # sorulmuyordu ama her biri "pending" sayilip 48h hata logu
+            # basiyordu (24k+ log satiri tamamen gurultu). Artik beti olmayan
+            # marketler toplu olarak 'expired' isaretlenir ve akistan cikar.
+            market_ids_with_bets = {
+                row[0]
+                for row in session.query(Bet.market_id).filter(Bet.status.in_(OPEN_BET_STATUSES)).distinct().all()
+                if row[0]
+            }
+            markets_with_bets = [m for m in markets_to_settle if m.id in market_ids_with_bets]
+
+            # Beti olmayan marketler: kapanis (target_date + 12h) gectiyse expired.
+            # Acik beti olan marketler ASLA expired yapilmaz.
+            expired_ids = [
+                m.id
+                for m in markets_to_settle
+                if m.id not in market_ids_with_bets
+                and m.target_date
+                and (m.target_date + timedelta(hours=12)) <= now_naive
+            ]
+            if expired_ids:
+                session.query(WeatherMarket).filter(WeatherMarket.id.in_(expired_ids)).update(
+                    {WeatherMarket.status: "expired"},
+                    synchronize_session=False,
+                )
+                logger.info("Settlement: %d market expired (acik beti yok)", len(expired_ids))
+
+            for market in markets_with_bets:
                 try:
                     result = self._settle_market(session, market, risk_manager)
                     if result is None:
@@ -204,10 +238,14 @@ class SettlementEngine:
 
             # Poly settlement outcome: gercek sicakligi kaydet
             try:
-                actual_temp = self._fetch_actual_temp(bet.city, bet.settled_at)
+                # 2026-10-27: gercek sicaklik MARKETIN gunune aittir, yerlesim
+                # anina degil. UMA gec cozerse (D+1, D+2) onceki halde yanlis
+                # gunun sicakligi yaziliyordu. target_date yoksa settled_at'e dus.
+                temp_date = getattr(market, "target_date", None) or bet.settled_at
+                actual_temp = self._fetch_actual_temp(bet.city, temp_date)
                 outcome_info = {
                     "settlement_temp_c": actual_temp,
-                    "settlement_temp_f": actual_temp * 9/5 + 32 if actual_temp else None,
+                    "settlement_temp_f": actual_temp * 9 / 5 + 32 if actual_temp else None,
                     "source": "wu_weather_underground",
                     "collected_at": datetime.now(timezone.utc).isoformat(),
                 }
@@ -263,7 +301,8 @@ class SettlementEngine:
             if not date_str or not city:
                 return None
             import sqlite3 as _sqlite3
-            conn = _sqlite3.connect("data/actuals.db")
+
+            conn = _sqlite3.connect(os.path.join(get_data_dir(), "actuals.db"))
             cur = conn.cursor()
             cur.execute(
                 "SELECT temperature_2m_max FROM actual_temperatures WHERE city = ? AND date = ?",
@@ -337,28 +376,57 @@ class SettlementEngine:
         return outcome
 
     def _call_gamma_api(self, market) -> dict | None:
-        """Make GET request to Gamma API and return parsed JSON."""
+        """Make GET request to Gamma API and return parsed JSON.
+
+        2026-10-22: User-Agent ekleniyor. Scraper 'Junbo/1.0' UA gonderiyor
+        ve sorunsuz calisiyor; settler ise basliksiz istek gonderiyordu ve
+        Cloudflare bazen 403 Forbidden donuyordu (log: 2127 adet). Ayrica
+        403/429 yanitlarinda kisa bir bekleme + tekrar deneme yapilir.
+        """
         # Rate limit korumasi (2026-08-16): Cloudflare 10054 ile baglanti
-        # sifirliyordu (saniyede ~10 istek -> IP gecici blok). Is?kler arasi
+        # sifirliyordu (saniyede ~10 istek -> IP gecici blok). Istekler arasi
         # kisa bekleme + basarisizlikta daha uzun bekleme eklenir.
         import time as _time
 
-        _time.sleep(0.25)
-        try:
-            url = f"{GAMMA_API_BASE}/markets/{market.id}"
-            from config.settings import bot_config
+        url = f"{GAMMA_API_BASE}/markets/{market.id}"
+        from config.settings import bot_config
 
-            resp = requests.get(url, timeout=15, proxies=bot_config.polymarket.get_proxies())
-            resp.raise_for_status()
-            return resp.json()
-        except requests.RequestException as e:
-            logger.warning(
-                "Gamma API request failed for %s: %s",
-                market.id,
-                e,
-            )
-            _time.sleep(1.0)  # basarisizlikta Cloudflare'e nefes payi
-            return None
+        headers = {
+            "User-Agent": "Junbo/1.0 (+tier3-12)",
+            "Accept": "application/json",
+        }
+        proxies = bot_config.polymarket.get_proxies()
+
+        for attempt in range(1, _GAMMA_MAX_ATTEMPTS + 1):
+            _time.sleep(0.25)
+            try:
+                resp = requests.get(url, headers=headers, timeout=15, proxies=proxies)
+                if resp.status_code in (403, 429):
+                    # Cloudflare bot korumasi / rate limit: daha uzun bekle.
+                    retry_after = resp.headers.get("Retry-After") if resp.headers else None
+                    wait = 2.0 * attempt
+                    if retry_after and retry_after.strip().isdigit():
+                        wait = float(retry_after)
+                    logger.warning(
+                        "Gamma API %s for %s, retry in %.1fs (attempt %d/%d)",
+                        resp.status_code,
+                        market.id,
+                        wait,
+                        attempt,
+                        _GAMMA_MAX_ATTEMPTS,
+                    )
+                    _time.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                return resp.json()
+            except requests.RequestException as e:
+                logger.warning(
+                    "Gamma API request failed for %s: %s",
+                    market.id,
+                    e,
+                )
+                _time.sleep(1.0 * attempt)  # basarisizlikta Cloudflare'e nefes payi
+        return None
 
     @staticmethod
     def _parse_outcome_prices(market, raw_prices) -> list | None:

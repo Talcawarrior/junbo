@@ -2,6 +2,7 @@
 
 import json
 import logging
+import threading
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func
@@ -78,21 +79,36 @@ def _should_skip_analysis(sess, market, now):
     return True  # inputs unchanged -> safe to skip
 
 
+_FETCH_LOCK = threading.Lock()
+
+
 def run_fetch_markets():
     """Fetch markets from Polymarket and save to raw weather_markets."""
-    from scrapers.polymarket import PolymarketScraper
-
-    scraper = PolymarketScraper()
-    count = scraper.fetch_and_save()
-    # 2026-08-19 AKTIVITE: gunde 1 kez poly vs db market/sehir sayisi
-    # (helper idempotent — ayni gun tekrar yazmaz).
+    # 2026-11-08: the scan loop and the price poller both call this.  A full
+    # scrape needs ~100 s (97 public-search queries at the 1 s per-host
+    # throttle) and the old 60 s wait let a second caller start while the
+    # first one was still writing, raising
+    # "UNIQUE constraint failed: weather_markets.id".  Single-flight keeps a
+    # second caller from racing the writer; it returns immediately and the
+    # rows land from the fetch already in progress.
+    if not _FETCH_LOCK.acquire(blocking=False):
+        return "fetch already in progress"
     try:
-        from utils.activity_log import log_daily_market_summary
+        from scrapers.polymarket import PolymarketScraper
 
-        log_daily_market_summary()
-    except Exception:  # noqa: BLE001
-        pass
-    return f"{count} market cekildi ve kaydedildi"
+        scraper = PolymarketScraper()
+        count = scraper.fetch_and_save()
+        # 2026-08-19 AKTIVITE: gunde 1 kez poly vs db market/sehir sayisi
+        # (helper idempotent — ayni gun tekrar yazmaz).
+        try:
+            from utils.activity_log import log_daily_market_summary
+
+            log_daily_market_summary()
+        except Exception:  # noqa: BLE001
+            pass
+        return f"{count} market cekildi ve kaydedildi"
+    finally:
+        _FETCH_LOCK.release()
 
 
 def run_parse_markets():

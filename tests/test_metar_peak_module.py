@@ -660,3 +660,65 @@ class TestCityLonFallback:
         # ICAO'da da yok -> None (siralamada en sona duser)
         m_yer = SimpleNamespace(city_code="XXXX", longitude=None)
         assert _city_lon(m_yer) is None
+
+
+class TestMetarPeakAccounting:
+    """2026-10-27 (S14): METAR-peak bet acarken entry_fee de kasadan dusulur.
+
+    Onceki halde yalnizca stake debit ediliyor, fee sadece realized_pnl
+    icine gomuluyordu -> cash_balance fee toplami kadar (~$34.66) fazla
+    gorunuyor, portfolio ile bet tablolari birbirini tutmuyordu.
+    """
+
+    def test_open_metar_bet_debits_stake_and_fee(self, market_factory):
+        from database.db import get_session
+        from database.models import Portfolio
+
+        with get_session() as s:
+            pf = s.query(Portfolio).filter_by(id=1).first()
+            if pf is None:
+                s.add(
+                    Portfolio(
+                        id=1,
+                        initial_value=1000.0,
+                        current_value=1000.0,
+                        cash_balance=1000.0,
+                        total_value=1000.0,
+                        total_realized_pnl=0.0,
+                    )
+                )
+                s.commit()
+                pf = s.query(Portfolio).filter_by(id=1).first()
+            cash_before = float(pf.cash_balance or 0.0)
+
+            m_id = market_factory(
+                city="Testville",
+                city_code="TEST",
+                metric="temperature_max",
+                market_type="RANGE",
+                threshold=25.0,
+                target_date=datetime.now(timezone.utc).replace(tzinfo=None),
+                status="open",
+                yes_price=0.40,
+            )
+            from database.models import WeatherMarket
+
+            market = s.query(WeatherMarket).filter_by(id=m_id).first()
+            assert market is not None
+            bet = mp._open_metar_bet(s, market, 25.0)
+            s.commit()
+
+            assert bet is not None, "bet acilmaliydi (giris 0.40 gecerli aralikta)"
+            assert bet.bet_type == "metar_peak"
+
+            fee = float(bet.entry_fee or 0.0)
+            assert fee > 0, "entry_fee hesaplanmis olmali"
+
+            cash_after = float(s.query(Portfolio).filter_by(id=1).first().cash_balance or 0.0)
+            expected = cash_before - float(bet.amount) - fee
+            # utils.accounting._to_float her hareketi 2 ondaliga yuvarlar.
+            assert abs(cash_after - round(expected, 2)) < 1e-6, (
+                f"stake + fee birlikte dusulmeli: beklenti {expected:.4f}, gercek {cash_after:.4f}"
+            )
+            # Fee gercekten kasadan cikti mi (yalnizca stake olsaydi 998.00 kalirdi)?
+            assert cash_after < cash_before - float(bet.amount) + 1e-9, "entry_fee kasadan dusulmemis"

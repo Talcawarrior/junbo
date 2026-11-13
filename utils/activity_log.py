@@ -18,13 +18,22 @@ API (/api/health-check) son 50 olayi dashboard'a tasir.
 from __future__ import annotations
 
 import logging
-import os
 import sqlite3
 from datetime import datetime, timezone
 
+from utils.db_paths import get_db_path
+
 logger = logging.getLogger("UTILS_ACTIVITY")
 
-_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "bot.db")
+_DB_PATH = ""  # legacy/test override; empty means resolve from config
+
+
+def _db_path() -> str:
+    """Resolve per call; an explicit module override wins (tests)."""
+    if _DB_PATH:
+        return str(_DB_PATH)
+    return get_db_path()
+
 
 _CREATE = """
 CREATE TABLE IF NOT EXISTS activity_events (
@@ -49,7 +58,7 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
 def log_event(category: str, city: str | None = None, detail: str = "") -> None:
     """Aktivite akisina bir olay yazar. Asla raise etmez (botu durdurmaz)."""
     try:
-        conn = sqlite3.connect(_DB_PATH, timeout=10)
+        conn = sqlite3.connect(_db_path(), timeout=10)
         conn.execute("PRAGMA busy_timeout=10000")
         _ensure_table(conn)
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -63,7 +72,7 @@ def log_event(category: str, city: str | None = None, detail: str = "") -> None:
 def recent_events(limit: int = 200) -> list[dict]:
     """Son N olay (yeni once). Dashboard/API icin. 2026-08-19: 50 -> 200."""
     try:
-        conn = sqlite3.connect(_DB_PATH, timeout=10)
+        conn = sqlite3.connect(_db_path(), timeout=10)
         conn.execute("PRAGMA busy_timeout=10000")
         _ensure_table(conn)
         rows = conn.execute(
@@ -118,7 +127,7 @@ def update_peak_watch(rows: list[dict]) -> None:
     bir oncekinden yuksek mu dusuk mu" — dashboard'da gorunur.
     """
     try:
-        conn = sqlite3.connect(_DB_PATH, timeout=10)
+        conn = sqlite3.connect(_db_path(), timeout=10)
         conn.execute("PRAGMA busy_timeout=10000")
         try:
             conn.execute(_PEAK_WATCH_CREATE)
@@ -152,7 +161,7 @@ def peak_watch_list() -> list[dict]:
     DESC; eski siralama (sIcaklik azalan) kaldirildi.
     """
     try:
-        conn = sqlite3.connect(_DB_PATH, timeout=10)
+        conn = sqlite3.connect(_db_path(), timeout=10)
         conn.execute("PRAGMA busy_timeout=10000")
         try:
             conn.execute(_PEAK_WATCH_CREATE)
@@ -197,7 +206,7 @@ def log_daily_market_summary() -> None:
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     try:
-        conn = _sq.connect(_DB_PATH, timeout=10)
+        conn = _sq.connect(_db_path(), timeout=10)
         conn.execute("PRAGMA busy_timeout=10000")
         _ensure_table(conn)
         already = conn.execute(

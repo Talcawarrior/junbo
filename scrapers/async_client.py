@@ -40,10 +40,39 @@ import requests  # sync fallback / non-aiohttp path
 
 try:
     import socks  # for SOCKS proxy error classification
+
     _HAS_SOCKS = True
 except ImportError:
     socks = None  # type: ignore
     _HAS_SOCKS = False
+
+# 2026-11-08: gamma-api.polymarket.com moved to CloudFront.  aiohttp's
+# ``proxy=`` sends the CONNECT hostname to the proxy, so WARP resolves the
+# name remotely (via the stale hosts pin) and the request lands on the
+# Cloudflare edge, which answers HTTP 421.  aiohttp_socks with rdns=False
+# resolves locally, so utils.poly_dns can pin the CloudFront IP in-process.
+try:
+    from aiohttp_socks import ProxyConnector  # type: ignore
+
+    _HAS_AIOHTTP_SOCKS = True
+except ImportError:  # pragma: no cover - aiohttp_socks is in requirements.txt
+    ProxyConnector = None  # type: ignore
+    _HAS_AIOHTTP_SOCKS = False
+
+
+def _is_socks_proxy(proxy: str | None) -> bool:
+    return bool(proxy) and proxy.lower().startswith(("socks4", "socks5"))
+
+
+def _socks_url(proxy: str) -> str:
+    """aiohttp_socks rejects the ``socks5h`` scheme; local DNS (rdns=False)
+    gives the same semantics through utils.poly_dns."""
+    url = proxy
+    for remote, local in (("socks5h://", "socks5://"), ("socks4a://", "socks4://")):
+        if url.lower().startswith(remote):
+            url = local + url[len(remote) :]
+    return url
+
 
 logger = logging.getLogger("SCRAPER_ASYNC")
 
@@ -53,13 +82,23 @@ logger = logging.getLogger("SCRAPER_ASYNC")
 # aiohttp.ClientError olarak yakalanmıyor -> retry tetiklenmiyor.
 # Bu fonksiyon hem aiohttp hem requests hem SOCKS hatalarını sınıflandırır.
 
+
 def _is_connection_error(exc: BaseException) -> bool:
     """Bağlantı seviyesinde hata mı? (retry tetikleyici)"""
     if isinstance(exc, (TimeoutError, ConnectionError)):
         return True
     if _HAS_AIOHTTP and isinstance(exc, aiohttp.ClientError):  # type: ignore
         return True
-    if _HAS_SOCKS and socks and isinstance(exc, (socks.GeneralProxyError, socks.ProxyError, socks.ProxyConnectionError, socks.SOCKS4Error, socks.SOCKS5Error)):  # type: ignore
+    socks_errors = (
+        socks.GeneralProxyError,
+        socks.ProxyError,
+        socks.ProxyConnectionError,
+        socks.SOCKS4Error,
+        socks.SOCKS5Error,
+    )
+    if (
+        _HAS_SOCKS and socks and isinstance(exc, socks_errors)  # type: ignore
+    ):
         return True
     # requests exceptions
     if isinstance(exc, requests.RequestException):
@@ -131,6 +170,24 @@ def cache_clear() -> None:
         _CACHE.clear()
 
 
+# ---- Error-event dedupe --------------------------------------------------
+# A stalled SOCKS tunnel produces dozens of identical TimeoutErrors inside one
+# batch (e.g. 20-70 events in 25s). The activity feed only needs the first one
+# per host per window; repeats stay in the file log.
+_ERROR_LOG_AT: dict[str, float] = {}
+_ERROR_LOG_WINDOW_S = 600.0
+
+
+def _should_log_error_event(host: str) -> bool:
+    """True at most once per window per host (activity feed dedupe)."""
+    now = time.monotonic()
+    last = _ERROR_LOG_AT.get(host, 0.0)
+    if now - last < _ERROR_LOG_WINDOW_S:
+        return False
+    _ERROR_LOG_AT[host] = now
+    return True
+
+
 # ---- Throttle ----------------------------------------------------------
 _LAST_CALL_AT: dict[str, float] = {}
 _THROTTLE_LOCK = threading.Lock()
@@ -190,12 +247,15 @@ async def _async_fetch_one(
                 raise
             logger.warning("async fetch %s failed: %s", url, exc)
             # 2026-08-19: teknik hata aktivite akisina (dashboard'da gorunur).
-            try:
-                from utils.activity_log import log_event
+            # 2026-10-08: ayni host patlamasi 10dk'da bir kez duser, gerisi
+            # sadece dosya logunda (feed spam onlendi).
+            if _should_log_error_event(host):
+                try:
+                    from utils.activity_log import log_event
 
-                log_event("error", host, f"{type(exc).__name__}: {str(exc)[:120]}")
-            except Exception:  # noqa: BLE001
-                pass
+                    log_event("error", host, f"{type(exc).__name__}: {str(exc)[:120]}")
+                except Exception:  # noqa: BLE001
+                    pass
             if cache_key is not None:
                 _cache_set(cache_key, None)
             return None
@@ -229,7 +289,9 @@ class AsyncHttpClient:
                 # semaphore timeout yerine kuyrukta bekleme; pool tasmaz).
                 # Proxy varken ozel connector kullanilir (socks); o zaman
                 # limiti degistirmeyiz — eski davranis korunur.
-                if self._proxy:
+                if _is_socks_proxy(self._proxy) and _HAS_AIOHTTP_SOCKS:
+                    kwargs["connector"] = ProxyConnector.from_url(_socks_url(self._proxy or ""), rdns=False)
+                elif self._proxy:
                     kwargs["proxy"] = self._proxy
                 else:
                     kwargs["connector"] = aiohttp.TCPConnector(limit=MAX_CONCURRENT, ttl_dns_cache=300)
@@ -270,12 +332,16 @@ class AsyncHttpClient:
         # session.close() rather than returning to a pool, eliminating
         # the cross-event-loop ResourceWarning that shows up on Windows
         # when the test process exits before the pool drains.
-        connector = aiohttp.TCPConnector(force_close=True)
+        use_socks = _is_socks_proxy(self._proxy) and _HAS_AIOHTTP_SOCKS
+        if use_socks:
+            connector = ProxyConnector.from_url(_socks_url(self._proxy or ""), rdns=False, force_close=True)
+        else:
+            connector = aiohttp.TCPConnector(force_close=True)
         session_kwargs: dict = {
             "headers": {"User-Agent": _USER_AGENT},
             "connector": connector,
         }
-        if self._proxy:
+        if self._proxy and not use_socks:
             session_kwargs["proxy"] = self._proxy
         session = aiohttp.ClientSession(**session_kwargs)
         try:

@@ -22,6 +22,11 @@ import argparse
 import os
 import sys
 import time
+import sys as _sys
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+from utils.db_paths import get_data_dir, get_db_path  # noqa: E402
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
@@ -30,8 +35,8 @@ if _REPO_ROOT not in sys.path:
 import sqlite3  # noqa: E402
 import requests  # noqa: E402
 
-BOT_DB = os.path.join(_REPO_ROOT, "data", "bot.db")
-ACTUALS_DB = os.path.join(_REPO_ROOT, "data", "actuals.db")
+BOT_DB = get_db_path()
+ACTUALS_DB = os.path.join(get_data_dir(), "actuals.db")
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 STATION_CODES = ["UUWW", "EGLC", "LFPB", "RKSI", "KBKF", "KHOU", "RCSS", "MPMG"]
 
@@ -42,7 +47,6 @@ def main() -> int:
     parser.add_argument("--start", default="2026-05-07", help="baslangic tarihi (archive kapsami)")
     parser.add_argument("--end", default="2026-08-13", help="bitis tarihi")
     args = parser.parse_args()
-
 
     db = sqlite3.connect(BOT_DB)
     cur = db.cursor()
@@ -85,9 +89,7 @@ def main() -> int:
         times = daily.get("time", [])
         mx = daily.get("temperature_2m_max", [])
         mn = daily.get("temperature_2m_min", [])
-        city_name = cur.execute(
-            "SELECT DISTINCT city FROM weather_markets WHERE city_code=?", (code,)
-        ).fetchone()
+        city_name = cur.execute("SELECT DISTINCT city FROM weather_markets WHERE city_code=?", (code,)).fetchone()
         cname = city_name[0] if city_name else code
         for i, t in enumerate(times):
             results.append((code, cname, lat, lon, t, mx[i], mn[i]))

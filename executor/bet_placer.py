@@ -374,6 +374,7 @@ class BetPlacer:
                 status="pending",
                 fair_value=fair_value,
                 expected_value=float(analysis.edge or 0.0),
+                bet_type="edge",
                 entry_fee=round(entry_fee, 4),
                 strike_temp=float(market.threshold or 0.0),  # NEW: copy threshold from market
             )
@@ -925,6 +926,7 @@ class BetPlacer:
             shares=shares,
             current_price=fill_price,
             status="placed",
+            bet_type="spread",
             order_id=f"paper_{market.id}_{ts}",
             placed_at=now,
             entry_fee=round(entry_fee, 4),
@@ -986,6 +988,7 @@ class BetPlacer:
         bet.close_reason = "rotation"
         bet.closed_at = now
         bet.realized_pnl = round(pnl, 4)
+        bet.pnl = round(pnl, 4)
 
         # Krediyi portfolio'ya yaz
         credit_sale(session, sell_proceeds, f"rotation_close:{bet.market_id}")
@@ -996,6 +999,11 @@ class BetPlacer:
             open_amt = session.query(Bet.amount).filter(Bet.status.in_(OPEN_BET_STATUSES)).all()
             open_exposure = sum(float(a[0] or 0) for a in open_amt)
             pf.total_value = portfolio_total_value(float(pf.cash_balance or 0), open_exposure)
+            # 2026-10-27 (S14): rotation PnL'i portfoy toplamina da islenir.
+            # Onceki halde sadece bet.realized_pnl yaziliyordu; portfolio
+            # total_realized_pnl ise yalnizca settlement'i sayiyordu -> iki
+            # deger surekli birbirinden kopuyordu (2026-10-27: $488 vs -$221).
+            pf.total_realized_pnl = (pf.total_realized_pnl or 0.0) + pnl
             pf.last_updated = now
 
         # Market statusu geri ac

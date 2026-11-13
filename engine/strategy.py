@@ -527,6 +527,7 @@ class BettingEngine:
                 expected_value=getattr(signal, "edge", 0.0),
                 unrealized_pnl=0.0,
                 realized_pnl=0.0,
+                bet_type="edge",
                 strike_temp=getattr(signal, "strike_temp", 25.0)
                 or (
                     market_data.get("strike_temp")

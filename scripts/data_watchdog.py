@@ -16,6 +16,7 @@ bir gorev disabled olduysa yeniden enable eder (kendi kendini duzeltir).
 Log: data/logs/data_watchdog.log
 """
 
+import os
 import sqlite3
 import subprocess
 import time
@@ -24,7 +25,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 PY = r"C:\Users\fdemir\AppData\Local\Programs\Python\Python312\python.exe"
-LOG = REPO / "data" / "logs" / "data_watchdog.log"
+DATA = Path(os.getenv("JUNBO_DATA_DIR", r"D:\JUNBO data"))
+LOG = DATA / "logs" / "data_watchdog.log"
 
 SNAPSHOT_MAX_AGE = 40 * 60  # saniye
 ORDERBOOK_MAX_AGE = 10 * 60  # 2026-08-21: 45dk -> 10dk (paralel collect ~4dk'ya indi)
@@ -37,6 +39,9 @@ TASKS = {
     "Junbo-OrderbookCollect": r"scripts\collect_orderbook.py",
     "Junbo-ActualsCollect": r"scripts\collect_actuals.py",
     "Junbo-SyncBacktest": r"scripts\sync_backtest_db.py",
+    "Junbo-ArchiveForecasts": r"scripts\archive_forecasts.py",
+    "Junbo-DataCatalog": r"scripts\build_data_catalog.py",
+    "Junbo-StrategySleeves": r"scripts\strategy_sleeves_report.py",
     "Junbo-BackupDatabases": r"scripts\backup_databases.py",
     "JunboBotWatchdog": r"scripts\bot_watchdog.py",
 }
@@ -101,7 +106,9 @@ def ensure_task_enabled() -> None:
     try:
         shell = (
             "Get-ScheduledTask | ForEach-Object { if ($_.State -ne 'Ready' -and "
-            "$_.TaskName -match 'Junbo') { Enable-ScheduledTask -TaskName "
+            "$_.TaskName -match '^(Junbo-OrderbookCollect|Junbo-ActualsCollect|"
+            "Junbo-SyncBacktest|Junbo-ArchiveForecasts|Junbo-DataCatalog|"
+            "Junbo-StrategySleeves|JunboBotWatchdog)$') { Enable-ScheduledTask -TaskName "
             "$_.TaskName | Out-Null; Write-Output ('ENABLED ' + $_.TaskName) }} }}"
         )
         out = subprocess.run(
@@ -121,7 +128,7 @@ def main() -> None:
     log("=== DATA WATCHDOG TICK ===")
 
     # 1) snapshot (bot.db market_snapshots)
-    age = db_max_age(str(REPO / "data" / "bot.db"), "market_snapshots", "snapshot_time")
+    age = db_max_age(str(DATA / "bot.db"), "market_snapshots", "snapshot_time")
     if age is None or age > SNAPSHOT_MAX_AGE:
         log(f"SNAPSHOT stale (age={age}) -> run")
         run_script("snapshot_only.py")
@@ -129,7 +136,7 @@ def main() -> None:
         log(f"SNAPSHOT ok (age={age:.0f}s)")
 
     # 2) orderbook
-    age = db_max_age(str(REPO / "data" / "orderbook.db"), "orderbook_snapshots", "snapshot_time")
+    age = db_max_age(str(DATA / "orderbook.db"), "orderbook_snapshots", "snapshot_time")
     if age is None or age > ORDERBOOK_MAX_AGE:
         log(f"ORDERBOOK stale (age={age}) -> run")
         run_script(r"scripts\collect_orderbook.py")
@@ -138,13 +145,13 @@ def main() -> None:
 
     # 3) actuals (tablo: actual_temperatures, zaman: fetched_at)
     try:
-        conn = sqlite3.connect(str(REPO / "data" / "actuals.db"))
+        conn = sqlite3.connect(str(DATA / "actuals.db"))
         tbls = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
         conn.close()
     except Exception:
         tbls = []
     if tbls:
-        age = db_max_age(str(REPO / "data" / "actuals.db"), "actual_temperatures", "fetched_at")
+        age = db_max_age(str(DATA / "actuals.db"), "actual_temperatures", "fetched_at")
         if age is None or age > ACTUALS_MAX_AGE:
             log(f"ACTUALS stale (age={age}) -> run")
             run_script(r"scripts\collect_actuals.py")
@@ -152,7 +159,7 @@ def main() -> None:
             log(f"ACTUALS ok (age={age:.0f}s)")
 
     # 4) backtest sync
-    age = db_max_age(str(REPO / "data" / "backtest.db"), "market_snapshots", "snapshot_time")
+    age = db_max_age(str(DATA / "backtest.db"), "market_snapshots", "snapshot_time")
     if age is None or age > SYNC_MAX_AGE:
         log(f"SYNC stale (age={age}) -> run")
         run_script(r"scripts\sync_backtest_db.py")
@@ -160,7 +167,7 @@ def main() -> None:
         log(f"SYNC ok (age={age:.0f}s)")
 
     # 5) backups -- klasordeki en genc dosya yasi
-    backup_dir = REPO / "data" / "backups"
+    backup_dir = DATA / "backups"
     if backup_dir.exists():
         files = list(backup_dir.iterdir())
         if files:
@@ -178,7 +185,7 @@ def main() -> None:
     # 7) DB bakimi (ANALYZE + VACUUM) -- gunde 1 kez, 02:00-04:00 UTC penceresinde.
     # VACUUM canli bot ile 'database is locked' riski tasidigi icin bet/settle
     # sessiz penceresi secildi; marker (guncel tarih) ile gunde tek calisma garanti.
-    _db_maintenance_marker = REPO / "data" / ".last_db_maintenance"
+    _db_maintenance_marker = DATA / ".last_db_maintenance"
     _today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     _maintained_today = False
     try:

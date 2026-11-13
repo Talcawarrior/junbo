@@ -11,6 +11,7 @@ Kapsanan bugfix'ler:
 5. Gamma rate limit (0bb98f1) — istekler arasi bekleme + basarisizlikta 1s.
 6. partial_tp_done migration (28c5ba4) — bets kolonu kaldirilmali.
 """
+
 from __future__ import annotations
 
 import os
@@ -120,8 +121,7 @@ class TestPolymarketProxyLive:
         proxies = bot_config.polymarket.get_proxies()
         bot_ok = False
         try:
-            r = requests.get("https://gamma-api.polymarket.com/markets?limit=1",
-                             timeout=8, proxies=proxies)
+            r = requests.get("https://gamma-api.polymarket.com/markets?limit=1", timeout=8, proxies=proxies)
             bot_ok = r.status_code == 200
         except Exception:
             bot_ok = False
@@ -136,8 +136,7 @@ class TestPolymarketProxyLive:
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
                 page = browser.new_page()
-                page.goto("https://gamma-api.polymarket.com/markets?limit=1",
-                          timeout=15000)
+                page.goto("https://gamma-api.polymarket.com/markets?limit=1", timeout=15000)
                 body = page.inner_text("body")
                 browser.close()
             assert '"id"' in body or "market" in body.lower(), (
@@ -152,15 +151,18 @@ class TestPolymarketProxyLive:
 # 2. CITY_ICAO_MAP istasyon duzeltmesi (1f9313a)
 # ---------------------------------------------------------------------------
 class TestCityIcaoStationFix:
-    @pytest.mark.parametrize("city,expected", [
-        ("moscow", "UUWW"),
-        ("london", "EGLC"),
-        ("paris", "LFPB"),
-        ("seoul", "RKSI"),
-        ("taipei", "RCSS"),
-        ("denver", "KBKF"),
-        ("houston", "KHOU"),
-    ])
+    @pytest.mark.parametrize(
+        "city,expected",
+        [
+            ("moscow", "UUWW"),
+            ("london", "EGLC"),
+            ("paris", "LFPB"),
+            ("seoul", "RKSI"),
+            ("taipei", "RCSS"),
+            ("denver", "KBKF"),
+            ("houston", "KHOU"),
+        ],
+    )
     def test_city_icao_mapping(self, city, expected):
         """7 sehir dogru cozum istasyonuna map'lenmeli (1f9313a)."""
         icao = None
@@ -183,7 +185,6 @@ class TestCityIcaoStationFix:
 class TestOrderbookArchive:
     def test_archive_writes_snapshot(self, tmp_path):
         """_archive_clob_price orderbook.db'ye best_ask yazar (0bb98f1)."""
-        from bot_loop import _archive_clob_price
 
         # gecici orderbook.db olustur (test ana DB'ye dokunmaz)
         ob_path = tmp_path / "orderbook.db"
@@ -214,9 +215,7 @@ class TestOrderbookArchive:
             ("555test", "0", "Testville", "temperature_max", "2026-08-16 12:00:00", 0.432, "now"),
         )
         conn.commit()
-        row = conn.execute(
-            "SELECT market_id, best_ask FROM orderbook_snapshots WHERE market_id='555test'"
-        ).fetchone()
+        row = conn.execute("SELECT market_id, best_ask FROM orderbook_snapshots WHERE market_id='555test'").fetchone()
         conn.close()
         assert row is not None
         assert abs(row[1] - 0.432) < 0.001
@@ -246,7 +245,7 @@ class TestGammaRateLimit:
         """_call_gamma_api proxy'yi kullanmali (10054 bug)."""
         from executor.settler import SettlementEngine
 
-        engine = SettlementEngine()
+        SettlementEngine()  # kurulabilmeli (import + init smoke)
         # settler'larda proxy get_proxies ile kullaniliyor — yapisal kontrol
         assert bot_config.polymarket.proxy_url
 

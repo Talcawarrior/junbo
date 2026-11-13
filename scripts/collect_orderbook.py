@@ -17,20 +17,27 @@ Does NOT touch bot.db — fully independent data collection.
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
+import os
 import sqlite3
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import sys as _sys
+from pathlib import Path as _Path
 
-# ── Paths ─────────────────────────────────────────────────────────────────
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+from utils.db_paths import get_db_path  # noqa: E402
+
+# Paths: consolidated data root. Override with env for tests.
+DATA_DIR = Path(os.getenv("JUNBO_DATA_DIR", r"D:\JUNBO data"))
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-ORDERBOOK_DB = ROOT / "data" / "orderbook.db"
-LOCK_FILE = ROOT / "data" / ".orderbook_collect.lock"
+ORDERBOOK_DB = Path(os.getenv("JUNBO_ORDERBOOK_DB", str(DATA_DIR / "orderbook.db")))
+LOCK_FILE = DATA_DIR / ".orderbook_collect.lock"
 LOCK_MAX_AGE = 30 * 60  # saniye; bayat lock = cokmus run, calmak guvenli
-LOG_DIR = ROOT / "data" / "logs"
+LOG_DIR = DATA_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Logging ───────────────────────────────────────────────────────────────
@@ -167,7 +174,7 @@ def fetch_active_markets_from_gamma() -> list[dict[str, Any]]:
 
     import sqlite3
 
-    db = sqlite3.connect(str(ROOT / "data" / "bot.db"))
+    db = sqlite3.connect(get_db_path())
     db.row_factory = sqlite3.Row
     markets = []
 

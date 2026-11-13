@@ -26,6 +26,14 @@ logger = logging.getLogger("BOT_LOOP")
 
 # Timeout values (seconds)
 _FETCH_TIMEOUT = 60
+# 2026-11-08: the market fetch runs ~97 public-search queries spaced 1 s
+# apart by the async client's per-host throttle plus the weather_markets
+# upsert, so a full scrape needs ~2.5-3 min.  The 60 s cap aborted the wait
+# while the worker thread kept writing, and the next cycle started a second
+# writer (duplicate-key race).  The market fetch gets its own budget and
+# run_fetch_markets is single-flight, so overlapping cycles coalesce;
+# other fetches stay at 60 s.
+_MARKET_FETCH_TIMEOUT = 300
 _CYCLE_TIMEOUT = 180
 
 # Akilli tarama ayarlari
@@ -228,29 +236,54 @@ async def price_poller_loop(state):
 
     logger.info("Price poller loop basladi (interval=%ds)", _PRICE_POLL_INTERVAL)
     while state.is_running:
+        # 2026-10-11: adimlar bagimsiz butce alir. Onceki yapida yavaslayan
+        # run_fetch_markets (proxy stall -> 60sn timeout) refresh+update'i de
+        # olduruyor, DB fiyatlari ve bet current_price saatlerce donuyordu.
+        # run_update_prices saf DB isidir, her kosulda calismalidir.
         try:
-            await asyncio.wait_for(asyncio.to_thread(run_fetch_markets), timeout=_FETCH_TIMEOUT)
+            await asyncio.wait_for(asyncio.to_thread(run_fetch_markets), timeout=_MARKET_FETCH_TIMEOUT)
+        except asyncio.CancelledError:
+            logger.info("Price poller cancelled")
+            break
+        except asyncio.TimeoutError:
+            logger.error("Price poll fetch timed out - refresh/update devam ediyor")
+        except Exception as e:
+            logger.error("Price poll fetch error: %s - refresh/update devam ediyor", e)
+        if not state.is_running:
+            break
+        try:
             # Refresh prices for markets we still hold (public-search stops
             # returning ended markets, so their stored price freezes). This
             # keeps the dashboard / PnL live through resolution.
             await asyncio.wait_for(asyncio.to_thread(run_refresh_open_prices), timeout=_FETCH_TIMEOUT)
+        except asyncio.CancelledError:
+            logger.info("Price poller cancelled")
+            break
+        except asyncio.TimeoutError:
+            logger.error("Price poll refresh timed out - update devam ediyor")
+        except Exception as e:
+            logger.error("Price poll refresh error: %s - update devam ediyor", e)
+        if not state.is_running:
+            break
+        try:
             await asyncio.wait_for(asyncio.to_thread(run_update_prices), timeout=_FETCH_TIMEOUT)
             state.last_price_update = datetime.now(timezone.utc).replace(tzinfo=None)
         except asyncio.CancelledError:
             logger.info("Price poller cancelled")
             break
         except asyncio.TimeoutError:
-            logger.error("Price poll timed out — retry in 60s")
+            logger.error("Price poll update timed out - retry in 60s")
             await asyncio.sleep(60)
+            continue
         except Exception as e:
-            logger.error("Price poll error: %s — retry in 60s", e)
+            logger.error("Price poll update error: %s - retry in 60s", e)
             await asyncio.sleep(60)
-        else:
-            # 2 gun sonrasi bahisler acildiysa 20 dk boyunca her dakika fiyat
-            # cek (state.fast_price_until), sonra tekrar 5 dk'ya don.
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
-            interval = _get_price_poll_interval(state, now)
-            await asyncio.sleep(interval)
+            continue
+        # 2 gun sonrasi bahisler acildiysa 20 dk boyunca her dakika fiyat
+        # cek (state.fast_price_until), sonra tekrar 5 dk'ya don.
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        interval = _get_price_poll_interval(state, now)
+        await asyncio.sleep(interval)
     logger.info("Price poller loop exited (is_running=%s)", state.is_running)
 
 
@@ -363,16 +396,16 @@ async def scan_and_bet_loop(state):
                     _probe_target = None
             if _probe_target is not None:
                 try:
-                    await asyncio.wait_for(asyncio.to_thread(run_fetch_markets), timeout=_FETCH_TIMEOUT)
+                    await asyncio.wait_for(asyncio.to_thread(run_fetch_markets), timeout=_MARKET_FETCH_TIMEOUT)
                 except asyncio.TimeoutError:
-                    logger.error("Fetch markets timed out (%ds)", _FETCH_TIMEOUT)
+                    logger.error("Fetch markets timed out (%ds)", _MARKET_FETCH_TIMEOUT)
                 except Exception as e:
                     logger.error("Fetch markets failed (%s)", e)
             elif not _is_midnight_window(now_fetch):
                 try:
-                    await asyncio.wait_for(asyncio.to_thread(run_fetch_markets), timeout=_FETCH_TIMEOUT)
+                    await asyncio.wait_for(asyncio.to_thread(run_fetch_markets), timeout=_MARKET_FETCH_TIMEOUT)
                 except asyncio.TimeoutError:
-                    logger.error("Fetch markets timed out (%ds) — continuing with stale data", _FETCH_TIMEOUT)
+                    logger.error("Fetch markets timed out (%ds) — continuing with stale data", _MARKET_FETCH_TIMEOUT)
                 except Exception as e:
                     logger.error("Fetch markets failed (%s) — continuing with stale data", e)
 
@@ -688,6 +721,20 @@ async def _run_daily_maintenance() -> None:
 
     if should_run():
         await asyncio.to_thread(run_evolution_cycle)
+
+    # ── HEAT tahmin motoru (2026-10-27, S15) ─────────────────────────────
+    # Tek sema / tek surec: HEAT tahminleri artik Junbo'nun kendi gunluk
+    # bakiminda tuketilir. Once bu job HICBIR yerden cagrilmiyordu (olu kod)
+    # ve depo semasi koptugu icin weather_forecasts'a tek satir bile
+    # yazilmamisti. Hata izole edilir: HEAT cokse bile bakim devam eder.
+    try:
+        from jobs.heat_mos_job import maybe_run as run_heat_mos
+
+        heat_result = await asyncio.to_thread(run_heat_mos)
+        if heat_result:
+            logger.info("HEAT tahmin guncellemesi: %s", heat_result)
+    except Exception as e:
+        logger.error("HEAT tahmin guncellemesi basarisiz: %s", e)
 
     # ── Pre-flight safety check (logs warnings if strategy params unsafe) ─
 

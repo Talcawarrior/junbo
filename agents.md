@@ -109,7 +109,7 @@ Bulunan her bug düzeltilip test edilmeli, sonra commit atılmalı.
 **GUNCEL STRATEJI (2026-08-20, bakiniz: CLAUDE.md bolum 2 — yetkili config):**
 
 **1) SPREAD modu (ana, `BETTING_STRATEGY=spread`):**
-- `spread_radius=0` (tek esik = tahminin merkezi), `spread_max_cities=15` (en az |bias| sapan sehir), `spread_max_entry=0.95`, `spread_stake_usd=2.0`, gunluk limit 120
+- `spread_radius=0` (tek esik = tahminin merkezi), `spread_max_cities=40` (en az |bias| sapan sehir), `spread_max_entry=0.50`, `spread_stake_usd=2.0`, gunluk limit 120 (2026-11-13 .env dogrulamasi)
 - Acilan betler settlement'a kadar TUTULUR (kayan pencere KAPALI); erken kapanis mekanizmalari (SL/TP/TS/time-decay/reopen) YOKTUR
 - Giris fiyati canli `weather_markets.yes_price` (5 dk); fiyat 0.01-0.95 arasi her seye bet acilir; derinlik siniri YOK (kullanici karari)
 
@@ -166,7 +166,7 @@ Bot'un çalıştığını doğrula:
 python -c "
 import urllib.request, json
 try:
-    r = urllib.request.urlopen('http://127.0.0.1:8093/health', timeout=5)
+    r = urllib.request.urlopen('http://127.0.0.1:8093/api/health-check', timeout=5)
     data = json.loads(r.read())
     print(f'Health OK: {data}')
 except Exception as e:
@@ -357,7 +357,8 @@ Degisiklik oldugunda bu bolumu de guncelle.
   REMOTE URL'DE GOMULU PUSH TOKENI VAR (`ghp_...@`). Asla bu token'i logla/goster.
   Repo tasinma olayi BILINIYOR; her prompt'ta "repo tasinmis" diye YENIDEN kesfetme.
 - **Bot modu: PAPER (DRY_RUN).** Gercek Polymarket trade'i ASLA acilmaz. Sorma.
-- **Strateji: SPREAD (ana mod).** `spread_radius=3`, `spread_max_cities=15`,
+- **Canli DB yolu:** `.env` `DB_PATH=D:\JUNBO data\bot.db`. Repo `data/bot.db` ticaret icin KULLANILMAZ; activity/peak_watch dahil tum path'ler `utils/db_paths.py` uzerinden okunur. `/health` endpoint'i YOK; dogru: `/api/status`, `/api/health-check`.
+- **Strateji: SPREAD (ana mod).** `spread_radius=0`, `spread_max_cities=40`,
   `spread_max_entry=0.50` (0.50 ve ustu fiyata O SEHRE HIC GIRILMEZ — 0.50->1.00
   sadece 2x, zararli; kullanici karari 2026-08-11), `spread_stake_usd=2.0`,
   `spread_max_bets_per_day=350` (3 gun x 15 sehir x 7 = 315 + marj),
@@ -414,7 +415,7 @@ Degisiklik oldugunda bu bolumu de guncelle.
   4b. **`spread_max_entry=0.30`.** Backtest en iyi config (kayan pencere + 0.30
      -> +$53,284). 0.30 ustu fiyatli esiklere girilmez. (Onceden 0.99 denenmis,
      kullanici "fiyat onemsiz" demisti; sonra veri 0.30'u gosterdi.)
-- **Son suite durumu:** 667 passed, 8 skipped, 0 failed.
+- **Son suite durumu:** 773 passed, 7 skipped, 0 failed (2026-11-13).
   (Ignore: test_betting_idempotency, test_comprehensive).
 - **Test DB izole:** `tests/conftest.py` temp DB'ye yonlendirir — suite bot
   CALISIYORKEN de production DB'ye dokunmaz. Yine de guvenli tarafta kalmak icin

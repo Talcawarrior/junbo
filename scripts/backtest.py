@@ -30,6 +30,11 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import sys as _sys
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+from utils.db_paths import get_data_dir, get_db_path  # noqa: E402
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
@@ -39,9 +44,9 @@ from utils.market_outcome import parse_resolved_outcome  # noqa: E402
 from utils.probability import normal_cdf, estimate_probability_empirical  # noqa: E402
 from scrapers.metar import city_utc_offset  # noqa: E402  (M3: gercek saat dilimi)
 
-BOT_DB = os.path.join(_REPO_ROOT, "data", "bot.db")
-OB_DB = os.path.join(_REPO_ROOT, "data", "orderbook.db")
-BP_DB = os.path.join(_REPO_ROOT, "data", "backtest_prices.db")
+BOT_DB = get_db_path()
+OB_DB = os.path.join(get_data_dir(), "orderbook.db")
+BP_DB = os.path.join(get_data_dir(), "backtest_prices.db")
 
 # Tum gercekci backtestlerde ortak maliyet modeli (ayni degerler).
 FEE_RATE = 0.05
@@ -95,15 +100,30 @@ def first_ask_below(series, max_entry) -> float | None:
     return None
 
 
-def peak_lock(rows: list[tuple[float, float]], utc_off: float, min_hour: int = 13) -> tuple[float | None, float | None]:
+def peak_lock(
+    rows: list[tuple[float, float]],
+    utc_off: float,
+    min_hour: int = 13,
+    confirmation_minutes: int = 30,
+) -> tuple[float | None, float | None]:
     """KILITLI METAR peak + kilitlenme epoch'u - scrapers/metar.py detect_peak
     ile BIREBIRE ayni kural. 2026-08-18 kullanici: 1 dusus YETERLI (20 21 22
     22 21 -> 22 kilitlenir, ikinci dusus beklenmez); zirve asilirsa kapat +
     yeni zirveye ac (aktar). (peak_temp, lock_epoch) ya da (None, None).
+
+    2026-10-22 DUZELTME (commit 05159a9 sonrasi ayrisma): detect_peak 1. dusustan
+    sonra `confirmation_minutes` (30 dk) onay penceresi istiyor ve esitlige
+    donus adayi IPTAL ediyor; bu fonksiyon eski (1. dususta kilit) kurali
+    uyguluyordu -> backtest canli bot'tan ERKEN kilitliyor, sonucu gercekci
+    degil. Artik detect_peak ile ayni state machine kullanilir; kilitlenme
+    epoch'u TEYIT gozleminin epoch'u (bet canlida ancak o zaman acilabilir).
     """
     if len(rows) < 3:
         return (None, None)
     cummax = rows[0][1]
+    candidate = None
+    candidate_time = None
+    confirmation_seconds = confirmation_minutes * 60
     for epoch, cur in rows[1:]:
         local_dt = datetime.fromtimestamp(epoch + utc_off * 3600, tz=timezone.utc)
         if local_dt.hour < min_hour:
@@ -111,8 +131,19 @@ def peak_lock(rows: list[tuple[float, float]], utc_off: float, min_hour: int = 1
             continue
         if cur > cummax:
             cummax = cur
+            candidate = None
+            candidate_time = None
         elif cur < cummax:
-            return (cummax, epoch)
+            if candidate is None:
+                # ILK DUSUS: aday zirve = cummax, onay saati baslat
+                candidate = cummax
+                candidate_time = epoch
+            elif epoch - candidate_time >= confirmation_seconds:
+                # Onay suresi doldu, temp hala cummax altinda -> KILIT
+                return (candidate, epoch)
+        else:  # cur == cummax -> aday iptal (zirve tekrar test edildi)
+            candidate = None
+            candidate_time = None
     return (None, None)
 
 

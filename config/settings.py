@@ -1,5 +1,6 @@
 """Junbo - Polymarket Weather Prediction Bot - Configuration Dataclasses & Legacy Config."""
 
+import json
 import os
 from dataclasses import dataclass
 
@@ -24,6 +25,11 @@ def _resolve_path(path_value: str, default_relative: str) -> str:
     if os.path.isabs(raw):
         return raw
     return os.path.join(BASE_DIR, raw)
+
+
+# 2026-10-22: Yeni sehir kefi job'i (jobs/new_city_job.py) bu yolu
+# config.settings'den okuyordu ama sabit HIC tanimli degildi -> import hatasi.
+CITY_OVERRIDES_PATH = _resolve_path(os.getenv("CITY_OVERRIDES_PATH", ""), "config/city_overrides.json")
 
 
 @dataclass
@@ -83,6 +89,40 @@ class MeteoConfig:
     openmeteo_url: str = "https://api.open-meteo.com/v1/forecast"
     weatherapi_key: str = os.getenv("WEATHERAPI_KEY", "")
     weatherapi_url: str = "https://api.weatherapi.com/v1"
+
+    # 2026-10-22: Ucretsiz/ucuz hava durumu kaynak endpointleri.
+    # utils/weather_sources.py bu alanlari import aninda okuyordu ama
+    # MeteoConfig'te tanimli DEGILDI -> modul import hatasi veriyordu
+    # (test_import_all_modules: 'MeteoConfig' object has no attribute 'iem_url').
+    iem_url: str = "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py"
+    nws_url: str = "https://api.weather.gov"
+    aviation_url: str = "https://aviationweather.gov/api/data"
+    vc_url: str = "https://timeline-api.weather.com/timeline"
+
+    # Visual Crossing anahtar havuzu (virgulle ayrilmis liste).
+    vc_api_key: str = os.getenv("VC_API_KEY", "")
+    vc_api_keys: list = None  # type: ignore[assignment]
+
+    # VC anahtar rotasyon indeksi (runtime durumu).
+    _vc_key_index: int = 0
+
+    def __post_init__(self) -> None:
+        if self.vc_api_keys is None:
+            raw = os.getenv("VC_API_KEYS", "")
+            self.vc_api_keys = [k.strip() for k in raw.split(",") if k.strip()]
+        if not self.vc_api_key and self.vc_api_keys:
+            self.vc_api_key = self.vc_api_keys[0]
+
+    def next_vc_key(self) -> str:
+        """Siradaki Visual Crossing anahtarini dondurur."""
+        if not self.vc_api_keys:
+            return self.vc_api_key
+        self._vc_key_index = (self._vc_key_index + 1) % len(self.vc_api_keys)
+        return self.vc_api_keys[self._vc_key_index]
+
+    def rotate_vc_key(self) -> str:
+        """Mevcut VC anahtarini degistirir (429 sonrasi kullanilir)."""
+        return self.next_vc_key()
 
 
 @dataclass
@@ -653,11 +693,53 @@ bot_config = BotConfig()
 Config = _ConfigProxy()
 config = Config  # alias used by older modules
 
+
+# 2026-10-22: Canli sehir/koordinat haritalari.
+# jobs/new_city_job.py her dongude `from config.settings import get_live_city_map`
+# yapiyordu ama fonksiyon HIC tanimli degildi -> ImportError ile job cokuyordu.
+def get_live_city_map() -> dict:
+    """Canli sehir token -> ICAO haritasi (temel harita + city_overrides.json).
+
+    Overrides dosyasi yoksa/bozuksa sadece temel harita doner.
+    """
+    live = dict(_CITY_ICAO_MAP)
+    try:
+        with open(CITY_OVERRIDES_PATH, encoding="utf-8") as fh:
+            data = json.load(fh)
+        for token, icao in (data.get("aliases") or {}).items():
+            live[str(token).lower()] = icao
+    except Exception:  # noqa: BLE001 - eksik/bozuk overrides dosyasi kritik degil
+        pass
+    return live
+
+
+def get_live_icao_coords() -> dict:
+    """Canli ICAO -> (lat, lon) koordinat haritasi (temel + city_overrides.json)."""
+    coords = {icao: (float(v[0]), float(v[1])) for icao, v in _ICAO_COORDS.items()}
+    try:
+        with open(CITY_OVERRIDES_PATH, encoding="utf-8") as fh:
+            data = json.load(fh)
+        for icao, xy in (data.get("coords") or {}).items():
+            coords[icao] = (float(xy[0]), float(xy[1]))
+    except Exception:  # noqa: BLE001 - eksik/bozuk overrides dosyasi kritik degil
+        pass
+    return coords
+
+
 # Auto-set proxy env vars for ALL requests (covers ClobClient + direct calls)
 if bot_config.polymarket.proxy_url:
     os.environ["HTTP_PROXY"] = bot_config.polymarket.proxy_url
     os.environ["HTTPS_PROXY"] = bot_config.polymarket.proxy_url
     os.environ["ALL_PROXY"] = bot_config.polymarket.proxy_url
+    # gamma-api moved to CloudFront; the hosts pin answers HTTP 421.
+    # Resolve it through DoH for this process only (POLY_DNS_FIX=0 disables).
+    if os.getenv("POLY_DNS_FIX", "1") != "0":
+        try:
+            from utils.poly_dns import install as _install_poly_dns
+
+            _install_poly_dns(bot_config.polymarket.proxy_url)
+        except Exception:  # noqa: BLE001 - DNS fix is best effort
+            pass
 
 
 def _load_strategy_params() -> dict:

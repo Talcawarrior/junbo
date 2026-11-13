@@ -5,13 +5,16 @@ import sqlite3
 import shutil
 import tempfile
 import os
-import sys
+import sys as _sys
+from pathlib import Path as _Path
 
-sys.path.insert(0, r"C:\Users\fdemir\Documents\New project\junbo")
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+from utils.db_paths import get_data_dir, get_db_path  # noqa: E402
+
 from utils.market_outcome import parse_resolved_outcome
 from collections import defaultdict
 
-BOT_DB = r"C:\Users\fdemir\Documents\New project\junbo\data\bot.db"
+BOT_DB = get_db_path()
 STAKE = 2.0
 FEE = 0.05
 GAS = 0.10
@@ -58,7 +61,7 @@ for r in cur.execute(
 # orderbook kopyala (kilitli)
 fd, tmp = tempfile.mkstemp(suffix=".db")
 os.close(fd)
-shutil.copy2(r"C:\Users\fdemir\Documents\New project\junbo\data\orderbook.db", tmp)
+shutil.copy2(os.path.join(get_data_dir(), "orderbook.db"), tmp)
 ob = sqlite3.connect(tmp, timeout=10)
 clob = {}  # (code, day, thr) -> best_ask (ilk gorulen)
 for mid, ask, stime in ob.execute(
@@ -125,12 +128,12 @@ for day in sorted(by_day):
     bets = by_day[day]
     day_pnl = sum(b["gain"] for b in bets)
     day_won = sum(1 for b in bets if b["won"])
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print(
-        f"=== {day} | bet={len(bets)} kazanan={day_won} kaybeden={len(bets)-day_won} "
-        f"win-rate={day_won/max(len(bets),1)*100:.1f}% | TOPLAM=${day_pnl:.2f}"
+        f"=== {day} | bet={len(bets)} kazanan={day_won} kaybeden={len(bets) - day_won} "
+        f"win-rate={day_won / max(len(bets), 1) * 100:.1f}% | TOPLAM=${day_pnl:.2f}"
     )
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
     for b in sorted(bets, key=lambda x: x["thr"]):
         mark = "KAZANDI" if b["won"] else "kaybetti"
         print(f"  {b['city']:<16} esik={b['thr']:>5.1f}C giris={b['entry']:.4f}  {mark:8}  {b['gain']:+.2f}")

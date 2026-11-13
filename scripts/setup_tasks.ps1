@@ -5,8 +5,10 @@ $W = "C:\Users\fdemir\Documents\New project\junbo"
 $tasks = @(
     @{Name="Junbo-OrderbookCollect"; Script="collect_orderbook.py"; Trigger="every10m"},
     @{Name="Junbo-ActualsCollect"; Script="collect_actuals.py"; Trigger="every6h"},
-    @{Name="Junbo-BackupDatabases"; Script="backup_databases.py"; Trigger="every6h"},
     @{Name="Junbo-SyncBacktest"; Script="sync_backtest_db.py"; Trigger="every6h"},
+    @{Name="Junbo-ArchiveForecasts"; Script="archive_forecasts.py"; Trigger="every6h"},
+    @{Name="Junbo-DataCatalog"; Script="build_data_catalog.py"; Trigger="every6h"},
+    @{Name="Junbo-StrategySleeves"; Script="strategy_sleeves_report.py"; Trigger="daily"},
     @{Name="JunboBotWatchdog"; Script="bot_watchdog.py"; Trigger="every1m"},
     @{Name="JunboSnapshot"; Script="..\snapshot_task.bat"; Trigger="every30m"; IsBat=$true}
 )
@@ -39,6 +41,9 @@ foreach ($t in $tasks) {
             }
             "every6h" {
                 $trig = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Hours 6)
+            }
+            "daily" {
+                $trig = New-ScheduledTaskTrigger -Daily -At "00:15"
             }
             default {
                 $trig = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1)

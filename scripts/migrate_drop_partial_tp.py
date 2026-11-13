@@ -10,14 +10,20 @@ zaten kullanilmiyor, tum degerler default False).
 Kullanim:
     python scripts/migrate_drop_partial_tp.py
 """
+
 import os
 import sqlite3
 import shutil
 import sys
 from datetime import datetime
+import sys as _sys
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+from utils.db_paths import get_db_path  # noqa: E402
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BOT_DB = os.path.join(_REPO_ROOT, "data", "bot.db")
+BOT_DB = get_db_path()
 
 
 def main() -> int:

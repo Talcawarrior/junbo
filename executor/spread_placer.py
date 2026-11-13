@@ -381,6 +381,7 @@ def _place_spread_bets_inner(session, target_day) -> dict:
                 shares=shares,
                 current_price=fill_price,
                 status="placed",
+                bet_type="spread",
                 order_id=f"spread_{mkt.id}_{ts}",
                 placed_at=now,
                 entry_fee=round(entry_fee, 4),

@@ -45,9 +45,41 @@ try:
 except Exception:  # pragma: no cover - fallback only when lib missing
     _HAVE_CRYPTO = False
 
-DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-DB_PATH = os.path.join(DB_DIR, "bot.db")
-BACKUP_DIR = os.path.join(DB_DIR, "backups")
+from utils.db_paths import get_db_path  # noqa: E402
+
+# Tests monkeypatch these module attributes; an empty value means
+# "resolve from the live config on every call".
+DB_DIR = ""
+DB_PATH = ""
+BACKUP_DIR = ""
+
+
+def _db_path() -> str:
+    """Resolve per call; an explicit module override wins (tests)."""
+    override = DB_PATH
+    if override:
+        return str(override)
+    return get_db_path()
+
+
+def _db_dir() -> str:
+    override = DB_DIR
+    if override:
+        return str(override)
+    return os.path.dirname(_db_path())
+
+
+def _backup_dir() -> str:
+    override = BACKUP_DIR
+    if override:
+        return str(override)
+    return os.path.join(_db_dir(), "backups")
+
+
+def _startup_marker() -> str:
+    return os.path.join(_db_dir(), ".last_startup_backup")
+
+
 # Keep a month of full-DB copies (gunde 1 scheduled backup -> ~30 gunluk
 # geri donus noktasi). Uzun backtest / felaket kurtarma icin 5 cok azdi
 # (2026-08-11 kullanici karari). 30 x ~210MB = ~6.3GB — disk dolu degilken uygun.
@@ -55,15 +87,14 @@ MAX_BACKUPS = 30
 # "startup" backup'lari her bot restartinda alinir (gun gelistirme surecinde
 # 20+ restart). 270MB x 30 = ~8GB birikiyordu. Startup backup'i GUNDE 1 kez
 # alinir (marker) — geri donus noktasi ayni, disk tasarrufu buyuk (2026-08-16).
-STARTUP_DAILY_MARKER = os.path.join(DB_DIR, ".last_startup_backup")
 PBKDF2_ITERATIONS = 200_000
 
 
 def _startup_backup_due() -> bool:
     """Startup backup'i bugun henuz alinmadiysa True (gunde 1 kez)."""
     try:
-        if os.path.exists(STARTUP_DAILY_MARKER):
-            with open(STARTUP_DAILY_MARKER) as fh:
+        if os.path.exists(_startup_marker()):
+            with open(_startup_marker()) as fh:
                 last = fh.read().strip()
             if last == datetime.now().strftime("%Y%m%d"):
                 return False
@@ -74,7 +105,7 @@ def _startup_backup_due() -> bool:
 
 def _mark_startup_backup() -> None:
     try:
-        with open(STARTUP_DAILY_MARKER, "w") as fh:
+        with open(_startup_marker(), "w") as fh:
             fh.write(datetime.now().strftime("%Y%m%d"))
     except Exception:  # noqa: BLE001
         pass
@@ -139,7 +170,7 @@ def _label_of(filename):
 
 def _discover_labels():
     labels = set()
-    for f in glob.glob(os.path.join(BACKUP_DIR, "bot_*.db")):
+    for f in glob.glob(os.path.join(_backup_dir(), "bot_*.db")):
         labels.add(_label_of(f))
     return labels
 
@@ -174,10 +205,10 @@ def _prune_dir(directory, label):
 def _prune_backups(label=None):
     """Keep only the newest MAX_BACKUPS local backups, scoped per label."""
     if label:
-        _prune_dir(BACKUP_DIR, label)
+        _prune_dir(_backup_dir(), label)
     else:
         for lbl in _discover_labels():
-            _prune_dir(BACKUP_DIR, lbl)
+            _prune_dir(_backup_dir(), lbl)
 
 
 def _shutil_copy(src, dst):
@@ -268,22 +299,22 @@ def create_backup(label="auto"):
     # Startup backup'lari gunde 1 kez (her bot restartinda 270MB birikiyordu)
     if label == "startup" and not _startup_backup_due():
         return None
-    os.makedirs(BACKUP_DIR, exist_ok=True)
+    os.makedirs(_backup_dir(), exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     backup_name = f"bot_{label}_{timestamp}.db"
-    backup_path = os.path.join(BACKUP_DIR, backup_name)
+    backup_path = os.path.join(_backup_dir(), backup_name)
     # Avoid collisions if two backups land in the same microsecond.
     suffix = 0
     while os.path.exists(backup_path):
         suffix += 1
-        backup_path = os.path.join(BACKUP_DIR, f"bot_{label}_{timestamp}_{suffix}.db")
+        backup_path = os.path.join(_backup_dir(), f"bot_{label}_{timestamp}_{suffix}.db")
 
-    if not os.path.exists(DB_PATH):
-        print(f"WARNING: {DB_PATH} not found, skipping backup")
+    if not os.path.exists(_db_path()):
+        print(f"WARNING: {_db_path()} not found, skipping backup")
         return None
 
     try:
-        src = sqlite3.connect(DB_PATH)
+        src = sqlite3.connect(_db_path())
         try:
             dst = sqlite3.connect(backup_path)
             try:
@@ -319,10 +350,10 @@ def create_backup(label="auto"):
 
 
 def list_backups():
-    if not os.path.exists(BACKUP_DIR):
+    if not os.path.exists(_backup_dir()):
         print("No backups found")
         return []
-    backups = sorted(glob.glob(os.path.join(BACKUP_DIR, "bot_*.db")))
+    backups = sorted(glob.glob(os.path.join(_backup_dir(), "bot_*.db")))
     for b in backups:
         size_kb = os.path.getsize(b) / 1024
         mtime = datetime.fromtimestamp(os.path.getmtime(b))
@@ -332,7 +363,7 @@ def list_backups():
 
 def restore_backup(backup_path=None, offsite=False):
     if backup_path is None:
-        search_dir = _offsite_dir() if offsite else BACKUP_DIR
+        search_dir = _offsite_dir() if offsite else _backup_dir()
         pattern = "bot_*.db.enc" if (offsite and _backup_key()) else "bot_*.db"
         backups = sorted(glob.glob(os.path.join(search_dir, pattern)))
         if not backups:
@@ -359,27 +390,27 @@ def restore_backup(backup_path=None, offsite=False):
         source = backup_path
 
     # Preserve the current (possibly corrupted) DB before overwriting.
-    if os.path.exists(DB_PATH):
-        fallback = DB_PATH + f".pre_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        _shutil_copy(DB_PATH, fallback)
+    if os.path.exists(_db_path()):
+        fallback = _db_path() + f".pre_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        _shutil_copy(_db_path(), fallback)
         print(f"Current DB saved as: {os.path.basename(fallback)}")
 
     # Drop any stale wal/shm so the restored single-file DB starts clean.
     for ext in ("-wal", "-shm"):
-        p = DB_PATH + ext
+        p = _db_path() + ext
         if os.path.exists(p):
             os.unlink(p)
 
-    _shutil_copy(source, DB_PATH)
+    _shutil_copy(source, _db_path())
     for ext in ("-wal", "-shm"):
         src = source + ext
         if os.path.exists(src):
-            _shutil_copy(src, DB_PATH + ext)
+            _shutil_copy(src, _db_path() + ext)
 
     if backup_path.endswith(".enc"):
         os.unlink(source)
 
-    if not _verify_sqlite(DB_PATH):
+    if not _verify_sqlite(_db_path()):
         print("WARNING: restored DB failed integrity_check")
         return False
 

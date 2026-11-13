@@ -37,22 +37,38 @@ class TestDetectPeakMorningBug:
         assert confirmed is False, f"sabah dususu zirve sayilmamali: peak={peak}"
 
     def test_ogleden_sonra_1_dusus_kilitler(self):
-        """2026-08-18 kullanici: 1 dusus YETERLI — 31'den sonra 30 gelirse
-        zirve 31 kilitlenir, ikinci dusus beklenmez (erken giris)."""
+        """2026-08-18 kullanici: 1 dusus YETERLI - 31'den sonra 30 gelirse
+        zirve 31 kilitlenir, ikinci dusus beklenmez (erken giris).
+
+        2026-09-07 kurali (commit 05159a9): 1. dusus aday zirve yaratir, ancak
+        kilit icin `confirmation_minutes` (30 dk) boyunca sicaklik cummax'in
+        ALTINDA kalmalidir. Bu yuzden test verisine dusustEN 30+ dk sonra bir
+        gozlem eklenir; oncesinde (17:00 olcumunden once) kilitlenmez.
+        """
         from scrapers.metar import detect_peak
 
-        # 15:00 31, 16:00 30 -> 31 kilitlenmeli (1 dusus)
-        rows = _rows_at([(13, 28.0), (14, 30.0), (15, 31.0), (16, 30.0)])
+        # 15:00 31, 16:00 30 (1. dusus), 17:00 29 (30 dk onay doldu) -> 31 kilitlenir
+        rows = _rows_at([(13, 28.0), (14, 30.0), (15, 31.0), (16, 30.0), (17, 29.0)])
         peak, confirmed = detect_peak(rows)
         assert confirmed is True
         assert peak == 31.0
 
-    def test_esitlik_dusus_sayilmaz_sonraki_dusus_kilitler(self):
-        """20 21 22 22 21 ornegi: 22'den sonra 22 (esit) dusus degil,
-        sonraki 21 dususu 22'yi kilitler (kullanici ornegi 2026-08-18)."""
+    def test_dusus_sonrasi_30dk_icinde_kilitlenmez(self):
+        """2026-09-07: 1. dususten sonra 30 dk dolmadan kilit OLUSMAZ."""
         from scrapers.metar import detect_peak
 
-        rows = _rows_at([(13, 20.0), (14, 21.0), (15, 22.0), (16, 22.0), (17, 21.0)])
+        # 16:00 30 (1. dusus), 16:30'dan once 30 dk dolmuyor -> kilit yok
+        rows = _rows_at([(13, 28.0), (14, 30.0), (15, 31.0), (16, 30.0)])
+        peak, confirmed = detect_peak(rows)
+        assert confirmed is False
+
+    def test_esitlik_dusus_sayilmaz_sonraki_dusus_kilitler(self):
+        """20 21 22 22 21 ornegi: 22'den sonra 22 (esit) dusus degil,
+        sonraki 21 dususu 22'yi aday yapar; 30 dk onay sonrasi kilitlenir
+        (kullanici ornegi 2026-08-18 + onay kurali 2026-09-07)."""
+        from scrapers.metar import detect_peak
+
+        rows = _rows_at([(13, 20.0), (14, 21.0), (15, 22.0), (16, 22.0), (17, 21.0), (18, 20.0)])
         peak, confirmed = detect_peak(rows)
         assert confirmed is True
         assert peak == 22.0

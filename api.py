@@ -269,10 +269,9 @@ def get_status():
         ) or 0.0
         daily_pnl = round(daily_pnl, 2)
 
-        realized_pnl_db = (
-            db.query(func.coalesce(func.sum(Bet.pnl), 0.0)).filter(Bet.status.in_(_closed_statuses)).scalar()
-        ) or 0.0
-        realized_pnl_db = round(realized_pnl_db, 2)
+        # Realized PnL (Closed bets) — SINGLE SOURCE: Bet.realized_pnl.
+        # (Bet.pnl is legacy; rotation-close used to update only realized_pnl,
+        # so Bet.pnl sums disagree. Do not use Bet.pnl here.)
 
         # 2. Unrealized PnL (Open bets)
         open_statuses = OPEN_BET_STATUSES
@@ -508,10 +507,13 @@ def get_status():
                 "max_openable_now": max_openable_now,
                 "capital_basis": round(capital_basis, 2),
                 "previous_day_realized_pnl": round(float(realized_before_today), 2),
-                # Formuller (Seffaflik icin)
+                # Formuller (Seffaflik icin) — ekranda gosterilen degerlerin KAYNAGI.
+                # portfoy_degeri o anki DB degerlerinden hesaplanir:
+                # nakit + acik stake + acik PnL (Sermaye + toplam PnL DEGIL;
+                # nakit gecmis reset/islemlerden gelen birikimli bakiyedir).
                 "formullar": {
-                    "portfoy_degeri": "Sermaye + Gerceklesmis PnL + Gerceklesmemis PnL",
-                    "nakit": "Sermaye - Acik Pozisyonlar Toplami + Gerceklesmis Kazanclar",
+                    "portfoy_degeri": "Nakit + Acik Pozisyonlar Toplami + Gerceklesmemis PnL",
+                    "nakit": "Portfolio tablosundaki birikimli nakit bakiyesi",
                     "acik_pozisyonlar": "Tum Acik Bet Tutari Toplami",
                     "toplam_pnl": "Gerceklesmis PnL + Gerceklesmemis PnL",
                     "sermaye_bazi": "Baslangic sermayesi + bugunden once kapanan betlerin net PnL'i",
@@ -1098,8 +1100,11 @@ def get_history():
 
 @app.get("/api/equity-curve")
 def get_equity_curve():
-    """Daily equity curve from ALL settled + closed_early bets (no limit).
+    """Daily equity curve from ALL closed bets (no limit).
 
+    SINGLE SOURCE: Bet.realized_pnl, statuses won/lost/settled/closed_early
+    AND rotation-"closed" (2026-10-13 fix: "closed" eksikti, grafik rotation
+    zararlarini gostermeyip ~800 yuksek ciziyordu).
     Returns [{date, pnl, count}] for every day that had at least one closure.
     The frontend starts from INITIAL_PORTFOLIO and accumulates daily PnL.
     """
@@ -1108,7 +1113,7 @@ def get_equity_curve():
     db = get_db_session()
     try:
         initial = state.config.INITIAL_PORTFOLIO
-        closed_statuses = ("won", "lost", "settled", "closed_early")
+        closed_statuses = ("won", "lost", "settled", "closed_early", "closed")
         close_col = func.coalesce(Bet.settled_at, Bet.closed_at)
         # SQLite: use date() function to extract calendar date from datetime string
         day_expr = func.date(close_col)
@@ -1117,7 +1122,7 @@ def get_equity_curve():
         rows = (
             db.query(
                 day_expr.label("day"),
-                func.sum(Bet.pnl).label("daily_pnl"),
+                func.sum(Bet.realized_pnl).label("daily_pnl"),
                 func.count(Bet.id).label("cnt"),
             )
             .filter(Bet.status.in_(closed_statuses))
@@ -1481,22 +1486,38 @@ def get_health_check():
             .all()
         )
 
+        def _bet_pnl(b: Bet) -> float:
+            """Tek kaynak: realized_pnl, yoksa legacy pnl."""
+            return float(b.realized_pnl if b.realized_pnl is not None else (b.pnl or 0.0))
+
+        def _is_rotation(b: Bet) -> bool:
+            return b.status in ("closed", "closed_early") and (b.close_reason or "").lower() == "rotation"
+
         total_settled = len(settled_all)
-        wins_all = sum(1 for b in settled_all if (b.realized_pnl if b.realized_pnl is not None else b.pnl or 0) > 0)
-        losses_all = sum(1 for b in settled_all if (b.realized_pnl if b.realized_pnl is not None else b.pnl or 0) <= 0)
+        wins_all = sum(1 for b in settled_all if _bet_pnl(b) > 0)
+        losses_all = sum(1 for b in settled_all if _bet_pnl(b) <= 0)
         win_rate_all = win_rate_pct(wins_all, total_settled)
-        total_pnl_all_health = sum(
-            float(b.realized_pnl if b.realized_pnl is not None else b.pnl or 0.0) for b in settled_all
-        )
+        total_pnl_all_health = sum(_bet_pnl(b) for b in settled_all)
         total_stake_all_health = sum(b.amount or 0.0 for b in settled_all)
         roi_all = roi_pct(total_pnl_all_health, total_stake_all_health)
+
+        # 4a. Rotation vs settlement breakdown. Rotation closes are real
+        # exits but they are not settlement wins/losses; reporting them as
+        # one pool makes the health verdict misleading for spread mode.
+        settlement_all = [b for b in settled_all if b.status in ("won", "lost", "settled")]
+        rotation_all = [b for b in settled_all if _is_rotation(b)]
+        settlement_wins_all = sum(1 for b in settlement_all if _bet_pnl(b) > 0)
+        settlement_losses_all = len(settlement_all) - settlement_wins_all
+        settlement_pnl_all = sum(_bet_pnl(b) for b in settlement_all)
+        rotation_pnl_all = sum(_bet_pnl(b) for b in rotation_all)
+        settlement_win_rate_all = win_rate_pct(settlement_wins_all, len(settlement_all))
 
         # 4b. Exit type breakdown for wins/losses (donut charts)
         # Early exits: rotation / tie-loser / manual. Settlement = ST.
         wins_by_exit = {"RT": 0, "TL": 0, "CL": 0, "OT": 0, "ST": 0}
         losses_by_exit = {"RT": 0, "TL": 0, "CL": 0, "OT": 0, "ST": 0}
         for b in settled_all:
-            is_win = b.pnl and b.pnl > 0
+            is_win = _bet_pnl(b) > 0
             code = "ST"
             if b.status in ("closed", "closed_early") and b.close_reason:
                 cr = b.close_reason.lower()
@@ -1516,38 +1537,51 @@ def get_health_check():
         # 5. Red Flags - son 48 saatlik verilere gore
         red_flags = []
 
-        # Son 48 saatteki kayiplari say
-        recent_losses = sum(
-            1
-            for b in settled_all
-            if b.pnl is not None
-            and b.pnl <= 0
-            and ((b.settled_at and b.settled_at >= h48) or (b.closed_at and b.closed_at >= h48))
-        )
-        recent_total = sum(
-            1 for b in settled_all if ((b.settled_at and b.settled_at >= h48) or (b.closed_at and b.closed_at >= h48))
-        )
-        recent_wins = sum(
-            1
-            for b in settled_all
-            if b.pnl is not None
-            and b.pnl > 0
-            and ((b.settled_at and b.settled_at >= h48) or (b.closed_at and b.closed_at >= h48))
-        )
+        # 5a. Son 48 saat: rotation ve settlement ayri degerlendirilir.
+        recent_bets = [
+            b for b in settled_all if ((b.settled_at and b.settled_at >= h48) or (b.closed_at and b.closed_at >= h48))
+        ]
+        recent_total = len(recent_bets)
+        recent_wins = sum(1 for b in recent_bets if _bet_pnl(b) > 0)
+        recent_losses = sum(1 for b in recent_bets if _bet_pnl(b) <= 0)
+        recent_net_pnl = round(sum(_bet_pnl(b) for b in recent_bets), 2)
         recent_win_rate = win_rate_pct(recent_wins, recent_total)
 
+        recent_rotation = [b for b in recent_bets if _is_rotation(b)]
+        recent_settlement = [b for b in recent_bets if b.status in ("won", "lost", "settled")]
+        recent_rotation_pnl = round(sum(_bet_pnl(b) for b in recent_rotation), 2)
+        recent_settlement_pnl = round(sum(_bet_pnl(b) for b in recent_settlement), 2)
+        recent_settlement_wins = sum(1 for b in recent_settlement if _bet_pnl(b) > 0)
+        recent_settlement_win_rate = win_rate_pct(recent_settlement_wins, len(recent_settlement))
+
         if recent_total >= 10 and recent_losses >= 7:
-            red_flags.append(
-                {
-                    "severity": "critical",
-                    "message": (
-                        f"Son 48 saatte {recent_losses} kayip "
-                        f"(toplam {recent_total} sonuclanan). "
-                        f"Calibration bozuk olabilir."
-                    ),
-                    "action": "Botu durdur ve kalibrasyonu kontrol et.",
-                }
-            )
+            if recent_net_pnl < 0:
+                red_flags.append(
+                    {
+                        "severity": "critical",
+                        "message": (
+                            f"Son 48 saatte {recent_losses} kayip "
+                            f"(toplam {recent_total}), net PnL ${recent_net_pnl:.2f}. "
+                            f"Rotation maliyeti ${recent_rotation_pnl:.2f}. "
+                            f"Kalibrasyon/strateji bozuk olabilir."
+                        ),
+                        "action": "Botu durdur ve kalibrasyonu kontrol et.",
+                    }
+                )
+            else:
+                red_flags.append(
+                    {
+                        "severity": "info",
+                        "message": (
+                            f"Son 48 saatte {recent_losses} kapanis zararla kapandi "
+                            f"ama net PnL +${recent_net_pnl:.2f} "
+                            f"(rotation ${recent_rotation_pnl:.2f}, "
+                            f"settlement +${recent_settlement_pnl:.2f}). "
+                            f"Kayip sayisi tek basina yaniltici."
+                        ),
+                        "action": "Rotation maliyetini izle; settlement sonucu pozitif.",
+                    }
+                )
 
         if state.is_running and bets_opened_24h == 0:
             any_analyses = db.query(Analysis).filter(Analysis.analyzed_at >= h48).count()
@@ -1584,13 +1618,29 @@ def get_health_check():
             )
 
         if recent_total >= 5 and recent_win_rate < 50:
-            red_flags.append(
-                {
-                    "severity": "critical",
-                    "message": (f"Win rate %{win_rate_all:.1f} (5+ sonuclanmis bet). Model tahminleri guvenilmez."),
-                    "action": "Kalibrasyon verisini kontrol et, evrim calistir.",
-                }
-            )
+            if recent_net_pnl < 0:
+                red_flags.append(
+                    {
+                        "severity": "critical",
+                        "message": (
+                            f"Son 48 saatte win rate %{recent_win_rate:.1f} "
+                            f"(net PnL ${recent_net_pnl:.2f}). Model tahminleri guvenilmez."
+                        ),
+                        "action": "Kalibrasyon verisini kontrol et, evrim calistir.",
+                    }
+                )
+            else:
+                red_flags.append(
+                    {
+                        "severity": "info",
+                        "message": (
+                            f"Son 48 saatte win rate %{recent_win_rate:.1f} gorunuyor "
+                            f"ama net PnL +${recent_net_pnl:.2f}; rotation kapanislari sayiliyor. "
+                            f"Settlement win rate %{recent_settlement_win_rate:.1f}."
+                        ),
+                        "action": "Settlement win rate'i esas al; rotation oranini izle.",
+                    }
+                )
 
         open_total = db.query(Bet).filter(Bet.status.in_(OPEN_BET_STATUSES)).count()
         if bets_opened_24h > 50 or open_total > 50:
@@ -1604,16 +1654,11 @@ def get_health_check():
                 }
             )
 
-        recent_pnl = sum(
-            b.pnl or 0.0
-            for b in settled_all
-            if ((b.settled_at and b.settled_at >= h48) or (b.closed_at and b.closed_at >= h48))
-        )
-        if recent_pnl < 0 and recent_total >= 5:
+        if recent_net_pnl < 0 and recent_total >= 5:
             red_flags.append(
                 {
                     "severity": "warning",
-                    "message": (f"Son 48 saatte PnL negatif: ${recent_pnl:.2f}. Zarar trendi devam ediyor."),
+                    "message": (f"Son 48 saatte net PnL negatif: ${recent_net_pnl:.2f}. Zarar trendi devam ediyor."),
                     "action": "Botu izlemeye devam et. 3 gun sonunda karar ver.",
                 }
             )
@@ -1647,14 +1692,14 @@ def get_health_check():
                         Bet.settled_at < day_end,
                         Bet.closed_at < day_end,
                     ),
-                    Bet.status.in_(("won", "lost", "settled", "closed_early")),
+                    Bet.status.in_(("won", "lost", "settled", "closed_early", "closed")),
                 )
                 .all()
             )
-            day_pnl = sum(b.pnl or 0.0 for b in day_bets)
+            day_pnl = sum(_bet_pnl(b) for b in day_bets)
             day_stake = sum(b.amount or 0.0 for b in day_bets)
-            day_wins = sum(1 for b in day_bets if b.pnl and b.pnl > 0)
-            day_losses = sum(1 for b in day_bets if b.pnl is not None and b.pnl <= 0)
+            day_wins = sum(1 for b in day_bets if _bet_pnl(b) > 0)
+            day_losses = sum(1 for b in day_bets if _bet_pnl(b) <= 0)
             day_total = day_wins + day_losses
             daily_pnl.append(
                 {
@@ -1678,9 +1723,14 @@ def get_health_check():
         else:
             verdict = "warning"
 
+        strategy_mode = getattr(bot_config.strategy, "betting_strategy", "edge")
+        edge_metrics_available = bool(net_edges)
+
         return {
             "verdict": verdict,
             "is_running": state.is_running,
+            "strategy_mode": strategy_mode,
+            "edge_metrics_available": edge_metrics_available,
             "activity_24h": {
                 "bets_opened": bets_opened_24h,
                 "pass_reasons": pass_reasons,
@@ -1688,6 +1738,7 @@ def get_health_check():
             },
             "edge_distribution": {
                 "values": edge_values,
+                "available": edge_metrics_available,
                 "avg_net_edge_pct": round(avg_net_edge, 2),
                 "min_net_edge_pct": round(min_net_edge, 2),
                 "max_net_edge_pct": round(max_net_edge, 2),
@@ -1706,6 +1757,29 @@ def get_health_check():
                 "avg_net_edge_pct": round(avg_net_edge, 2),
                 "wins_by_exit": wins_by_exit,
                 "losses_by_exit": losses_by_exit,
+                "settlement": {
+                    "count": len(settlement_all),
+                    "wins": settlement_wins_all,
+                    "losses": settlement_losses_all,
+                    "win_rate_pct": round(settlement_win_rate_all, 1),
+                    "pnl": round(settlement_pnl_all, 2),
+                },
+                "rotation": {
+                    "count": len(rotation_all),
+                    "pnl": round(rotation_pnl_all, 2),
+                },
+            },
+            "recent_48h": {
+                "total": recent_total,
+                "wins": recent_wins,
+                "losses": recent_losses,
+                "win_rate_pct": round(recent_win_rate, 1),
+                "net_pnl": recent_net_pnl,
+                "rotation_count": len(recent_rotation),
+                "rotation_pnl": recent_rotation_pnl,
+                "settlement_count": len(recent_settlement),
+                "settlement_pnl": recent_settlement_pnl,
+                "settlement_win_rate_pct": round(recent_settlement_win_rate, 1),
             },
             "red_flags": red_flags,
             "daily_pnl_timeline": daily_pnl,

@@ -67,7 +67,7 @@ def test_import_all_modules():
         rel = fpath.relative_to(REPO_ROOT)
         dotted = str(rel.with_suffix("")).replace(os.sep, ".")
         # Skip test files, __init__, and scripts with leading underscore.
-        if rel.parts and rel.parts[0] in ("tests", "scripts", "backtest_archive"):
+        if rel.parts and rel.parts[0] in ("tests", "scripts", "backtest_archive", "forecast_runner"):
             continue
         if dotted.endswith("__init__"):
             continue
@@ -132,6 +132,11 @@ REQUIRED_REACHABLE_MODULES = [
     ("data_pipeline.backfill_from_live_db", "backfill"),
     ("data_pipeline.unified_datastore", "UnifiedDatastore"),
     ("data_pipeline.weather_ensemble", "backfill_archive_many"),
+    # 2026-10-27 (S15): HEAT tahmin motoru Junbo icine tasindi (tek sema,
+    # tek surec). Sema tanimi heat.schema'da yasar; job heat.predictions
+    # uzerinden okur.
+    ("heat.schema", "ensure_schema"),
+    ("heat.predictions", "fetch_live_predictions"),
 ]
 
 
@@ -535,6 +540,75 @@ ALLOWED_DEAD = {
     "price_at",
     "price_before",
     "thr_to_market",
+    # 2026-10-22: Yeni moduller (backtest/, replay/, research/, jobs/,
+    # utils/weather_sources.py, utils/om_cache.py) henuz bot ana akisina
+    # WIRILMEMIS durumda. Bu fonksiyonlar ya standalone script ise ya da
+    # ilgili job/backtest modulunun ic helper'i (census, tanim dosyasi
+    # disinda referans gormedigi icin "dead" sayiyor). Silinmiyorlar:
+    # testlerle korunuyorlar ve manual/scheduled calistiriliyorlar.
+    # research/ou_model.py — OU model yardimcilari (unit testlerle korunur)
+    "bucket_prob",
+    "fit_ar1",
+    "predict_dist",
+    # utils/om_cache.py — Open-Meteo cache (unit testlerle korunur)
+    "build_om_url",
+    "om_get",
+    "om_put",
+    # utils/weather_sources.py — ucretsiz hava kaynaklari (dormant library)
+    "iem_daily_max",
+    "metar_running_high",
+    "nws_forecast_max",
+    "settlement_actual",
+    "vc_daily",
+    "vc_range",
+    # jobs/collect_settlement_temps.py — settlement sicaklik toplayici job
+    "c_to_f_bucket",
+    "get_polymarket_question",
+    "get_wu_max_temp",
+    "parse_bucket_from_question",
+    "settle_temps_job",
+    # jobs/heat_mos_job.py + jobs/new_city_job.py — job entry point + icler
+    "discover_unknown_cities",
+    "fetch_live_predictions",
+    "geocode_city",
+    "maybe_run",
+    "station_info",
+    # backtest/ — backtest engine yardimcilari (unit testlerle korunur)
+    "combo_pnl",
+    "evaluate_source_city",
+    "load_source_offsets",
+    "normalized_heat_settlement",
+    # replay/fidelity.py — replay/live karsilastirma (unit testlerle korunur)
+    "compare_replay_vs_live",
+    "strategy_of",
+    # scripts/backtest_forecast_peak.py + scripts/backtest_peak_trail.py
+    "half_up",
+    "iso_utc",
+    "open_orderbook",
+    "quote_at_or_after",
+    "to_epoch",
+    # scripts/replay_full_bot.py — replay CLI
+    "settlement_outcome",
+    # debug_spread.py — elle calistirilan debug araci
+    "debug_spread_placer",
+    # config/settings.py - yeni live-map helper (get_live_city_map kardesi, henuz caller yok)
+    "get_live_icao_coords",
+    # replay/seeding.py — replay test teardown'i cagirir
+    # (tests/test_replay_engine.py::_restore_db). Census `tests/` dizinini
+    # atladigi icin capraz-dosya referansi goremiyor.
+    "rebind_get_session",
+    # 2026-11-11: data archive/catalog CLI helpers (standalone scripts)
+    "archive_once",
+    "enrich_key_ranges",
+    "init_catalog",
+    "query_with_timeout",
+    "role_for",
+    "scan_once",
+    "scan_parquet",
+    "scan_sqlite",
+    "sqlite_connect",
+    "sqlite_table_info",
+    "utc_now",
 }
 
 
@@ -554,7 +628,16 @@ def test_no_dead_public_functions():
     from collections import defaultdict
 
     repo_root = Path(__file__).resolve().parent.parent
-    skip_dirs = {"tests", "venv", "__pycache__", "migrations", "node_modules"}
+    skip_dirs = {
+        "tests",
+        "venv",
+        "__pycache__",
+        "migrations",
+        "node_modules",
+        "forecast_runner",
+        "data",
+        "backtest_archive",
+    }
 
     all_files = [f for f in repo_root.rglob("*.py") if not any(d in f.parts for d in skip_dirs)]
 

@@ -132,6 +132,35 @@ def _protect_production_db_function():
     yield
 
 
+@pytest.fixture(autouse=True, scope="function")
+def _rebind_module_get_session():
+    """`database.db` yeniden yuklendiginde modul-seviyesi `get_session`
+    baglarini guncel engine'e geri bagla.
+
+    2026-10-27 (S16): Bir test `sys.modules`'tan `database.db`'yi silip
+    yeniden import ettiginde YENI bir engine olusuyor; ama `executor.bet_placer`
+    gibi moduller `from database.db import get_session` ile ESKI fonksiyona
+    bagli kaliyor. O testler kendi piyasalarini yeni DB'ye yaziyor,
+    `place_all_pending` ise eski DB'ye bakip "0 open markets found" diyor
+    -> `tests/test_tie_betting.py` tam suite'te 7/7 kiriliyordu (tek basina
+    gecerken). Kanit: bet_placer.get_session is database.db.get_session ->
+    False; yeni DB'de 1 market varken bet_placer 0 goruyor.
+
+    Yalnizca kaynagi `database.db` olan baglar yeniden baglanir; testlerin
+    kendi sahte get_session'lari korunur.
+    """
+    import database.db as db_mod
+
+    current = db_mod.get_session
+    for mod in list(sys.modules.values()):
+        bound = getattr(mod, "get_session", None)
+        if bound is None or bound is current:
+            continue
+        if getattr(bound, "__module__", None) == "database.db":
+            mod.get_session = current
+    yield
+
+
 # ── Shared market factory ─────────────────────────────────────────────────
 
 _FAKE_MARKET_SEQ = [0]

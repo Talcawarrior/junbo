@@ -27,15 +27,18 @@ import argparse
 import os
 import sqlite3
 import sys
-import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
+import sys as _sys
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+from utils.db_paths import get_data_dir  # noqa: E402
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _REPO_ROOT)
 
-DATA = os.path.join(_REPO_ROOT, "data")
+DATA = get_data_dir()
 BOT_DB = os.path.join(DATA, "bot.db")
 OB_DB = os.path.join(DATA, "orderbook.db")
 ACTUAL_DB = os.path.join(DATA, "actuals.db")
@@ -66,6 +69,7 @@ def _ts(x) -> float | None:
 
 
 # --- Veri kaynaklari (read-only, gercek DB) ---------------------------------
+
 
 class ReplayData:
     """Bir defa yuklenen, her gun icin T<=simtime filtreli erisim saglar."""
@@ -127,8 +131,12 @@ class ReplayData:
             cur = self.markets.get(key)
             if cur is None or (t is not None and (cur["target_ts"] is None or t < cur["target_ts"])):
                 self.markets[key] = {
-                    "id": str(mid), "target_ts": t, "mtype": mtype,
-                    "city": city, "threshold": float(thr), "lon": lon,
+                    "id": str(mid),
+                    "target_ts": t,
+                    "mtype": mtype,
+                    "city": city,
+                    "threshold": float(thr),
+                    "lon": lon,
                 }
 
     def _load_actuals(self):
@@ -176,7 +184,8 @@ class ReplayData:
     def _load_metar(self):
         # ham: code -> [(epoch, temp)] (yerel gun filtresi metar_until'de yapilir)
         for code, tmax, obs in self.bot.execute(
-            "SELECT city_code, temp_c, obs_time FROM metar_observations WHERE temp_c IS NOT NULL AND obs_time IS NOT NULL"
+            "SELECT city_code, temp_c, obs_time FROM metar_observations "
+            "WHERE temp_c IS NOT NULL AND obs_time IS NOT NULL"
         ):
             t = _ts(obs)
             if t is None:
@@ -226,9 +235,7 @@ class ReplayData:
                 continue
             self._bias_acc[code][0] += b
             self._bias_acc[code][1] += 1
-        self.city_bias = {
-            k: v[0] / v[1] for k, v in self._bias_acc.items() if v[1] > 0
-        }
+        self.city_bias = {k: v[0] / v[1] for k, v in self._bias_acc.items() if v[1] > 0}
 
     # ---- time-ekran (T) filtreli erisimler ----
     def forecast_for(self, code: str, day: str, settle_ts: float) -> float | None:
@@ -245,8 +252,7 @@ class ReplayData:
             return None
         return sum(vals) / len(vals)
 
-    def metar_until(self, code: str, day: str, sim_ts: float,
-                    utc_off: float = 0.0) -> list[tuple[float, float]]:
+    def metar_until(self, code: str, day: str, sim_ts: float, utc_off: float = 0.0) -> list[tuple[float, float]]:
         """(code) icin YEREL gun `day` penceresine giren, obs_time<=sim_ts gozlemler.
 
         METAR arsivi UTC-gun bazinda degil, ham epoch saklanir. Yerel gun
@@ -297,6 +303,7 @@ HALF_UP = lambda x: int(x + 0.5) if x >= 0 else int(x - 0.5)  # noqa: E731
 
 def city_utc_offset(code: str, day: str, lon: float | None) -> float:
     from scrapers.metar import city_utc_offset as _off
+
     try:
         return _off(code, day, lon)
     except Exception:
@@ -305,6 +312,7 @@ def city_utc_offset(code: str, day: str, lon: float | None) -> float:
 
 def detect_peak(rows, utc_off, confirmation_minutes=30):
     from scrapers.metar import detect_peak as _dp
+
     return _dp(rows, utc_offset_hours=utc_off, confirmation_minutes=confirmation_minutes)
 
 
@@ -336,6 +344,7 @@ def _avg_peak_hour_hist(rd: ReplayData, code: str, day: str, lon: float | None) 
 
 # --- Replay ana dongu -------------------------------------------------------
 
+
 def simulate(rd: ReplayData, day: str, detail: bool):
     """Bir gunun tam bot davranisini simüle eder. Sonuc listesi doner."""
     from config.settings import bot_config
@@ -347,7 +356,6 @@ def simulate(rd: ReplayData, day: str, detail: bool):
     spread_max_bets = int(getattr(s, "spread_max_bets_per_day", 120) or 120)
     metar_cap = int(getattr(s, "metar_peak_max_bets_per_day", 12) or 12)
     fee_rate = float(getattr(s, "current_fee_rate", 0.05) or 0.05)
-    GAS = 0.0
 
     # sim 'bugun' zamani: D gunu.
     #   - SPREAD (T-2/T-1): bot o gun ilk acilis aninda karar verir -> 12:00 UTC.
@@ -357,11 +365,7 @@ def simulate(rd: ReplayData, day: str, detail: bool):
     _st = day_end_ts
     settle_ts = (_st + 12 * 3600) if _st is not None else (sim_ts or 0.0) + 36 * 3600
 
-    day_mkts = {
-        (code, d, bkt): m
-        for (code, d, bkt), m in rd.markets.items()
-        if d == day
-    }
+    day_mkts = {(code, d, bkt): m for (code, d, bkt), m in rd.markets.items() if d == day}
     if not day_mkts:
         return []
 
@@ -439,22 +443,30 @@ def simulate(rd: ReplayData, day: str, detail: bool):
                 continue
             stake = spread_stake
             cost = stake  # YES bet costu stake
-            shares = stake / entry
             if outcome:
                 pnl = (stake / entry) - cost - stake * fee_rate
                 won = True
             else:
                 pnl = -cost
                 won = False
-            results.append({
-                "leg": leg, "day": day, "tgt": tgt_day, "city": rd.city_name[code],
-                "code": code, "bucket": center, "entry": entry,
-                "stake": stake, "won": won, "pnl": pnl, "exit": "hold_settlement",
-            })
+            results.append(
+                {
+                    "leg": leg,
+                    "day": day,
+                    "tgt": tgt_day,
+                    "city": rd.city_name[code],
+                    "code": code,
+                    "bucket": center,
+                    "entry": entry,
+                    "stake": stake,
+                    "won": won,
+                    "pnl": pnl,
+                    "exit": "hold_settlement",
+                }
+            )
 
     # ---- T-0 METAR-peak ----
     # TUM sehirler (bias filtresi kaldirildi), RANGE+temperature_max, detect_peak
-    peak_cities: dict[str, dict] = {}
     for code in rd.city_name:
         if code not in rd.city_lon and code not in rd.city_name:
             continue
@@ -466,8 +478,13 @@ def simulate(rd: ReplayData, day: str, detail: bool):
         locked, confirmed = detect_peak(sorted(rows, key=lambda x: x[0]), off, confirmation_minutes=0)
         if not confirmed or locked is None:
             continue
-        # HIBRIT: gecmis ortalama peak saati
-        avg_hour = _avg_peak_hour_hist(rd, code, day, lon)
+        # 2026-10-27: `_avg_peak_hour_hist` BURADA KULLANILMIYOR — bilinen eksik.
+        # Canli bot (jobs/metar_peak.py:755) bu degeri `early_attempt` kapisi
+        # icin kullaniyor: ortalama peak saati biliniyorsa, saat gelince
+        # cur_max'a DUSUS BEKLEMEDEN girilir. Bu replay yalnizca 1-dusus
+        # kilidini modelliyor, yani erken giris ayaklarini KACIRIYOR
+        # (muhafazakar taraf). Erken giris eklemek backtest sonuclarini
+        # degistirir -> kullanici karari bekliyor.
         cur_max = max(t for _, t in rows)
         winner_val = float(cur_max) if cur_max > locked else locked
         winner_bucket = HALF_UP(winner_val)
@@ -487,7 +504,6 @@ def simulate(rd: ReplayData, day: str, detail: bool):
         if metar_opened >= metar_cap:
             continue
         stake = 3.0  # METAR-peak stake
-        shares = stake / entry
         if outcome:
             pnl = (stake / entry) - stake - stake * fee_rate
             won = True
@@ -495,11 +511,21 @@ def simulate(rd: ReplayData, day: str, detail: bool):
             pnl = -stake
             won = False
         metar_opened += 1
-        results.append({
-            "leg": "METAR", "day": day, "tgt": day, "city": rd.city_name[code],
-            "code": code, "bucket": winner_bucket, "entry": entry,
-            "stake": stake, "won": won, "pnl": pnl, "exit": "hold_settlement",
-        })
+        results.append(
+            {
+                "leg": "METAR",
+                "day": day,
+                "tgt": day,
+                "city": rd.city_name[code],
+                "code": code,
+                "bucket": winner_bucket,
+                "entry": entry,
+                "stake": stake,
+                "won": won,
+                "pnl": pnl,
+                "exit": "hold_settlement",
+            }
+        )
 
     return results
 
@@ -565,21 +591,23 @@ def main() -> int:
     print(f"{'TOPLAM':<8}{tot_n:>5}{tot_w:>5}{wr:>7.1f}{tot_pnl:>+10.2f}{tot_stake:>10.2f}{roi:>+8.1f}")
 
     # gun gun
-    print(f"\nGUN BAZINDA:")
+    print("\nGUN BAZINDA:")
     print(f"{'gun':<12}{'T-2':>8}{'T-1':>8}{'T-0':>8}{'METAR':>8}{'NET':>10}")
     for day in days:
-        t2 = sum(r['pnl'] for r in per_day[day].get('T-2', []))
-        t1 = sum(r['pnl'] for r in per_day[day].get('T-1', []))
-        t0 = sum(r['pnl'] for r in per_day[day].get('T-0', []))
-        mt = sum(r['pnl'] for r in per_day[day].get('METAR', []))
+        t2 = sum(r["pnl"] for r in per_day[day].get("T-2", []))
+        t1 = sum(r["pnl"] for r in per_day[day].get("T-1", []))
+        t0 = sum(r["pnl"] for r in per_day[day].get("T-0", []))
+        mt = sum(r["pnl"] for r in per_day[day].get("METAR", []))
         net = t2 + t1 + t0 + mt
         print(f"{day:<12}{t2:>+8.2f}{t1:>+8.2f}{t0:>+8.2f}{mt:>+8.2f}{net:>+10.2f}")
 
     if args.detail and all_res:
-        print(f"\n--- DETAY (ilk 60 bet) ---")
+        print("\n--- DETAY (ilk 60 bet) ---")
         for r in all_res[:60]:
-            print(f"  {r['day']} {r['leg']:<4} {r['city']:<20} bucket={r['bucket']:>3} "
-                  f"entry={r['entry']:.3f} {'WON' if r['won'] else 'LOST'} pnl={r['pnl']:+.2f}")
+            print(
+                f"  {r['day']} {r['leg']:<4} {r['city']:<20} bucket={r['bucket']:>3} "
+                f"entry={r['entry']:.3f} {'WON' if r['won'] else 'LOST'} pnl={r['pnl']:+.2f}"
+            )
 
     print("\n[crash] YOK — replay temiz tamamlandi.")
     return 0

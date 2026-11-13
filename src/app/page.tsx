@@ -305,7 +305,7 @@ function OverviewTab({ kpiData, portfolioData, openPositions, activityFeed, edge
                 icon: <Wallet className="h-3 w-3" />,
                 color: TEAL,
                 sub: `PnL: ${fmtUsd(kpiData.totalPnl)}`,
-                tooltip: "Baslangic sermayesi + toplam PnL"
+                tooltip: "Nakit + acik stake + acik PnL (piyasa degeri)"
               },
               {
                 label: "Acik bet toplami",

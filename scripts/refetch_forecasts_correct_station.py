@@ -17,6 +17,11 @@ import os
 import sys
 import time
 from datetime import datetime
+import sys as _sys
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+from utils.db_paths import get_db_path  # noqa: E402
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
@@ -25,7 +30,7 @@ if _REPO_ROOT not in sys.path:
 import sqlite3  # noqa: E402
 import requests  # noqa: E402
 
-BOT_DB = os.path.join(_REPO_ROOT, "data", "bot.db")
+BOT_DB = get_db_path()
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 
 # Open-Meteo model adi -> bot source adi (weather_forecasts.source)
@@ -93,9 +98,7 @@ def main() -> int:
             continue
         daily = d.get("daily", {})
         times = daily.get("time", [])
-        city_name = cur.execute(
-            "SELECT DISTINCT city FROM weather_markets WHERE city_code=?", (code,)
-        ).fetchone()
+        city_name = cur.execute("SELECT DISTINCT city FROM weather_markets WHERE city_code=?", (code,)).fetchone()
         cname = city_name[0] if city_name else code
         for i, t in enumerate(times):
             for model, source in MODEL_SOURCES.items():

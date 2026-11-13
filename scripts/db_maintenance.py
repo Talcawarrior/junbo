@@ -18,13 +18,18 @@ Elle calistirma:  python scripts/db_maintenance.py
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+import sys as _sys
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+from utils.db_paths import get_data_dir, get_db_path  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 LOG = REPO / "data" / "logs" / "db_maintenance.log"
 
 DBS = [
-    ("bot.db", REPO / "data" / "bot.db"),
-    ("backtest.db", REPO / "data" / "backtest.db"),
+    ("bot.db", Path(get_db_path())),
+    ("backtest.db", Path(get_data_dir()) / "backtest.db"),
 ]
 
 

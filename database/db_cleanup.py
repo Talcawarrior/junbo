@@ -61,7 +61,15 @@ def archive_old_forecasts(hot_days: int = 10, cold_days: int = 120) -> dict:
     result = {}
 
     # --- Step 1+2: Archive old rows ---
-    for table in ALL_TABLES:
+    # historical_calibrations is reference data (a few thousand rows, ~1 MB),
+    # not hot operational data.  Its rows are historical by definition, so the
+    # 10-day hot cutoff matched every row: the table was emptied on each
+    # cleanup and the calibration engine logged "bias map for 0 cities",
+    # disabling forecast bias correction until a backfill could rebuild it
+    # (2026-11-08: 6050 rows archived + deleted, backfill then had no
+    # forecasts left to join and wrote 0 rows).  Keep it in SQLite; its
+    # parquet archive is still pruned by cold_days below.
+    for table in [t for t in ALL_TABLES if t != CALIB_TABLE]:
         try:
             date_col = _TABLE_DATE_COL[table]
             df = pd.read_sql_query(

@@ -1,15 +1,26 @@
 """Settlement anında Polymarket/Weather Underground'dan gerçek max temp çekip kaydeder."""
-import os, sys, time, json, logging, sqlite3, requests, threading
+
+import json
+import logging
+import os
+import sqlite3
+import sys
+import time
+
+import requests
 from datetime import datetime, timedelta
-from typing import Optional
+import sys as _sys
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+from utils.db_paths import get_db_path  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config.settings import bot_config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("SETTLEMENT_TEMPS")
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "bot.db")
+DB_PATH = get_db_path()
 
 # Weather Underground API (Polymarket'in baz aldığı kaynak)
 WU_API_KEY = os.getenv("WEATHERAPI_KEY")  # .env'de var
@@ -95,25 +106,25 @@ def get_wu_max_temp(city: str, target_date: str) -> float | None:
         "Greensboro": (36.07, -79.79),
         "Anchorage": (61.22, -149.90),
         "Plano": (33.02, -96.70),
+        # 2026-10-27: "Newark" TEK anahtar olabilir. Once iki kez yazilmisti
+        # (NJ 40.74,-74.17 ve CA 37.52,-121.88); Python'da SONRAKI kazanir,
+        # yani NJ sessizce CA ile eziliyordu. Kanonik olan Newark NJ korunur.
+        # Newark CA gerekirse ayri anahtar adi ("Newark, CA") kullanilmali.
         "Newark": (40.74, -74.17),
         "Toledo": (41.66, -83.55),
         "Orlando": (28.54, -81.38),
         "Chula Vista": (32.64, -117.08),
         "Irvine": (33.68, -117.83),
-        "Newark": (37.52, -121.88),
         "Durham": (35.99, -78.90),
         "Chandler": (33.31, -111.84),
         "Fort Wayne": (41.13, -85.13),
+        # "St. Petersburg" da iki kez yazilmisti (FL 27.77,-82.64 ve RU
+        # 59.93,30.31). Bu blok ABD oldugu icin FL korunur; Rusya gerekirse
+        # "Saint Petersburg" (tam yazim) ile ayri anahtar olarak eklenmeli.
         "St. Petersburg": (27.77, -82.64),
         "Laredo": (27.51, -99.47),
         "Buffalo": (42.89, -78.88),
         "Jersey City": (40.73, -74.08),
-        "Chula Vista": (32.64, -117.08),
-        "Chandler": (33.31, -111.84),
-        "Orlando": (28.54, -81.38),
-        "St. Petersburg": (27.77, -82.64),
-        "Irvine": (33.68, -117.83),
-        "Durham": (35.99, -78.90),
         "Cape Town": (-33.92, 18.42),
         "Istanbul": (41.01, 28.98),
         "Shanghai": (31.23, 121.47),
@@ -150,10 +161,7 @@ def get_wu_max_temp(city: str, target_date: str) -> float | None:
         "Helsinki": (60.17, 24.94),
         "Reykjavik": (64.15, -21.90),
         "Moscow": (55.76, 37.62),
-        "St. Petersburg": (59.93, 30.31),
         "Kiev": (50.45, 30.52),
-        "Warsaw": (52.23, 21.01),
-        "Bucharest": (44.43, 26.10),
         "Belgrade": (44.79, 20.45),
         "Zagreb": (45.81, 15.98),
         "Ljubljana": (46.06, 14.51),
@@ -200,6 +208,7 @@ def parse_bucket_from_question(q: str) -> tuple[float, float] | None:
     - Single: 'be 28°C' veya 'be 29°C' -> threshold bazli (threshold, threshold+1)
     """
     import re
+
     # Range format: between 98-99°F or between 98-99F
     m = re.search(r"between\s+(\d+)\s*-\s*(\d+)\s*[°]?\s*[FC]", q, re.IGNORECASE)
     if m:
@@ -209,11 +218,11 @@ def parse_bucket_from_question(q: str) -> tuple[float, float] | None:
     m = re.search(r"be\s+(\d+(?:\.\d+)?)\s*[°]?\s*[FC]", q, re.IGNORECASE)
     if m:
         t = float(m.group(1))
-        is_f = 'F' in q.upper() and 'C' not in q.upper()
+        is_f = "F" in q.upper() and "C" not in q.upper()
         if is_f:
             return (t, t + 1)
         else:
-            f = t * 9/5 + 32
+            f = t * 9 / 5 + 32
             low = int(f // 2) * 2
             return (low, low + 2)
     return None
@@ -233,7 +242,7 @@ def get_polymarket_question(market_id: str) -> str | None:
 
 def c_to_f_bucket(c: float) -> tuple[float, float]:
     """Celsius'tan Fahrenheit bucket araligi (2F genisliginde)"""
-    f = c * 9/5 + 32
+    f = c * 9 / 5 + 32
     low = int(f // 2) * 2
     return (low, low + 2)
 
@@ -246,14 +255,17 @@ def settle_temps_job(lookback_hours: int = 12):
 
     # Henuz result_data'si olmayan, kapanmis betler
     since = datetime.utcnow() - timedelta(hours=lookback_hours)
-    cur.execute("""
+    cur.execute(
+        """
         SELECT b.id, b.market_id, b.city, b.strike_temp, b.placed_at, b.settled_at
         FROM bets b
         WHERE b.status IN ('won','lost')
         AND (b.result_data IS NULL OR b.result_data = '')
         AND b.settled_at >= ?
         ORDER BY b.settled_at DESC
-    """, (since.isoformat(),))
+    """,
+        (since.isoformat(),),
+    )
 
     rows = cur.fetchall()
     log.info(f"{len(rows)} bet icin settlement temp cekilecek")
@@ -283,9 +295,12 @@ def settle_temps_job(lookback_hours: int = 12):
             "collected_at": datetime.utcnow().isoformat(),
         }
 
-        cur.execute("""
+        cur.execute(
+            """
             UPDATE bets SET result_data = ? WHERE id = ?
-        """, (json.dumps(result), bid))
+        """,
+            (json.dumps(result), bid),
+        )
         updated += 1
 
         log.info(f"Bet {bid}: {city} strike={strike}C wu={wu_temp}C bucket={bucket} our_bucket={strike_bucket}")

@@ -5,6 +5,7 @@ Creates timestamped copies in data/backups/ and purges files older than retentio
 """
 
 import logging
+import os
 import re
 import shutil
 import sys
@@ -12,17 +13,22 @@ import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
+import sys as _sys
+from pathlib import Path as _Path
 
-# ── Paths ─────────────────────────────────────────────────────────────────
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+from utils.db_paths import get_db_path  # noqa: E402
+
+# Paths: consolidated data root. Override with env for tests.
+DATA_DIR = Path(os.getenv("JUNBO_DATA_DIR", r"D:\JUNBO data"))
 ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT / "data"
-BACKUP_DIR = DATA_DIR / "backups"
+BACKUP_DIR = Path(os.getenv("JUNBO_BACKUP_DIR", str(DATA_DIR / "backups")))
 BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 LOG_DIR = DATA_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 SOURCE_DBS = [
-    DATA_DIR / "bot.db",
+    Path(get_db_path()),
     DATA_DIR / "orderbook.db",
     DATA_DIR / "actuals.db",
     DATA_DIR / "backtest.db",

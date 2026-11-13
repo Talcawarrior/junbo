@@ -24,7 +24,7 @@ def get_engine():
 
     eng = create_engine(
         f"sqlite:///{DB_PATH}",
-        connect_args={"check_same_thread": False},
+        connect_args={"check_same_thread": False, "timeout": 30},
         pool_pre_ping=True,
         echo=config.DB_ECHO,
     )
@@ -32,9 +32,21 @@ def get_engine():
     @event.listens_for(eng, "connect")
     def set_sqlite_pragma(dbapi_connection, _connection_record):
         cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA busy_timeout=30000")
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.execute("PRAGMA cache_size=10000")
+        # 2026-10-27 (S19): `data/bot.db` D:'ye symlink ama `-wal` dosyasi
+        # SQLite tarafindan VERILEN yolun yaninda (C:) acilir; bu yuzden WAL
+        # C: diskini dolduruyordu (olculdu: 3.324,8 MB). Ayrica restart
+        # `os._exit(1)` ile bittigi icin kapanista son checkpoint/truncate
+        # yapilamiyor ve dosya yuksek-seviyesinde kaliyordu.
+        #   wal_autocheckpoint: her ~4 MB'ta checkpoint (varsayilan 1000 sayfa,
+        #     acikca yazilir ki baska bir bilesen bunu degistirmesin).
+        #   journal_size_limit: checkpoint sonrasi WAL dosyasi en fazla bu
+        #     kadar kalir (64 MB) — sinirsiz buyume imkansiz.
+        cursor.execute("PRAGMA wal_autocheckpoint=1000")
+        cursor.execute("PRAGMA journal_size_limit=67108864")
         cursor.close()
 
     return eng

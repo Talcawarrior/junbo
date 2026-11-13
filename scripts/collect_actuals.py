@@ -7,6 +7,7 @@ Supports backfill on first run and incremental updates on subsequent runs.
 
 import json
 import logging
+import os
 import ssl
 import sqlite3
 import sys
@@ -14,12 +15,18 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+import sys as _sys
+from pathlib import Path as _Path
 
-# ── Paths ─────────────────────────────────────────────────────────────────
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+from utils.db_paths import get_db_path  # noqa: E402
+
+# Paths: consolidated data root. Override with env for tests.
+DATA_DIR = Path(os.getenv("JUNBO_DATA_DIR", r"D:\JUNBO data"))
 ROOT = Path(__file__).resolve().parent.parent
-BOT_DB = ROOT / "data" / "bot.db"
-ACTUALS_DB = ROOT / "data" / "actuals.db"
-LOG_DIR = ROOT / "data" / "logs"
+BOT_DB = Path(os.getenv("JUNBO_BOT_DB", get_db_path()))
+ACTUALS_DB = Path(os.getenv("JUNBO_ACTUALS_DB", str(DATA_DIR / "actuals.db")))
+LOG_DIR = DATA_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Logging ───────────────────────────────────────────────────────────────

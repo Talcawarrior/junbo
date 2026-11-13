@@ -399,6 +399,7 @@ def _open_metar_bet(session, market: WeatherMarket, peak_temp: float) -> Optiona
         strike_temp=market.threshold,
         status="placed",
         realized_pnl=0.0,
+        bet_type="metar_peak",
         order_id=f"metar_{market.id}_{ts}",
         entry_fee=entry_fee,
         placed_at=now,
@@ -407,10 +408,15 @@ def _open_metar_bet(session, market: WeatherMarket, peak_temp: float) -> Optiona
     session.add(bet)
     # 2026-08-18 audit fix (C1): stake daha once HIC dusulmuyordu -> kagit nakit
     # ve exposure yanlis. bet_placer/spread_placer gibi burada da debit edilir.
+    # 2026-10-27 (S14): entry_fee de stake ile birlikte dusulur. Onceki halde
+    # fee sadece realized_pnl icine gomuluyor, kasadan HIC eksilmiyordu ->
+    # cash_balance fee toplami kadar (~$34.66) fazla gorunuyordu.
     try:
         from utils.accounting import debit_stake
 
         debit_stake(session, use_stake, f"metar_peak {market.city} {market.threshold}C")
+        if entry_fee > 0:
+            debit_stake(session, entry_fee, f"metar_peak_fee {market.city} {market.threshold}C")
     except ValueError as exc:
         logger.warning("metar_peak: %s %sC nakit dusulemedi (%s) - bet iptal", market.city, market.threshold, exc)
         session.rollback()

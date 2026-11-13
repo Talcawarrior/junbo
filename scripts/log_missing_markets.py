@@ -19,6 +19,11 @@ import sqlite3
 import sys
 from collections import defaultdict
 from datetime import datetime, timezone
+import sys as _sys
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+from utils.db_paths import get_db_path  # noqa: E402
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
@@ -32,7 +37,7 @@ LOG_PATH = os.path.join(_REPO_ROOT, "reports", "missing_markets_log.md")
 
 def _collect(day: str) -> list[tuple[str, str, float, list[int]]]:
     """(code, city, kilitli_peak, mevcut esikler) — marketi olmayanlar."""
-    db = sqlite3.connect(os.path.join(_REPO_ROOT, "data", "bot.db"), timeout=30)
+    db = sqlite3.connect(get_db_path(), timeout=30)
     db.execute("PRAGMA busy_timeout=30000")
 
     city_of: dict[str, str] = {}
