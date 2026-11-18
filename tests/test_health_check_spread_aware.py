@@ -129,6 +129,23 @@ def test_edge_metrics_are_marked_unavailable_without_analyses(client):
 
     data = client.get("/api/health-check").json()
 
-    assert data["strategy_mode"] in ("spread", "edge")
+    assert data["strategy_mode"] in ("spread", "edge", "metar")
     assert data["edge_metrics_available"] is False
     assert data["edge_distribution"]["available"] is False
+
+
+def test_strategy_mode_reports_metar_when_spread_disabled(client):
+    """SPREAD_ENABLED=false iken etkin mod 'metar' olarak raporlanir."""
+    from config.settings import bot_config
+
+    old_enabled = bot_config.strategy.spread_enabled
+    old_strategy = bot_config.strategy.betting_strategy
+    bot_config.strategy.spread_enabled = False
+    bot_config.strategy.betting_strategy = "spread"
+    try:
+        _seed(rotation=1, wins=1, losses=0)
+        data = client.get("/api/health-check").json()
+        assert data["strategy_mode"] == "metar"
+    finally:
+        bot_config.strategy.spread_enabled = old_enabled
+        bot_config.strategy.betting_strategy = old_strategy

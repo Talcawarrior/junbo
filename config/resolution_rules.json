@@ -1,0 +1,402 @@
+{
+  "EGLC": {
+    "city": "London",
+    "station": "EGLC",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/gb/london/EGLC",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in London be 22°C or below on August 7?"
+  },
+  "RKSI": {
+    "city": "Seoul",
+    "station": "RKSI",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/kr/incheon/RKSI",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Seoul (Incheon) be 29°C or below on August 7?"
+  },
+  "EDDM": {
+    "city": "Munich",
+    "station": "EDDM",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/de/munich/EDDM",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Munich be 21°C or below on August 7?"
+  },
+  "LTAC": {
+    "city": "Ankara",
+    "station": "LTAC",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/tr/%C3%A7ubuk/LTAC",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Ankara be 30°C or below on August 7?"
+  },
+  "LFPB": {
+    "city": "Paris",
+    "station": "LFPB",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/fr/bonneuil-en-france/LFPB",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Paris be 23°C or below on August 7?"
+  },
+  "RJTT": {
+    "city": "Tokyo",
+    "station": "RJTT",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/jp/tokyo/RJTT",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Tokyo be 28°C or below on August 7?"
+  },
+  "LEMD": {
+    "city": "Madrid",
+    "station": "LEMD",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/es/madrid/LEMD",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Madrid be 35°C or below on August 7?"
+  },
+  "EHAM": {
+    "city": "Amsterdam",
+    "station": "EHAM",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/nl/schiphol/EHAM",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Amsterdam be 19°C or below on August 7?"
+  },
+  "EPWA": {
+    "city": "Warsaw",
+    "station": "EPWA",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/pl/warsaw/EPWA",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Warsaw be 22°C or below on August 7?"
+  },
+  "EFHK": {
+    "city": "Helsinki",
+    "station": "EFHK",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/fi/vantaa/EFHK",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Helsinki be 17°C or below on August 7?"
+  },
+  "LIMC": {
+    "city": "Milan",
+    "station": "LIMC",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/it/milan/LIMC",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Milan be 30°C or below on August 7?"
+  },
+  "WSSS": {
+    "city": "Singapore",
+    "station": "WSSS",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/sg/singapore/WSSS",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Singapore be 27°C or below on August 7?"
+  },
+  "RCSS": {
+    "city": "Taipei",
+    "station": "RCSS",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/tw/taipei/RCSS",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Taipei be 27°C or below on August 7?"
+  },
+  "ZSPD": {
+    "city": "Shanghai",
+    "station": "ZSPD",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/cn/shanghai/ZSPD",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the lowest temperature in Shanghai be 28°C on August 7?"
+  },
+  "ZBAA": {
+    "city": "Beijing",
+    "station": "ZBAA",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/cn/beijing/ZBAA",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Beijing be 31°C or below on August 7?"
+  },
+  "RPLL": {
+    "city": "Manila",
+    "station": "RPLL",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/ph/manila/RPLL",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Manila be 24°C or below on August 7?"
+  },
+  "WMKK": {
+    "city": "Kuala Lumpur",
+    "station": "WMKK",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/my/sepang-district/WMKK",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Kuala Lumpur be 27°C or below on August 7?"
+  },
+  "FACT": {
+    "city": "Cape Town",
+    "station": "FACT",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/za/matroosfontein/FACT",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Cape Town be 14°C or below on August 7?"
+  },
+  "OPKC": {
+    "city": "Karachi",
+    "station": "OPKC",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/pk/karachi/OPKC",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Karachi be 28°C or below on August 7?"
+  },
+  "KMIA": {
+    "city": "Miami",
+    "station": "KMIA",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/us/fl/miami/KMIA",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Miami be 79°F or below on August 7?"
+  },
+  "KLGA": {
+    "city": "New York",
+    "station": "KLGA",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/us/ny/new-york-city/KLGA",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in New York City be 81°F or below on August 7?"
+  },
+  "KORD": {
+    "city": "Chicago",
+    "station": "KORD",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/us/il/chicago/KORD",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Chicago be 75°F or below on August 7?"
+  },
+  "KHOU": {
+    "city": "Houston",
+    "station": "KHOU",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/us/tx/houston/KHOU",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Houston be 85°F or below on August 7?"
+  },
+  "KLAX": {
+    "city": "Los Angeles",
+    "station": "KLAX",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/us/ca/los-angeles/KLAX",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Los Angeles be 71°F or below on August 7?"
+  },
+  "KBKF": {
+    "city": "Denver",
+    "station": "KBKF",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/us/co/aurora/KBKF",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Denver be 87°F or below on August 7?"
+  },
+  "KSEA": {
+    "city": "Seattle",
+    "station": "KSEA",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/us/wa/seatac/KSEA",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Seattle be 79°F or below on August 7?"
+  },
+  "KATL": {
+    "city": "Atlanta",
+    "station": "KATL",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/us/ga/atlanta/KATL",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Atlanta be 79°F or below on August 7?"
+  },
+  "KSFO": {
+    "city": "San Francisco",
+    "station": "KSFO",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/us/ca/san-francisco/KSFO",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in San Francisco be 65°F or below on August 7?"
+  },
+  "KAUS": {
+    "city": "Austin",
+    "station": "KAUS",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/us/tx/austin/KAUS",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Austin be 89°F or below on August 7?"
+  },
+  "SAEZ": {
+    "city": "Buenos Aires",
+    "station": "SAEZ",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/ar/ezeiza/SAEZ",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Buenos Aires be 8°C or below on August 7?"
+  },
+  "SBGR": {
+    "city": "Sao Paulo",
+    "station": "SBGR",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/br/guarulhos/SBGR",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Sao Paulo be 22°C or below on August 7?"
+  },
+  "KDAL": {
+    "city": "Dallas",
+    "station": "KDAL",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/us/tx/dallas/KDAL",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Dallas be 95°F or below on August 7?"
+  },
+  "CYYZ": {
+    "city": "Toronto",
+    "station": "CYYZ",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/ca/mississauga/CYYZ",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Toronto be 22°C or below on August 7?"
+  },
+  "MMMX": {
+    "city": "Mexico City",
+    "station": "MMMX",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/mx/mexico-city/MMMX",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Mexico City be 17°C or below on August 7?"
+  },
+  "ZUUU": {
+    "city": "Chengdu",
+    "station": "ZUUU",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/cn/chengdu/ZUUU",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Chengdu be 25°C or below on August 6?"
+  },
+  "NZWN": {
+    "city": "Wellington",
+    "station": "NZWN",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/nz/wellington/NZWN",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Wellington be 5°C or below on August 6?"
+  },
+  "ZGSZ": {
+    "city": "Shenzhen",
+    "station": "ZGSZ",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/cn/shenzhen/ZGSZ",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Shenzhen be 28°C or below on August 6?"
+  },
+  "ZGGG": {
+    "city": "Guangzhou",
+    "station": "ZGGG",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/cn/guangzhou/ZGGG",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Guangzhou be 29°C or below on August 6?"
+  },
+  "RKPK": {
+    "city": "Busan",
+    "station": "RKPK",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/kr/busan/RKPK",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Busan be 30°C or below on August 6?"
+  },
+  "ZUCK": {
+    "city": "Chongqing",
+    "station": "ZUCK",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/cn/chongqing/ZUCK",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Chongqing be 27°C or below on August 6?"
+  },
+  "ZHHH": {
+    "city": "Wuhan",
+    "station": "ZHHH",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/cn/wuhan/ZHHH",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Wuhan be 30°C or below on August 6?"
+  },
+  "ZSQD": {
+    "city": "Qingdao",
+    "station": "ZSQD",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/cn/qingdao/ZSQD",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Qingdao be 28°C or below on August 6?"
+  },
+  "OEJN": {
+    "city": "Jeddah",
+    "station": "OEJN",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/sa/jeddah/OEJN",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Jeddah be 32°C or below on August 6?"
+  },
+  "VILK": {
+    "city": "Lucknow",
+    "station": "VILK",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/in/lucknow/VILK",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Lucknow be 22°C or below on August 6?"
+  },
+  "MPMG": {
+    "city": "Panama City",
+    "station": "MPMG",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/pa/panama-city/MPMG",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the highest temperature in Panama City be 28°C or below on August 11?"
+  },
+  "MPTO": {
+    "city": "Panama City",
+    "station": "MPTO",
+    "source": "weather.gov",
+    "resolution_url": "https://www.weather.gov/wrh/timeseries?site=mpmg",
+    "rounding": "floor_1C_bucket",
+    "evidence": "Will the lowest temperature in Panama City be 20°C or below on August 24?"
+  },
+  "LTFM": {
+    "city": "Istanbul",
+    "station": "LTFM",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/tr/istanbul/LTFM",
+    "rounding": "floor_1C_bucket",
+    "evidence": "manuel + canli dogrulama (Istanbul Airport Station)"
+  },
+  "VHHH": {
+    "city": "Hong Kong",
+    "station": "VHHH",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/hk/hong-kong/VHHH",
+    "rounding": "floor_1C_bucket",
+    "evidence": "manuel (kalip)"
+  },
+  "LLBG": {
+    "city": "Tel Aviv",
+    "station": "LLBG",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/il/tel-aviv/LLBG",
+    "rounding": "floor_1C_bucket",
+    "evidence": "manuel (kalip)"
+  },
+  "UUWW": {
+    "city": "Moscow",
+    "station": "UUWW",
+    "source": "wunderground",
+    "resolution_url": "https://www.wunderground.com/history/daily/ru/moscow/UUWW",
+    "rounding": "floor_1C_bucket",
+    "evidence": "manuel (kalip)"
+  }
+}

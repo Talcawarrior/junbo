@@ -70,6 +70,7 @@ _TMP_DB_PATH = None
 
 
 def pytest_configure(config):
+    config.addinivalue_line("markers", "real_price_guard: gercek verify_entry_price mantigini test et")
     global _TMP_DB_PATH
     if _TMP_DB_PATH is None:
         _fd, _TMP_DB_PATH = tempfile.mkstemp(suffix=".db")
@@ -236,3 +237,25 @@ def _reset_strategy_params():
     Config.MAX_BET_PCT = original_config_max_bet_pct
     bot_config.strategy.metar_peak_max_bets_per_day = original_metar_cap
     bot_config.strategy.turkey_only = original_turkey_only
+
+
+# ── Canli fiyat dogrulamasi (2026-11-18) ─────────────────────────────────────
+# verify_entry_price artik FAIL-CLOSED: CLOB'a ulasilamazsa bet acilmaz.
+# Testlerde ag yok; varsayilan olarak DB fiyati "dogrulanmis" sayilir ve
+# erken kapanis DB fiyatindan yapilir (eski test beklentileri korunur).
+# Gercek dogrulama mantigi tests/test_entry_price_guard.py'de test edilir;
+# o testler @pytest.mark.real_price_guard ile bu yamayi devre disi birakir.
+@pytest.fixture(autouse=True)
+def _stub_live_price_guard(request, monkeypatch):
+    if request.node.get_closest_marker("real_price_guard"):
+        yield
+        return
+    import utils.clob_live as _cl
+
+    monkeypatch.setattr(_cl, "verify_entry_price", lambda market, db_price, *a, **k: (True, float(db_price), "ok"))
+    monkeypatch.setattr(
+        _cl,
+        "live_exit_price",
+        lambda market, *a, **k: float(market.yes_price) if getattr(market, "yes_price", None) else None,
+    )
+    yield

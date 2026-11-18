@@ -312,24 +312,24 @@ def _place_spread_bets_inner(session, target_day) -> dict:
             # weather_markets.yes_price 5dk gecikmeli ve WS dustugunde REST poll
             # fiyati guncellemez -> 0.001-0.02 gibi gercek-disi fiyatlarla bet
             # acilabiliyor. CLOB canli kotu DB fiyatla %15'ten fazla sapiyorsa
-            # bet REDDEDILIR. CLOB hataliysa bet asla engellenmez (bet_placer
-            # ile ayni kural).
+            # bet REDDEDILIR. (2026-11-18 oncesi: CLOB hataliysa bet engellenmezdi;
+            # artik engellenir - asagiya bakin.)
+            # 2026-11-18: FAIL-CLOSED. Fiyat dogrulanamazsa (bayat DB, CLOB'a
+            # ulasilamiyor, ask>=1, %15+ sapma) bet ACILMAZ. Dolum = canli ask.
             try:
-                from utils.clob_live import live_quote_for_market, price_is_stale
+                from utils.clob_live import verify_entry_price
 
-                _tok, live_ask, live_bid = live_quote_for_market(mkt.raw_data)
-                if _tok is not None and live_ask is not None and price_is_stale(entry, live_ask, live_bid):
-                    logger.warning(
-                        "STALE PRICE GUARD: %s DB yes=%.4f vs CLOB ask=%.4f (bid=%.4f) - bet refused",
-                        mkt.id,
-                        entry,
-                        live_ask,
-                        live_bid,
-                    )
-                    skipped += 1
-                    continue
-            except Exception as exc:  # never block betting on CLOB failure
-                logger.debug("Live price guard skipped for %s: %s", mkt.id, exc)
+                _ok, _ask, _why = verify_entry_price(mkt, entry)
+            except Exception as exc:  # noqa: BLE001 — dogrulama hatasi = bet yok
+                _ok, _ask, _why = False, None, f"dogrulama hatasi: {exc}"
+            if not _ok or _ask is None:
+                logger.warning("spread skip: %s %s %sC - %s", city_name, target_day, thr, _why)
+                skipped += 1
+                continue
+            entry = _ask
+            if not (min_entry <= entry < max_entry):
+                skipped += 1
+                continue
 
             # 2026-08-16 kullanici karari: fair-value ve 0.10-0.20 olum bolge
             # filtreleri KALDIRILDI — "fiyat ne olursa olsun 0.01-0.95 arasi

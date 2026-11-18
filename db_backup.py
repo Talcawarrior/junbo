@@ -195,10 +195,17 @@ def _delete_backup(primary):
                 os.unlink(p)
 
 
+# 2026-11-18: bot.db 1.7 GB'a cikti; label basina 30 kopya = ~51 GB.
+# Startup yedekleri yalnizca "son acilis oncesi" geri donus noktasidir;
+# 30 gunluk gecmisi gunluk "scheduled" yedekler tutar.
+MAX_BACKUPS_BY_LABEL = {"startup": 3}
+
+
 def _prune_dir(directory, label):
-    """Keep only the newest MAX_BACKUPS backups for a label in a directory."""
+    """Keep only the newest N backups for a label in a directory."""
     primaries = _primary_backups(directory, label)
-    for old in primaries[: max(0, len(primaries) - MAX_BACKUPS)]:
+    keep = MAX_BACKUPS_BY_LABEL.get(label, MAX_BACKUPS)
+    for old in primaries[: max(0, len(primaries) - keep)]:
         _delete_backup(old)
 
 
@@ -299,6 +306,13 @@ def create_backup(label="auto"):
     # Startup backup'lari gunde 1 kez (her bot restartinda 270MB birikiyordu)
     if label == "startup" and not _startup_backup_due():
         return None
+    # 2026-11-18: marker KOPYADAN ONCE yazilir. 1.7 GB DB'nin kopyasi ~1 dk
+    # suruyor; watchdog/servis botu her dakika oldururken marker hic
+    # yazilamadi ve her acilista yeni bir 1.7 GB yedek baslatildi
+    # (17 Kasim gecesi 7 dk'da ~12 GB). Basarisiz olursa ertesi gun tekrar denenir;
+    # gunluk "scheduled" yedek zaten ayri alinir.
+    if label == "startup":
+        _mark_startup_backup()
     os.makedirs(_backup_dir(), exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     backup_name = f"bot_{label}_{timestamp}.db"
@@ -340,12 +354,17 @@ def create_backup(label="auto"):
             print(f"Backup created & verified: {backup_name}")
     except (sqlite3.Error, OSError) as exc:
         print(f"WARNING: backup failed ({exc}), skipping")
+        # 2026-11-18: yarim kalmis kopyayi (ve -journal) temizle - disk dolduruyordu.
+        for p in (backup_path, backup_path + "-journal", backup_path + "-wal", backup_path + "-shm"):
+            try:
+                if os.path.exists(p):
+                    os.unlink(p)
+            except OSError:
+                pass
         return None
 
     _prune_backups(label)
     mirror_offsite(backup_path)
-    if label == "startup":
-        _mark_startup_backup()
     return backup_path
 
 

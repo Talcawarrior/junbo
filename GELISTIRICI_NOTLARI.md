@@ -238,6 +238,9 @@ python -m pytest tests/test_accounting.py tests/test_settler_polymarket.py tests
 
 # 6) FULL suite (push oncesi)
 python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q
+# 2026-11-18 gercek: 784 passed, 6 skipped, 0 failed (523 sn; spread kapatma + path + proxy retry testleri dahil).
+# 2026-11-18 aksam gercek: 797 passed, 8 skipped, 2 failed (892 sn; +17 denetim testi). 2 hata canli
+#   TestPolymarketProxyLive: WARP SOCKS o anda kopuktu; WARP toparlaninca sinif tekrar 3/3 passed.
 # HEDEF: "758 passed, 7 skipped, 0 failed" (2026-10-28 olcumu)
 # 2026-11-09 HEDEF/gercek: "762 passed, 6 skipped, 0 failed" (616 sn; +test_poly_dns 3 test, settlement gate + backtest bias testleri yesil).
 # 2026-10-28 gercek: 758 passed, 7 skipped, 0 failed (1363 sn).
@@ -350,6 +353,15 @@ Hangi dosya hangi kurali korur:
 
 | Hata | Cozum |
 |---|---|
+| **Yedekler C:'yi dolduracakti (2026-11-18)** | `scripts/backup_databases.py` her 6 saatte 4 DB'yi (~7 GB) kopyalayip 90 gun sakliyordu; veri + yedek C:'ye tasininca ~28 GB/gun -> ~5 gunde disk dolu. Cozum: UTC gununde 1 kosu (`RUN_MARKER` `.last_backup_databases_run`, `--force` ile ek kosu) + `KEEP_LAST_BY_PREFIX` (bot/orderbook/backtest/actuals son 7; db_backup.py dosyalarina dokunulmaz). `data_watchdog` BACKUP kontrolu marker yasina bakar (>26 sa). Test: `tests/test_backup_retention.py`. |
+| **CLOB REST yedegi hic calismadi (2026-11-18)** | `_clob_rest_poll_once` marketleri `get_session()` icinde ORM nesnesi olarak aliyor, `raw_data`'yi session kapandiktan sonra okuyordu; `expire_on_commit=True` -> `DetachedInstanceError` yutuldu -> 0 HTTP istegi, `orderbook_snapshots` `token_id='0'` satiri hic yok, `yes_price` REST tazelemesi de hic olmadi. Cozum: kolon sorgusu + `SimpleNamespace`; `_archive_clob_prices` toplu tek transaction. Test: `tests/test_clob_rest_poll.py`. |
+| **orderbook.db kilit cakismasi (2026-11-18)** | `collect_orderbook.py` tum toplamayi TEK transaction'da yapiyordu (3-19 dk yazma kilidi); botun WS arsiv yazimi asyncio dongusu icinde senkron sqlite (timeout 5 sn) idi -> WS acilinca dongu donabilirdi; backtest testleri `database is locked` aldi. Cozum: collector 100 satirda bir commit + `timeout=30`; WS arsivi `asyncio.to_thread`. |
+| **WeatherNext 3+ gun cekilmedi (2026-11-18)** | Runner kapisi `utcHour % 12 === 0` (utcHour tur basinda sabit). Turlar 80-140 dk surup kaydigi icin (23:59 -> 02:59) 00/12'de baslayan tur olmadi; 11-16/17'de ~38 saat runner turu da yoktu. Open-Meteo (6s) ve IEM (24s) ayni sebeple atlaniyordu. Cozum: UTC slot kapisi `forecast_runner/windows-runner/gates.mjs` (slot icindeki ilk basarili tur; durum `C:\JUNBO data\state\gated_slots_utc.json`). Test: `tests/test_runner_gates.py`. |
+| **.env HEAT/OM yollari D:'de kaldi (2026-11-18)** | Runner C:'ye tasindi ama `.env` `JUNBO_HEAT_DB`/`HEAT_MAIN_DB`/`OM_CACHE_DB` D:'yi gosteriyordu -> heat_mos ertesi gun donmus D: kopyasini okuyacakti, om_cache ikiye bolundu. C:'ye cevrildi (`.env.bak_20261118_heatpaths`); `heat/config.py` adaylari ve `utils/om_cache.py` varsayilani da C:. |
+| **JunboWARP gorevi bozuk ve zararliydi (2026-11-18)** | Disabled + tirnaksiz yol; ayrica `start_warp.ps1` `warp-cli mode warp` (tam VPN) calistirip SOCKS portunu kapatirdi. Cozum: `scripts/warp_health.ps1` (cdn-cgi/trace yoklama, 2 basarisiz tick -> disconnect/connect, 15 dk cooldown, mod degismez), gorev 5 dk, yedek XML `C:\JUNBO data\state\JunboWARP_task_backup_20261118.xml`. Test: `tests/test_warp_health_script.py`. |
+| **bot_watchdog yanlis "stale" alarmi (2026-11-18)** | 17:59 tick'i (collect_orderbook 19 dk) log yazmadi; bot_watchdog 4 kez enable+run yapti. Cozum: gorev `Running` ise 40 dk'ya kadar alarm yok, >40 dk ise `/end` + `/run`. Test: `tests/test_bot_watchdog_data_guard.py`. |
+| **Orderbook Ekim boslugu — veri watchdog'u durdu (2026-11-18)** | Bot servisi calisiyordu (`market_snapshots` Ekim 1.087.985 satir) ama `JunboDataWatchdog` logu 19.09 01:30 -> 11.11 21:53 arasi yok; `collect_orderbook.py` de ayni aralikta calismadi. `JunboSnapshot` (29.09) ve `Junbo-BackupDatabases` (28.09) Disabled kalmis. `ensure_task_enabled` PowerShell komutu fazladan `}}` ile timeout'a dusuyordu ve bu iki gorev listede yoktu. Cozum: gecerli PowerShell + tam liste (`TASK_ENSURE_NAMES`), `bot_watchdog` data-watchdog log staleness kontrolu, CLOB arsiv yolu `get_data_dir()`. Ekim depth verisi geri getirilemez; Ekim fiyat verisi `market_snapshots`'ta. |
+| **Spread zararli cikti — kapatildi (2026-11-18)** | Gercek orderbook ask + gercek Polymarket sonucu ile 2 aylik backtest: **1.067 bet, %22.3 win, -$854.67**; edge filtreli varyant da -$62/-$68. `.env` `SPREAD_ENABLED=false`; `bot_loop` spread placer + edge dongusunu atlar, METAR-peak devam eder (PAPER). METAR hibrit 3-17 Agu: **195 bet, %81.5, +$1.032**. Veri denetimi: `orderbook.db` 29 Eyl-10 Kas bos (44 gun); canli `weather_forecasts` yalnizca Kasim. Backtest araclari: `%` help crash, O(n^2) market lookup, PK tabanli aralik, indeksli orderbook okuma. |
 | **Health-check yanlis "critical" (2026-11-13)** | Edge-modu kalibrasyonu rotation kapanislarini kayip sayiyordu; spread modunda `Analysis` satiri olmadigi icin edge metrikleri 0'di. 2026-11-13: verdict son 48s NET PnL'e baglandi; `summary_all.rotation`/`settlement` ve `recent_48h` eklendi; win-rate mesaji `recent_win_rate` kullaniyor. Ornek: verdict critical iken net +$22.58 idi. |
 | **DB yolu bolunmesi (2026-11-13)** | `utils/activity_log.py` ve ~33 script repo `data/bot.db`'yi hardcoded okuyordu (0 bet). `utils/db_paths.py` eklendi; activity_log, scriptler, `executor/settler.py` (actuals), `db_backup.py`, `jobs/collect_settlement_temps.py` canli `DB_PATH`'e baglandi. `tests/test_db_path_consistency.py` regresyonu korur. |
 | **JunboBotWatchdog Disabled (2026-11-13)** | Task Scheduler'da `JunboBotWatchdog` Disabled idi; servis tek basina koruma sagliyordu. Enable edildi (1 dk, `scripts/bot_watchdog.py`). |
@@ -602,6 +614,10 @@ calisir (kesintiye karsi guvence):
   `jobs/snapshot_job.py`, `bot_loop.py`, `snapshot_only.py` ayni degeri kullanir).
 - DB yedekleri (`data/backups/`): **30 gun** tutulur (`scripts/backup_databases.py`
   `RETENTION_DAYS = 30`), `Junbo-BackupDatabases` task'i 6 saatte bir alir.
+  **2026-11-18 guncel:** konum `<JUNBO_DATA_DIR>\backups`; `backup_databases.py` UTC gununde
+  1 kez kosar (marker `.last_backup_databases_run`) ve prefix basina son 7 kopyayi tutar
+  (`KEEP_LAST_BY_PREFIX`); `RETENTION_DAYS=90` yalnizca emniyet supabidir. bot.db'nin 30 gunluk
+  dogrulanmis serisi `db_backup.py` `bot_scheduled` yedekleridir (startup: son 3).
 - `conftest.py` test-oncesi backup: **gunluk en fazla 1 kez** (marker throttling,
   `data/.last_pre_test_backup`).
 
@@ -732,11 +748,12 @@ Bir ariza ile karsilasildiginda once buraya bak, sonra gerekirse kod kanitlarini
   | JunboSnapshot | Ready, 30dk, WakeToRun | snapshot (24/7 garantisi) |
   | JunboBotWatchdog | Ready, 1dk | heartbeat + crash restart (2026-11-13 enable) |
   | JunboDataWatchdog | Ready, 6dk | veri tazeligi self-healing |
-  | Junbo-BackupDatabases | Ready, 6sa | DB yedekleme + purge |
+  | Junbo-BackupDatabases | Ready, 6sa (gunde 1 kosar, 2026-11-18) | DB yedekleme, son 7 kopya |
   | Junbo-ActualsCollect | Ready, 6sa | gerceklesen hava |
   | Junbo-OrderbookCollect | Ready, 30dk | orderbook derinligi |
   | Junbo-SyncBacktest | Ready, 6sa | backtest.db senkron |
-  | JunboBot / JunboBotBackup / JunboWARP | Disabled (bilincli) | eski yontemler |
+  | JunboWARP | Ready, 5dk (2026-11-18) | `scripts\warp_health.ps1`: WARP proxy saglik + reconnect (mod degismez) |
+  | JunboBot / JunboBotBackup | Disabled (bilincli) | eski yontemler (bot = Windows servisi + JunboBotWatchdog) |
 - **Aksiyon:** Ready olmasi gereken bir gorev Disabled ise `schtasks /change /tn
   "\Gorev" /enable` ile ac, sonra log/Last Result dogrula.
 

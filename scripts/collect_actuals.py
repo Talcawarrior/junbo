@@ -19,10 +19,10 @@ import sys as _sys
 from pathlib import Path as _Path
 
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
-from utils.db_paths import get_db_path  # noqa: E402
+from utils.db_paths import get_data_dir, get_db_path  # noqa: E402
 
 # Paths: consolidated data root. Override with env for tests.
-DATA_DIR = Path(os.getenv("JUNBO_DATA_DIR", r"D:\JUNBO data"))
+DATA_DIR = Path(os.getenv("JUNBO_DATA_DIR", get_data_dir()))
 ROOT = Path(__file__).resolve().parent.parent
 BOT_DB = Path(os.getenv("JUNBO_BOT_DB", get_db_path()))
 ACTUALS_DB = Path(os.getenv("JUNBO_ACTUALS_DB", str(DATA_DIR / "actuals.db")))

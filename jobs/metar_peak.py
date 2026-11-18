@@ -251,9 +251,18 @@ def _close_wrong_bucket_bets(session, city_code: str, target_date, winning_bucke
             continue
         if int(float(wm.threshold) + 0.5) == winning_bucket:
             continue  # kazanan bucket TUTULUR
+        # 2026-11-18: satis fiyati = canli CLOB BID (gercekte satilabilecek fiyat).
+        # Eskiden DB yes_price (bayat olabilir, mid/last) kullaniliyordu ->
+        # kesinti sonrasi kagit uzerinde gercek disi satis gelirleri. Bid
+        # alinamazsa bet KAPATILMAZ; settlement'ta zaten sonuclanir.
         try:
-            live = float(wm.yes_price) if wm.yes_price else float(bet.entry_price or 0)
-        except (TypeError, ValueError):
+            from utils.clob_live import live_exit_price
+
+            live = live_exit_price(wm)
+        except Exception:  # noqa: BLE001
+            live = None
+        if live is None:
+            logger.info("metar_peak: bet#%s %s %sC kapatilmadi - canli bid yok", bet.id, bet.city, wm.threshold)
             continue
         ok = placer.close_bet_for_rotation(bet, max(0.01, min(0.99, live)), session)
         if ok:
@@ -302,65 +311,30 @@ def _open_metar_bet(session, market: WeatherMarket, peak_temp: float) -> Optiona
         log_event("bet_blocked", str(market.city), f"peak bucket {float(market.threshold):.1f}C: {neden}")
         return None
 
-    # 2026-08-18 audit fix (C3): fantom/stale fiyat guardi. Canli METAR-peak
-    # betleri (30 bet, -$32.84) icin entry=0.01-0.03 longshot'lar tamamen
-    # kayipti. MIN_ENTRY uzerindekiler de CLOB canli kottan %15'ten fazla
-    # sapiyorsa reddedilir. CLOB hataliysa bet asla engellenmez.
+    # 2026-11-18: FAIL-CLOSED fiyat dogrulamasi. 2026-11-17 21:07 UTC'de restart
+    # sonrasi Londra/Paris/Amsterdam/Munih betleri bayat DB fiyatindan
+    # (0.30-0.52) acildi; gercek piyasa bid 0.999 / ask 1.00'di. Eski guard
+    # CLOB'a ulasilamayinca beti geciriyordu, orderbook.db yedek guard'i ise
+    # yanlis yola (repo/data/orderbook.db, 0 bayt) bakiyordu -> hic calismadi.
+    # Artik: fiyat dogrulanamazsa bet yok; dolum fiyati = canli CLOB ask.
     try:
-        from utils.clob_live import live_quote_for_market, price_is_stale
+        from utils.clob_live import verify_entry_price
 
-        # getattr: WeatherMarket.raw_data mypy'de Column[str]; runtime'da str|None.
-        # live_quote_for_market(str|None) bekler — Column tipini asla gecirmeyiz.
-        _tok, live_ask, live_bid = live_quote_for_market(getattr(market, "raw_data", None))
-        if _tok is not None and live_ask is not None and price_is_stale(entry, live_ask, live_bid):
-            logger.warning(
-                "metar_peak: STALE PRICE GUARD %s DB yes=%.4f vs CLOB ask=%.4f (bid=%.4f) - bet refused",
-                market.id,
-                entry,
-                live_ask,
-                live_bid,
-            )
-            from utils.activity_log import log_event
+        _ok, _ask, _why = verify_entry_price(market, entry)
+    except Exception as exc:  # noqa: BLE001 — dogrulama hatasi = bet yok
+        _ok, _ask, _why = False, None, f"dogrulama hatasi: {exc}"
+    if not _ok or _ask is None:
+        logger.warning("metar_peak: %s %sC bet reddedildi - %s", market.city, market.threshold, _why)
+        from utils.activity_log import log_event
 
-            log_event(
-                "bet_blocked",
-                str(market.city),
-                f"STALE PRICE GUARD: DB={entry:.3f} vs CLOB ask={live_ask:.3f} (fark > %15)",
-            )
-            return None
-    except Exception as exc:  # never block betting on CLOB failure
-        logger.debug("metar_peak: live price guard skipped for %s: %s", market.id, exc)
+        log_event("bet_blocked", str(market.city), f"FIYAT DOGRULANAMADI: {_why}")
+        return None
+    entry = _ask
+    if not (MIN_ENTRY <= entry < max_entry):
+        from utils.activity_log import log_event
 
-    # 2026-08-20 STALE GUARD YEDEGI (orderbook.db — CLOB'dan BAGIMSIZ):
-    # Toronto 19 Agu'da CLOB istegi dusunce guard atlandi, bayat 25C'ye
-    # girildi (-$6). Orderbook.db botun kendi 5dk'lık GERCEK ask okumalaridir;
-    # son okuma DB fiyatindan %15+ sapiyorsa fiyat bayattir, bet reddedilir.
-    try:
-        import os as _os
-        import sqlite3 as _sq
-
-        _ob = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "data", "orderbook.db")
-        if _os.path.exists(_ob):
-            _oc = _sq.connect(_ob, timeout=5)
-            _last = _oc.execute(
-                "SELECT best_ask FROM orderbook_snapshots WHERE market_id=? AND best_ask IS NOT NULL "
-                "ORDER BY snapshot_time DESC LIMIT 1",
-                (str(market.id),),
-            ).fetchone()
-            _oc.close()
-            if _last and _last[0] is not None:
-                _ob_ask = float(_last[0])
-                if 0 < _ob_ask < 1 and abs(entry - _ob_ask) / _ob_ask > 0.15:
-                    from utils.activity_log import log_event
-
-                    log_event(
-                        "bet_blocked",
-                        str(market.city),
-                        f"STALE GUARD(ob): DB={entry:.3f} vs orderbook ask={_ob_ask:.3f} (fark > %15)",
-                    )
-                    return None
-    except Exception:  # noqa: BLE001 — yedek guard asla beti durdurmaz
-        pass
+        log_event("bet_blocked", str(market.city), f"canli ask={entry:.3f} aralik disi [{MIN_ENTRY}, {max_entry})")
+        return None
 
     pf = session.query(Portfolio).filter(Portfolio.id == 1).first()
     cash = float(pf.cash_balance) if pf else 0.0

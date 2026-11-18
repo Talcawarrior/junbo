@@ -131,3 +131,81 @@ def max_stake_by_depth(token_id: str, entry_price: float, fill_pct: float = 0.30
     except Exception as exc:  # network / parse / HTTP errors
         logger.warning("CLOB depth failed for token %s: %s", token_id, exc)
         return None
+
+
+# ── 2026-11-18: FAIL-CLOSED giris fiyati dogrulamasi ─────────────────────────
+# Olay: 2026-11-17 21:07 UTC restart sonrasi metar_peak Londra/Paris/Amsterdam/
+# Munih betlerini 0.30-0.52'den acti; gercek piyasa o anda bid 0.999 / ask 1.00
+# idi (sonuc belliydi). Sebep: (1) DB fiyati kesintiden kalma bayat fiyatti,
+# (2) CLOB'a ulasilamayinca eski guard "asla engelleme" diyerek beti geciriyordu.
+# Yeni kural: fiyat DOGRULANAMIYORSA BET ACILMAZ. Dolum fiyati = canli CLOB ask
+# (kagit muhasebe gercekte odenecek fiyati kullanir, Gamma mid/last degil).
+
+# DB fiyatinin (weather_markets.last_updated) en fazla kac dakika eski olabilecegi.
+# Gamma poll 5 dk, CLOB WS anlik -> 15 dk = en az 2 poll kacirilmis demektir.
+MAX_PRICE_AGE_MIN = 15.0
+
+
+def _price_age_minutes(market, now=None) -> float | None:
+    """weather_markets.last_updated'tan bu yana gecen dakika (naive UTC)."""
+    from datetime import datetime, timezone
+
+    last = getattr(market, "last_updated", None)
+    if last is None:
+        return None
+    if getattr(last, "tzinfo", None) is not None:
+        last = last.astimezone(timezone.utc).replace(tzinfo=None)
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    return (now - last).total_seconds() / 60.0
+
+
+def verify_entry_price(market, db_price: float, now=None, timeout: float = 5.0) -> tuple[bool, float | None, str]:
+    """Bet acmadan once giris fiyatini dogrular (FAIL-CLOSED).
+
+    Returns ``(ok, fill_price, reason)``:
+      - ok=True  -> fill_price = canli CLOB best ask (bet bu fiyattan acilir)
+      - ok=False -> bet ACILMAZ; reason activity log'a yazilir.
+
+    Red sebepleri:
+      1. DB fiyati bayat (last_updated > MAX_PRICE_AGE_MIN dk ya da yok)
+      2. YES token bulunamadi
+      3. CLOB kotu alinamadi (ag/geo-block/bos defter) -> artik ENGELLER
+      4. Ask 0 veya >= 1 (market fiilen cozulmus / defter yok)
+      5. DB fiyati canli ask'tan %15'ten fazla sapiyor
+    """
+    age = _price_age_minutes(market, now)
+    if age is None:
+        return False, None, "fiyat zamani yok (last_updated bos)"
+    if age > MAX_PRICE_AGE_MIN:
+        return False, None, f"DB fiyati bayat ({age:.0f} dk > {MAX_PRICE_AGE_MIN:.0f})"
+
+    token_id = extract_yes_token_id(getattr(market, "raw_data", None))
+    if token_id is None:
+        return False, None, "YES token bulunamadi"
+
+    ask, bid = _fetch_live_yes_quote(token_id, timeout=timeout)
+    if ask is None:
+        return False, None, "CLOB kotu alinamadi (fail-closed)"
+    if not (0.0 < float(ask) < 1.0):
+        return False, None, f"CLOB ask={ask} gecersiz (market cozulmus/bos defter)"
+    if price_is_stale(float(db_price), float(ask), bid):
+        return False, None, f"DB={float(db_price):.3f} vs CLOB ask={float(ask):.3f} (fark > %15)"
+    return True, round(float(ask), 4), "ok"
+
+
+def live_exit_price(market, timeout: float = 5.0) -> float | None:
+    """Erken kapanis (satis) icin canli CLOB best bid. Alinamazsa None.
+
+    Satis gercekte bid'den olur; Gamma yes_price (mid/last, bayat olabilir)
+    kagit uzerinde olmayan gelir yaziyordu (2026-11-18).
+    """
+    token_id = extract_yes_token_id(getattr(market, "raw_data", None))
+    if token_id is None:
+        return None
+    _ask, bid = _fetch_live_yes_quote(token_id, timeout=timeout)
+    if bid is None:
+        return None
+    bid = float(bid)
+    if not (0.0 < bid < 1.0):
+        return None
+    return round(bid, 4)

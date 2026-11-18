@@ -22,6 +22,14 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG = os.path.join(REPO, "logs", "watchdog.log")
 BOT_LOG = os.path.join(REPO, "logs", "bot.log")
 HEARTBEAT_TIMEOUT = 15 * 60  # seconds
+DATA_ROOT = os.getenv("JUNBO_DATA_DIR") or r"C:\JUNBO data"
+DATA_WATCHDOG_LOG = os.path.join(DATA_ROOT, "logs", "data_watchdog.log")
+DATA_WATCHDOG_TASK = "JunboDataWatchdog"
+DATA_WATCHDOG_STALE = 15 * 60  # seconds
+# 2026-11-18: tek bir data-watchdog tick'i log yazmadan uzun surebilir (or.
+# 17:59'daki collect_orderbook 19 dk). Gorev Running iken log yasi bu esige
+# kadar normaldir (gorev ExecutionTimeLimit 30 dk + 6 dk aralik + pay).
+DATA_WATCHDOG_HUNG = 40 * 60  # seconds
 
 
 def log(msg: str) -> None:
@@ -76,8 +84,57 @@ def ensure_running() -> None:
     _run(["net", "start", SERVICE])
 
 
+def ensure_data_watchdog() -> None:
+    """Data watchdog 15 dk'dir log yazmadiysa gorevi enable + run et.
+
+    2026-11-18: data watchdog 19 Eyl-11 Kas arasi durdu ve kimse fark
+    etmedi; orderbook/snapshot/backup gorevleri de onunla durdu. Bu kontrol
+    data watchdog'un kendi bekcisidir.
+    """
+    age = None
+    if os.path.exists(DATA_WATCHDOG_LOG):
+        age = time.time() - os.path.getmtime(DATA_WATCHDOG_LOG)
+    if age is not None and age <= DATA_WATCHDOG_STALE:
+        return
+    state = _task_state(DATA_WATCHDOG_TASK)
+    if state == "Running" and age is not None and age <= DATA_WATCHDOG_HUNG:
+        return  # uzun ama normal tick (yanlis "stale" alarmi verme)
+    if state == "Running":
+        log(f"DATA WATCHDOG hung (age={age:.0f}s, Running) - end+run {DATA_WATCHDOG_TASK}")
+        _run(["schtasks", "/end", "/tn", DATA_WATCHDOG_TASK])
+    else:
+        log(f"DATA WATCHDOG stale (age={age}, state={state or '?'}) - enable+run {DATA_WATCHDOG_TASK}")
+        _run(["schtasks", "/change", "/tn", DATA_WATCHDOG_TASK, "/enable"])
+    _run(["schtasks", "/run", "/tn", DATA_WATCHDOG_TASK])
+
+
+def _task_state(name: str) -> str:
+    """Task Scheduler durumu (Ready/Running/Disabled). Dil bagimsiz; hata -> ''.
+
+    schtasks ciktisi yerellestirilmis (bu makinede Rusca) oldugu icin
+    PowerShell enum adi kullanilir. Yalnizca log bayatken cagrilir.
+    """
+    try:
+        out = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                f"(Get-ScheduledTask -TaskName '{name}').State",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return (out.stdout or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 if __name__ == "__main__":
     try:
         ensure_running()
+        ensure_data_watchdog()
     except Exception as e:  # noqa: BLE001
         log(f"WATCHDOG CRASH: {e}")

@@ -191,6 +191,9 @@ ALLOWED_DEAD = {
     # CLI / service entry points
     "main",
     "run_cli",
+    # scripts/bot_watchdog.py __main__ entry point (called from the same file;
+    # cross-file census cannot see the __main__ call).
+    "ensure_data_watchdog",
     "SvcStop",
     "SvcDoRun",
     "bot_lifespan",

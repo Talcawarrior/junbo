@@ -28,10 +28,10 @@ import sys as _sys
 from pathlib import Path as _Path
 
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
-from utils.db_paths import get_db_path  # noqa: E402
+from utils.db_paths import get_data_dir, get_db_path  # noqa: E402
 
 # Paths: consolidated data root. Override with env for tests.
-DATA_DIR = Path(os.getenv("JUNBO_DATA_DIR", r"D:\JUNBO data"))
+DATA_DIR = Path(os.getenv("JUNBO_DATA_DIR", get_data_dir()))
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 ORDERBOOK_DB = Path(os.getenv("JUNBO_ORDERBOOK_DB", str(DATA_DIR / "orderbook.db")))
@@ -332,6 +332,9 @@ def _fetch_one(market: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] |
     return market, fetch_orderbook(market["token_id"])
 
 
+_COMMIT_EVERY = 100  # satir; 2026-11-18 periyodik commit
+
+
 def collect_once(workers: int = MAX_WORKERS) -> int:
     """Run one collection cycle. Returns number of markets processed.
 
@@ -349,7 +352,10 @@ def collect_once(workers: int = MAX_WORKERS) -> int:
     logger.info("Found %d weather markets, fetching orderbooks (%d workers)...", len(markets), workers)
     snapshot_time = datetime.now(timezone.utc).isoformat()
 
-    conn = sqlite3.connect(str(ORDERBOOK_DB))
+    # 2026-11-18: periyodik commit + 30 sn busy timeout. Eskiden tum toplama
+    # (3-19 dk) TEK transaction'di; yazma kilidi boyunca botun CLOB arsivi ve
+    # okuyucular (backtest testleri) 'database is locked' aliyordu.
+    conn = sqlite3.connect(str(ORDERBOOK_DB), timeout=30)
     processed = 0
     errors = 0
 
@@ -375,6 +381,8 @@ def collect_once(workers: int = MAX_WORKERS) -> int:
                     threshold=market.get("threshold"),
                 )
                 processed += 1
+                if processed % _COMMIT_EVERY == 0:
+                    conn.commit()  # kilidi birak (bkz. yukaridaki not)
 
                 if processed <= 10 or processed % 500 == 0:
                     logger.info(

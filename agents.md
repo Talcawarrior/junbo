@@ -82,7 +82,6 @@ python -m pytest tests/ \
   --ignore=tests/test_comprehensive.py \
   --tb=short -q
 
-# Çıktı: "634 passed, 0 failed" olmalı.
 # (test_betting_idempotency ve test_comprehensive ignore edilebilir)
 ```
 
@@ -106,12 +105,12 @@ Bulunan her bug düzeltilip test edilmeli, sonra commit atılmalı.
 
 ## Botun Temel Mantığı
 
-**GUNCEL STRATEJI (2026-08-20, bakiniz: CLAUDE.md bolum 2 — yetkili config):**
+**GUNCEL STRATEJI (2026-11-18: SPREAD KAPALI, METAR-only; bakiniz: CLAUDE.md bolum 2 — yetkili config):**
 
-**1) SPREAD modu (ana, `BETTING_STRATEGY=spread`):**
-- `spread_radius=0` (tek esik = tahminin merkezi), `spread_max_cities=40` (en az |bias| sapan sehir), `spread_max_entry=0.50`, `spread_stake_usd=2.0`, gunluk limit 120 (2026-11-13 .env dogrulamasi)
-- Acilan betler settlement'a kadar TUTULUR (kayan pencere KAPALI); erken kapanis mekanizmalari (SL/TP/TS/time-decay/reopen) YOKTUR
-- Giris fiyati canli `weather_markets.yes_price` (5 dk); fiyat 0.01-0.95 arasi her seye bet acilir; derinlik siniri YOK (kullanici karari)
+**1) SPREAD modu (KAPALI, `SPREAD_ENABLED=false`):**
+- **2026-11-18 kullanici karari:** gercek orderbook + gercek Polymarket sonucu ile 2 aylik backtest **1.067 bet, %22.3 win, -$854.67**; edge filtresi (`entry < fair`) de negatif. Spread kapatildi; kod korunur, `SPREAD_ENABLED=true` ile geri acilir.
+- Eski parametreler: `spread_radius=0`, `spread_max_cities=40`, `spread_max_entry=0.50`, `spread_stake_usd=2.0`, gunluk limit 120.
+- Acilan betler settlement'a kadar TUTULUR; erken kapanis mekanizmalari YOKTUR.
 
 **2) METAR-peak modu (HIBRIT, 2026-08-20):**
 - `_avg_peak_hour`: sehir bazli gecmis ortalama peak saati (bugun haric, >=3 gun) — saat gelmeden bet acilmaz
@@ -125,109 +124,11 @@ Bulunan her bug düzeltilip test edilmeli, sonra commit atılmalı.
 
 Eski edge-tabanli mod (`BETTING_STRATEGY=edge`) korunur ama kullanilmaz.
 
-### 0 failed → Otomatik Bot Başlatma
-
-Full test suite **0 failed** ile geçtiyse, bot otomatik restart edilir:
-
-```bash
-# 1. Mevcut bot'u durdur
-python -c "
-import socket
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-sock.settimeout(2)
-result = sock.connect_ex(('127.0.0.1', 8093))
-sock.close()
-if result == 0:
-    import urllib.request
-    try:
-        urllib.request.urlopen('http://127.0.0.1:8093/stop', timeout=3)
-        print('Bot stopped via API')
-    except Exception as e:
-        print(f'Stop API failed: {e} (may need manual kill)')
-else:
-    print('Bot not running, skipping stop')
-"
-
-# 2. Biraz bekle (port boşalsın)
-timeout /t 3 /nobreak >nul
-
-# 3. Bot'u başlat
-start /B python main.py bot
-echo "Bot started on port 8093"
-```
-
-Alternatif (watchdog ile):
-```bash
-python watchdog.py start
-```
-
-Bot'un çalıştığını doğrula:
-```bash
-python -c "
-import urllib.request, json
-try:
-    r = urllib.request.urlopen('http://127.0.0.1:8093/api/health-check', timeout=5)
-    data = json.loads(r.read())
-    print(f'Health OK: {data}')
-except Exception as e:
-    print(f'Health check failed: {e}')
-"
-```
-
 ## Zorunlu Test Komutları (Her Değişiklikten Sonra)
 
 Bu projede **dead code, import hatası, calibration bug'ı** gibi sessiz hatalar daha önce CI'den kaçtı. Aşağıdaki adımlar **her kod değişikliğinden sonra** zorunludur.
 
-### 1. Latent-Bug Testleri (Önce Bunu Çalıştır)
-```bash
-python -m pytest tests/test_latent_bugs.py -v --tb=long
-```
-Bu test paketi:
-- **test_import_all_modules** — tüm .py dosyalarını import eder, kırık import/yazım hatası yakalar
-- **test_config_proxy_map_matches_botconfig** — config proxy senkronizasyonu
-- **test_required_modules_reachable** — zorunlu modüller import edilebilir mi
-- **test_required_reachable_names** — zorunlu fonksiyon/sınıf isimleri var mı
-- **test_calibration_get_calibrated_temperature_no_crash** — calibration crash yapmaz
-- **test_calibration_fallback_mbe_matches** — fallback değer geçerli
-- **test_no_dead_public_functions** — public fonksiyonların en az bir caller'ı var mı
-
-### 2. Lint + Type Check
-```bash
-python quick_check.py --fast
-```
-Ya da teker teker:
-```bash
-ruff check . --ignore F401
-mypy --ignore-missing-imports .
-```
-
-### 3. Değiştirilen Modülün Testleri
-```bash
-# Örnekler:
-python -m pytest tests/test_calculator.py -v --tb=short
-python -m pytest tests/test_calibration_audit.py -v --tb=short
-python -m pytest tests/test_preflight.py -v --tb=short
-```
-
-### 3b. Config + Strateji Testleri (settings.py/strategy.py/bet_placer.py değişikliklerinde)
-```bash
-python -m pytest tests/test_faz25_35.py tests/test_strategy_selection.py tests/test_days_ahead_regression.py -v --tb=short
-```
-Bu testler `flat_bet_usd`, `max_bet_amount`, `total_exposure_pct`, `rotation_threshold` gibi config değerlerini doğrular.
-
-### 4. E2E + Liveliness Testleri
-```bash
-python -m pytest tests/test_e2e_system.py tests/test_integration_e2e.py tests/test_faz2_e2e_mock.py tests/test_liveliness_audit.py --tb=short -q
-```
-Bu paket botun uçtan uca akışını (fetch → parse → analyze → bet) ve canlılık/işlevsellik kontrollerini doğrular. Sonraki adımlara geçmeden önce geçmeli.
-
-### 4b. Muhasebe + Settlement Testleri (DRY_RUN/muhasebe değişikliklerinde ZORUNLU)
-```bash
-python -m pytest tests/test_accounting.py tests/test_settler_polymarket.py tests/test_betting_idempotency.py tests/test_signals_active_positions.py --tb=short -q
-```
-Bu testler DRY_RUN modunda bile muhasebenin tutarlı olduğunu doğrular. `debit_stake` / `credit_sale` / `credit_settlement` değişikliklerinde bu paket mutlaka çalıştırılmalı.
-
-### 5. Full Test Run (Push Öncesi)
+### 1. Full Test Run (Push Öncesi)
 ```bash
 python -m pytest tests/ \
   --ignore=tests/test_betting_idempotency.py \
@@ -235,24 +136,25 @@ python -m pytest tests/ \
   --tb=short -q
 ```
 
-### 6. Codegraph Sync
+### 2. Codegraph Sync
 Kod değişikliğinden sonra index güncel kalsın (plugin etkinse):
 ```bash
 codegraph sync
 ```
 Ya da MCP tool ile `codegraph-plugin-sync`. Değişen dosyalar/semboller yeni çalışan botta ve sonraki keşiflerde doğru görünsün.
 
-### 7. Bot Restart (Full suite 0 failed ise ZORUNLU)
+### 3. Bot Restart (Full suite 0 failed ise ZORUNLU)
 Full test suite **0 failed** ile geçtiyse bot restart edilir — yeni kod çalışan süreçte kullanılsın:
 ```bash
 # 1. Mevcut bot process'lerini bul ve durdur
 Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -match 'main.py bot' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 
-# 2. Biraz bekle (port boşalsın)
-Start-Sleep -Seconds 3
-
-# 3. Bot'u başlat
-Start-Process -FilePath "python" -ArgumentList "main.py","bot" -WorkingDirectory "C:\Users\fdemir\Documents\New project\junbo" -WindowStyle Hidden
+# 2. 2026-11-18: Bot `JunboBot` Windows servisi altinda calisir; servis izleyicisi
+#    (junbo_service.py `_monitor`) cocuk sureci ~8 sn icinde KENDISI yeniden baslatir.
+#    Start-Process ile ikinci bot BASLATMA (servis disi kopya + 8093 port cakismasi).
+#    Servis kapaliysa: net start JunboBot
+Start-Sleep -Seconds 10
+Get-NetTCPConnection -LocalPort 8093 -State Listen | Select-Object OwningProcess
 ```
 
 Bot'un çalıştığını doğrula:
@@ -318,6 +220,8 @@ if _marker != today:
 5. **E2E/integration**
 6. **Full suite + coverage**
 
+Ayrintili test paketleri: README "Test Paketi" tablosu ve GELISTIRICI_NOTLARI test komutlari.
+
 ---
 
 ## ALLOWED_DEAD Güncelleme
@@ -345,8 +249,8 @@ Degisiklik oldugunda bu bolumu de guncelle.
    Eger VARSA iş bitiminde push et, kullaniciya "push edildi mi" diye SORMADAN.
 2. Bot calisiyor mu? `GET 127.0.0.1:8093/api/status` — cagri basarisizsa bot kapali.
    Bot ayrica bir Windows servisidir (`sc.exe query JunboBot` — STATE 4 RUNNING olmali)
-   ve `JunboBotWatchdog` (1dk), `JunboDataWatchdog` (5dk), `JunboBot` task (boot/logon)
-   ile korunur. Port 8093'u sadece TEK `main.py bot` process'i dinlemeli.
+   ve `JunboBotWatchdog` (1dk), `JunboDataWatchdog` (6dk) ile korunur. `JunboBot` task'i
+   KASITLI Disabled (servis + watchdog yeterli; ikisi birden cift bot riski yaratir). Port 8093'u sadece TEK `main.py bot` process'i dinlemeli.
 3. Codegraph guncel mi? Degisiklik yaptiysan `codegraph sync` calistir.
 4. Belirtilen isi yap. Tam suite 0 failed ise bot restart.
 5. Dokumantasyon: README + GELISTIRICI_NOTLARI senkronu.
@@ -357,15 +261,20 @@ Degisiklik oldugunda bu bolumu de guncelle.
   REMOTE URL'DE GOMULU PUSH TOKENI VAR (`ghp_...@`). Asla bu token'i logla/goster.
   Repo tasinma olayi BILINIYOR; her prompt'ta "repo tasinmis" diye YENIDEN kesfetme.
 - **Bot modu: PAPER (DRY_RUN).** Gercek Polymarket trade'i ASLA acilmaz. Sorma.
-- **Canli DB yolu:** `.env` `DB_PATH=D:\JUNBO data\bot.db`. Repo `data/bot.db` ticaret icin KULLANILMAZ; activity/peak_watch dahil tum path'ler `utils/db_paths.py` uzerinden okunur. `/health` endpoint'i YOK; dogru: `/api/status`, `/api/health-check`.
-- **Strateji: SPREAD (ana mod).** `spread_radius=0`, `spread_max_cities=40`,
-  `spread_max_entry=0.50` (0.50 ve ustu fiyata O SEHRE HIC GIRILMEZ — 0.50->1.00
-  sadece 2x, zararli; kullanici karari 2026-08-11), `spread_stake_usd=2.0`,
-  `spread_max_bets_per_day=350` (3 gun x 15 sehir x 7 = 315 + marj),
-  `betting_window_enabled=False` (gun boyu bet).
-- **Spread bet canli fiyatla acilir:** `_place_spread_bets_inner` entry fiyatini
-  `mkt.yes_price`'dan okur (5 dk'da `run_fetch_markets` ile guncellenir).
-  `_first_snapshot_price` KALDIRILDI (bayat snapshot yerine canli fiyat).
+- **Canli DB yolu:** `.env` `DB_PATH=C:\JUNBO data\bot.db` + `JUNBO_DATA_DIR=C:\JUNBO data` (2026-11-18 tasima). `D:\JUNBO data` yedek/arsiv olarak durur. Repo `data/bot.db` ticaret icin KULLANILMAZ; activity/peak_watch dahil tum path'ler `utils/db_paths.py` uzerinden okunur. `/health` endpoint'i YOK; dogru: `/api/status`, `/api/health-check`.
+- **Strateji: METAR-only (2026-11-18).** `SPREAD_ENABLED=false`; spread placer + edge dongusu bet acmaz. METAR-peak hibrit calisir. Spread parametreleri (tarihsel): `spread_radius=0`, `spread_max_cities=40`, `spread_max_entry=0.50`, `spread_stake_usd=2.0`, `spread_max_bets_per_day=120`.
+- **Spread bet canli fiyatla acilir (KAPALI):** `_place_spread_bets_inner` entry fiyatini
+  `mkt.yes_price`'dan okur; `SPREAD_ENABLED=true` ile geri acilir.
+- **VERI BOSLUGU (2026-11-18 tespit + fix):** `orderbook_snapshots` 2026-09-28 19:59Z -> 2026-11-11 18:59Z arasi yok (~44 gun; id bazli ikili aramayla dogrulandi). Kok neden: `JunboDataWatchdog` 19.09 01:30 -> 11.11 21:53 arasi calismadi; `JunboSnapshot` (29.09) ve `Junbo-BackupDatabases` (28.09) Disabled kaldi; `ensure_task_enabled` PowerShell komutu bozuktu (`}}` + 30s timeout) ve bu iki gorev listede yoktu. Fix: gecerli PowerShell + `TASK_ENSURE_NAMES` tam liste, `bot_watchdog` data-watchdog log bekcisi, CLOB arsiv yolu `get_data_dir()`. Ekim depth geri getirilemez; Ekim fiyat verisi `market_snapshots`'ta (1.087.985 satir). Runner DB'leri (`tempmarket-edge/main`, `kardesler`) C:'ye tasindi; `forecast_runner\data` junction C:'yi gosteriyor.
+- **DENETIM DUZELTMELERI (2026-11-18 aksam):** (a) Yedek: `backup_databases.py` UTC gununde 1 kez
+  (marker `<JUNBO_DATA_DIR>\.last_backup_databases_run`) + prefix basina son 7 kopya; `data_watchdog`
+  BACKUP esigi marker > 26 sa. (b) `.env` `JUNBO_HEAT_DB`/`HEAT_MAIN_DB`/`OM_CACHE_DB` -> `C:\JUNBO data`.
+  (c) CLOB REST yedegi `DetachedInstanceError` yuzunden hic calismiyordu -> duzeltildi; arsiv toplu tek
+  transaction, WS arsiv yazimi `asyncio.to_thread`, collector 100 satirda bir commit. (d) Runner kapilari
+  UTC slot tabanli (`forecast_runner/windows-runner/gates.mjs`; WN2 12s, Open-Meteo 6s, IEM 24s).
+  (e) `JunboWARP` = `scripts\warp_health.ps1` (5 dk; proxy yoklama + reconnect; WARP modu ASLA
+  degistirilmez -- `start_warp.ps1` OBSOLETE, `mode warp` SOCKS'u kapatir). (f) `gamma-api` HTTP 421
+  makine hosts sabitlemesinden gelir; bot `utils/poly_dns.py` (DoH) ile asar -- WARP arizasi sanma.
 - **DOGRULANMIS BULGULAR (2026-08-11, kullanici tespiti):**
   1. **Yeni-market fast mode GUN BAZLI olmalidir, sayi bazli DEGIL.** Gun dongusu:
      bugunun marketleri kapanir, 2-gun-sonrasi acilir -> toplam market sayisi
@@ -415,7 +324,9 @@ Degisiklik oldugunda bu bolumu de guncelle.
   4b. **`spread_max_entry=0.30`.** Backtest en iyi config (kayan pencere + 0.30
      -> +$53,284). 0.30 ustu fiyatli esiklere girilmez. (Onceden 0.99 denenmis,
      kullanici "fiyat onemsiz" demisti; sonra veri 0.30'u gosterdi.)
-- **Son suite durumu:** 773 passed, 7 skipped, 0 failed (2026-11-13).
+- **Son suite durumu:** 797 passed, 8 skipped, 2 failed (2026-11-18 aksam, 892 sn). 2 hata
+  `TestPolymarketProxyLive` (o anda WARP SOCKS kopuktu; `warp_health.log` FAIL tick'leri); WARP
+  toparlaninca sinif tekrar kosuldu: 3/3 passed. Kod kaynakli hata yok. (Onceki: 784/6/0.)
   (Ignore: test_betting_idempotency, test_comprehensive).
 - **Test DB izole:** `tests/conftest.py` temp DB'ye yonlendirir — suite bot
   CALISIYORKEN de production DB'ye dokunmaz. Yine de guvenli tarafta kalmak icin

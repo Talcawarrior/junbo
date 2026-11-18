@@ -28,6 +28,24 @@ sys.path.insert(0, REPO_ROOT)
 from config.settings import bot_config, config  # noqa: E402
 
 
+def _retry_live(fn, attempts: int = 4, delay: float = 3.0):
+    """WARP/proxy canli testleri icin kisa retry (harici ag flake'i).
+
+    WARP tunnel bazen 'Connected' gorunurken tek bir istekte Host unreachable
+    dondurur; testi hemen dusurmek yerine birkac kez dene.
+    """
+    last: Exception | None = None
+    for i in range(attempts):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001
+            last = e
+            if i + 1 < attempts:
+                time.sleep(delay)
+    assert last is not None  # attempts >= 1 -> en az bir hata yakalandi
+    raise last
+
+
 # ---------------------------------------------------------------------------
 # 1. Polymarket proxy
 # ---------------------------------------------------------------------------
@@ -91,12 +109,17 @@ class TestPolymarketProxyLive:
 
         proxies = bot_config.polymarket.get_proxies()
         assert proxies, "proxy yok — test anlamsiz"
-        r = requests.get(
-            "https://gamma-api.polymarket.com/markets?limit=1",
-            timeout=15,
-            proxies=proxies,
-        )
-        assert r.status_code == 200, f"Gamma proxy ile erisilemedi: {r.status_code}"
+
+        def _get():
+            resp = requests.get(
+                "https://gamma-api.polymarket.com/markets?limit=1",
+                timeout=15,
+                proxies=proxies,
+            )
+            assert resp.status_code == 200, f"Gamma proxy ile erisilemedi: {resp.status_code}"
+            return resp
+
+        r = _retry_live(_get)
         assert "id" in r.text[:200]
 
     def test_fetch_raw_markets_via_proxy(self):
@@ -104,7 +127,7 @@ class TestPolymarketProxyLive:
         from scrapers.polymarket import PolymarketScraper
 
         scraper = PolymarketScraper()
-        raw = scraper._fetch_raw_markets()
+        raw = _retry_live(scraper._fetch_raw_markets)
         assert raw, "proxy ile market cekilemedi — bot 18 Agustos'u goremiyor"
         titles = [str(e.get("title", "")) for e in raw]
         assert any("temperature" in t.lower() for t in titles), "weather marketleri yok"

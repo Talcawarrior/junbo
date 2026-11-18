@@ -788,6 +788,13 @@ def cmd_orderbook(args) -> int:
             "status": status,
         }
 
+    # 2026-11-18: O(1) market lookup. Eski kod her (sehir, esik, gun) icin
+    # 86k marketi bastan tarayarak O(n^2) kaliyor ve backtest'i dakikalarca
+    # kilitliyordu. setdefault ilk-eslesme davranisini korur.
+    market_lookup: dict[tuple[str, float, str], str] = {}
+    for _mid, _m in markets.items():
+        market_lookup.setdefault((_m["city"], _m["thr"], _m["day"]), _mid)
+
     # GERCEK outcome: market -> YES kazandi mi
     outcome = {}
     for mid, m in markets.items():
@@ -796,21 +803,31 @@ def cmd_orderbook(args) -> int:
             outcome[mid] = o
 
     # orderbook ask serisi: market -> [(t, best_ask)]
-    ob = sqlite3.connect(OB_DB)
+    # 2026-11-18: TUM tabloyu (4.26 GB) bellege almak yerine yalnizca
+    # cozumlenmis marketlerin satirlarini (market_id, snapshot_time) indeksi
+    # uzerinden parcali oku. Canli DB DELETE journal modunda oldugu icin
+    # uzun tam-tarama yaziciyi bloke ediyordu; bu sorgu kisa ve indeksli.
+    ob = sqlite3.connect(OB_DB, timeout=60)
+    ob.execute("PRAGMA busy_timeout=60000")
     oc = ob.cursor()
     ask_series = defaultdict(list)
-    for mid, ask, st in oc.execute(
-        "SELECT market_id, best_ask, snapshot_time FROM orderbook_snapshots WHERE best_ask IS NOT NULL"
-    ):
-        t = ts(st)
-        if t is None:
-            continue
-        try:
-            a = float(ask)
-            if 0 < a <= 1:
-                ask_series[str(mid)].append((t, a))
-        except (TypeError, ValueError):
-            pass
+    _ids = list(outcome.keys())
+    for _i in range(0, len(_ids), 500):
+        _chunk = _ids[_i : _i + 500]
+        _q = (
+            "SELECT market_id, best_ask, snapshot_time FROM orderbook_snapshots "
+            "WHERE best_ask IS NOT NULL AND market_id IN (" + ",".join("?" * len(_chunk)) + ")"
+        )
+        for mid, ask, st in oc.execute(_q, _chunk):
+            t = ts(st)
+            if t is None:
+                continue
+            try:
+                a = float(ask)
+                if 0 < a <= 1:
+                    ask_series[str(mid)].append((t, a))
+            except (TypeError, ValueError):
+                pass
     ob.close()
     for k in ask_series:
         ask_series[k].sort(key=lambda x: x[0])
@@ -869,18 +886,8 @@ def cmd_orderbook(args) -> int:
             center = round(mean)
             for thr in range(center - args.spread, center + args.spread + 1):
                 # bu esigin marketini bul (orderbook'ta gorulen)
-                found = None
-                for mid, m in markets.items():
-                    if (
-                        m["city"] == city
-                        and m["thr"] == float(thr)
-                        and m["day"] == day
-                        and mid in ask_series
-                        and mid in outcome
-                    ):
-                        found = mid
-                        break
-                if found is None:
+                found = market_lookup.get((city, float(thr), day))
+                if found is None or found not in ask_series or found not in outcome:
                     continue
                 o = outcome[found]
                 # acilis fiyati: first_ask / median_ask / vwap (ilk 20 snapshot)
@@ -929,9 +936,15 @@ def cmd_orderbook(args) -> int:
         return pnl, total, won, max_dd
 
     # C2: seffaflik - veri donemi ve kapsam
-    db2 = sqlite3.connect(OB_DB)
-    ob_range = db2.execute("SELECT MIN(snapshot_time), MAX(snapshot_time) FROM orderbook_snapshots").fetchone()
-    ob_markets = db2.execute("SELECT COUNT(DISTINCT market_id) FROM orderbook_snapshots").fetchone()[0]
+    # 2026-11-18: MIN/MAX tam-tarama yerine PK (id) uzerinden ilk/son satir;
+    # COUNT(DISTINCT market_id) indeksten okunur. Canli DELETE-journal DB'de
+    # tam-tarama yaziciyi bloke ediyordu.
+    db2 = sqlite3.connect(OB_DB, timeout=60)
+    db2.execute("PRAGMA busy_timeout=60000")
+    _rmin = db2.execute("SELECT snapshot_time FROM orderbook_snapshots ORDER BY id ASC LIMIT 1").fetchone()
+    _rmax = db2.execute("SELECT snapshot_time FROM orderbook_snapshots ORDER BY id DESC LIMIT 1").fetchone()
+    ob_range = (_rmin[0] if _rmin else None, _rmax[0] if _rmax else None)
+    ob_markets = db2.execute("SELECT COUNT(*) FROM (SELECT DISTINCT market_id FROM orderbook_snapshots)").fetchone()[0]
     db2.close()
     resolved = sum(1 for v in outcome.values() if v is not None)
     unresolved = len(markets) - resolved
@@ -2735,7 +2748,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--depth-frac",
         type=float,
         default=0.0,
-        help="GERCEKCI: bet, orderbook derinliginin en fazla bu ORANI kadar alabilir (0.1 = %10; 0=kapali)",
+        help="GERCEKCI: bet, orderbook derinliginin en fazla bu ORANI kadar alabilir (0.1 = %%10; 0=kapali)",
     )
     pl.add_argument(
         "--max-bet-stake", type=float, default=0.0, help="bet basina max stake (orderbook derinlik; 0=sinirsiz)"
@@ -2750,7 +2763,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--stop-loss",
         type=float,
         default=0.0,
-        help="stop-loss orani: giristen sonra fiyat entry*(1-sl) altina duserse sat (0.5 = %50)",
+        help="stop-loss orani: giristen sonra fiyat entry*(1-sl) altina duserse sat (0.5 = %%50)",
     )
     pl.set_defaults(func=lambda a: cmd_metar_peak_live(a))
 

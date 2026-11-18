@@ -1724,6 +1724,10 @@ def get_health_check():
             verdict = "warning"
 
         strategy_mode = getattr(bot_config.strategy, "betting_strategy", "edge")
+        # 2026-11-18: spread kapaliyken etkin mod METAR-only'dir; dashboard
+        # yanlislikla "spread" gostermesin.
+        if strategy_mode == "spread" and not getattr(bot_config.strategy, "spread_enabled", True):
+            strategy_mode = "metar"
         edge_metrics_available = bool(net_edges)
 
         return {

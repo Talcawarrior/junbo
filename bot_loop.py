@@ -508,7 +508,8 @@ async def scan_and_bet_loop(state):
                     # etrafinda +/- radius dereceye YES bet ac (ilk snapshot fiyati).
                     # Edge modunda (eski davranis) sadece FAST price poller aktif.
                     strategy = getattr(bot_config.strategy, "betting_strategy", "edge")
-                    if strategy == "spread":
+                    spread_enabled = bool(getattr(bot_config.strategy, "spread_enabled", True))
+                    if strategy == "spread" and spread_enabled:
                         try:
                             from executor.spread_placer import place_spread_bets
 
@@ -556,7 +557,8 @@ async def scan_and_bet_loop(state):
             if spread_retry_counter >= _SPREAD_RETRY_INTERVAL:
                 spread_retry_counter = 0
                 strategy = getattr(bot_config.strategy, "betting_strategy", "edge")
-                if strategy == "spread":
+                spread_enabled = bool(getattr(bot_config.strategy, "spread_enabled", True))
+                if strategy == "spread" and spread_enabled:
                     try:
                         from executor.spread_placer import place_spread_bets
 
@@ -761,8 +763,30 @@ def _clob_rest_poll_once() -> None:
 
     proxies = bot_config.polymarket.get_proxies()
     try:
+        # 2026-11-18 fix: ORM nesneleri get_session() commit'inde expire olur
+        # (expire_on_commit=True). Session kapandiktan sonra m.raw_data okumak
+        # DetachedInstanceError atiyor, _fetch bunu yutup None donuyordu ->
+        # REST yedegi HIC HTTP istegi atmadi, arsive tek satir yazmadi
+        # (token_id='0' satiri 0). Kolon sorgusu + duz kopya session'dan bagimsizdir.
+        from types import SimpleNamespace
+
         with get_session() as s:
-            markets = s.query(WeatherMarket).filter(WeatherMarket.status == "open").all()
+            rows = (
+                s.query(
+                    WeatherMarket.id,
+                    WeatherMarket.raw_data,
+                    WeatherMarket.city,
+                    WeatherMarket.metric,
+                    WeatherMarket.target_date,
+                    WeatherMarket.threshold,
+                )
+                .filter(WeatherMarket.status == "open")
+                .all()
+            )
+        markets = [
+            SimpleNamespace(id=r[0], raw_data=r[1], city=r[2], metric=r[3], target_date=r[4], threshold=r[5])
+            for r in rows
+        ]
         if not markets:
             return
         # 2026-08-17 HIZ FIXI: ~1900 market SEQUENTIAL 15s timeout -> en kotu
@@ -800,17 +824,17 @@ def _clob_rest_poll_once() -> None:
             except Exception:
                 return None
 
-        saved = 0
-        updates = []
+        fetched = []
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as ex:
             for m, ask in zip(markets, ex.map(_fetch, markets)):
                 if ask is None:
                     continue
-                _archive_clob_price(m, ask)
-                saved += 1
-                updates.append((str(m.id), ask))
-        if saved:
-            logger.info("CLOB REST poll: %d market fiyati arsivlendi", saved)
+                fetched.append((m, ask))
+        updates = [(str(m.id), ask) for m, ask in fetched]
+        # 2026-11-18: arsiv tek baglanti + tek transaction. Eskiden market basina
+        # ayri baglanti/commit vardi; collector kilidinde her biri 5 sn bekliyordu.
+        saved = _archive_clob_prices(fetched)
+        logger.info("CLOB REST poll: %d/%d market fiyati alindi, %d arsivlendi", len(fetched), len(markets), saved)
         # 2026-08-18 audit fix (ag #9): REST yedegi SADECE orderbook arsivliyor,
         # weather_markets.yes_price'i guncellemiyordu -> WS kesintisinde bet giris
         # fiyati 5dk'lik Gamma poll'una kadar BAYAT kaliyordu (fantom fiyat riski).
@@ -842,38 +866,64 @@ def _archive_clob_price(wm, price: float) -> None:
     gecmisi birikir (backtest'ler bu seriyi kullanir). Best-effort: hata
     sessiz gecilir, fiyat guncellemesini bloklamaz.
     """
+    _archive_clob_prices([(wm, price)])
+
+
+def _archive_clob_prices(items) -> int:
+    """(wm, price) ciftlerini orderbook.db'ye TEK baglanti + TEK transaction ile yazar.
+
+    wm: id/city/metric/target_date/threshold tasiyan herhangi bir nesne (ORM
+    nesnesi degil, duz kopya onerilir). Best-effort: hata WARNING olarak loglanir,
+    fiyat guncellemesini bloklamaz. Yazilan satir sayisini doner.
+    """
     import sqlite3
 
-    try:
-        _repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        ob_path = os.path.join(_repo_root, "data", "orderbook.db")
-        conn = sqlite3.connect(ob_path, timeout=5)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    rows = []
+    for wm, price in items:
         try:
-            # threshold kolonu varsa ekle (eski tablolar icin)
-            cols = [r[1] for r in conn.execute("PRAGMA table_info(orderbook_snapshots)")]
-            if "threshold" not in cols:
-                conn.execute("ALTER TABLE orderbook_snapshots ADD COLUMN threshold REAL")
-                conn.commit()
-            conn.execute(
-                "INSERT INTO orderbook_snapshots "
-                "(market_id, token_id, city, metric, target_date, threshold, best_ask, snapshot_time, created_at) "
-                "VALUES (?,?,?,?,?,?,?,?, datetime('now'))",
+            td = getattr(wm, "target_date", None)
+            rows.append(
                 (
                     str(wm.id),
                     "0",
                     getattr(wm, "city", None),
                     getattr(wm, "metric", None),
-                    getattr(wm, "target_date", None),
+                    str(td) if td is not None else None,
                     getattr(wm, "threshold", None),
                     float(price),
-                    datetime.now(timezone.utc).isoformat(),
-                ),
+                    now_iso,
+                )
+            )
+        except (TypeError, ValueError, AttributeError):
+            continue
+    if not rows:
+        return 0
+    try:
+        # 2026-11-18 fix: repo data/orderbook.db hardcoded idi (0 byte) ->
+        # CLOB arsivi canli DB'ye hic yazmiyordu. Tek kaynak: get_data_dir().
+        from utils.db_paths import get_data_dir
+
+        ob_path = os.path.join(get_data_dir(), "orderbook.db")
+        conn = sqlite3.connect(ob_path, timeout=10)
+        try:
+            # threshold kolonu varsa ekle (eski tablolar icin)
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(orderbook_snapshots)")]
+            if "threshold" not in cols:
+                conn.execute("ALTER TABLE orderbook_snapshots ADD COLUMN threshold REAL")
+            conn.executemany(
+                "INSERT INTO orderbook_snapshots "
+                "(market_id, token_id, city, metric, target_date, threshold, best_ask, snapshot_time, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?, datetime('now'))",
+                rows,
             )
             conn.commit()
         finally:
             conn.close()
+        return len(rows)
     except Exception as exc:  # noqa: BLE001
-        logger.debug("CLOB arsiv hatasi %s: %s", getattr(wm, "id", "?"), exc)
+        logger.warning("CLOB arsiv hatasi (%d satir): %s", len(rows), exc)
+        return 0
 
 
 async def clob_stream_loop(state):
@@ -886,6 +936,8 @@ async def clob_stream_loop(state):
     gecmisi). Fiyat olayi gelince WeatherMarket.yes_price guncellenir ve
     orderbook.db'ye best_ask arsivlenir.
     """
+    from types import SimpleNamespace
+
     from scrapers.clob_stream import CLOBMarketStream
 
     def _asset_ids():
@@ -908,15 +960,24 @@ async def clob_stream_loop(state):
             price = payload.get("price")
             if not mkt or price is None:
                 return
+            snap = None
             with get_session() as s:
                 wm = s.query(WeatherMarket).filter_by(id=str(mkt)).first()
                 if wm is not None and wm.status == "open":
                     wm.yes_price = float(price)
                     wm.no_price = max(0.0, min(1.0, 1.0 - float(price)))
                     wm.last_updated = datetime.now(timezone.utc).replace(tzinfo=None)
-                    # CLOB fiyatini orderbook.db'ye arsivle (backtest icin kalici).
-                    # WebSocket fiyat olayi ~anlik: best_ask olarak kaydedilir.
-                    _archive_clob_price(wm, float(price))
+                    snap = SimpleNamespace(
+                        id=wm.id, city=wm.city, metric=wm.metric, target_date=wm.target_date, threshold=wm.threshold
+                    )
+            if snap is not None:
+                # CLOB fiyatini orderbook.db'ye arsivle (backtest icin kalici).
+                # 2026-11-18: yazma event loop DISINDA (to_thread). orderbook.db
+                # rollback-journal; collector kilidindeyken sqlite 10 sn'ye kadar
+                # bekleyebilir -- senkron cagri tum asyncio dongusunu (scan,
+                # METAR, API) donduruyordu. Callback'ler sirali await edildigi icin
+                # ayni anda tek yazma ucusta olur.
+                await asyncio.to_thread(_archive_clob_price, snap, float(price))
         except Exception as e:  # noqa: BLE001
             logger.warning("CLOB event isleme hatasi: %s", e)
 

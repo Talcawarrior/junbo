@@ -17,6 +17,7 @@ HARDCODED_SNIPPETS = [
     'sqlite3.connect("file:data/bot.db',
     'sqlite3.connect("data/actuals.db")',
     'sqlite3.connect("data/orderbook.db")',
+    'os.path.join(_repo_root, "data", "orderbook.db")',
     'sqlite3.connect("data/backtest_prices.db")',
     'sqlite3.connect(r"data\\bot.db"',
     'os.path.join(_REPO_ROOT, "data", "bot.db")',
@@ -66,7 +67,7 @@ def test_paths_follow_runtime_config_swap(monkeypatch):
 def test_no_hardcoded_runtime_db_paths():
     files = list((REPO_ROOT / "scripts").glob("*.py"))
     files += list((REPO_ROOT / "jobs").glob("*.py"))
-    files += [REPO_ROOT / "executor" / "settler.py", REPO_ROOT / "db_backup.py"]
+    files += [REPO_ROOT / "executor" / "settler.py", REPO_ROOT / "db_backup.py", REPO_ROOT / "bot_loop.py"]
 
     offenders = []
     for path in files:
@@ -76,3 +77,33 @@ def test_no_hardcoded_runtime_db_paths():
                 offenders.append(f"{path.relative_to(REPO_ROOT)}: {snippet}")
 
     assert not offenders, "Hardcoded DB paths found:\n" + "\n".join(offenders)
+
+
+def test_archive_clob_price_writes_to_configured_data_dir(tmp_path, monkeypatch):
+    """CLOB arsivi repo data/orderbook.db'ye degil, JUNBO_DATA_DIR'e yazmali."""
+    import sqlite3
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("JUNBO_DATA_DIR", str(tmp_path))
+    con = sqlite3.connect(tmp_path / "orderbook.db")
+    con.execute(
+        """CREATE TABLE orderbook_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            market_id TEXT, token_id TEXT, city TEXT, metric TEXT, target_date TEXT,
+            threshold REAL, bid_depth_usd REAL, ask_depth_usd REAL, best_bid REAL,
+            best_ask REAL, spread REAL, num_bid_levels INTEGER, num_ask_levels INTEGER,
+            snapshot_time TEXT, created_at TEXT
+        )"""
+    )
+    con.commit()
+    con.close()
+
+    import bot_loop
+
+    wm = SimpleNamespace(id="m-test", city="Testville", metric="temperature_max", target_date=None, threshold=10.0)
+    bot_loop._archive_clob_price(wm, 0.42)
+
+    con = sqlite3.connect(tmp_path / "orderbook.db")
+    row = con.execute("SELECT market_id, best_ask FROM orderbook_snapshots").fetchone()
+    con.close()
+    assert row == ("m-test", 0.42)

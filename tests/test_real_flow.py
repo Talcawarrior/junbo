@@ -190,24 +190,59 @@ class TestScanAndBetLoop:
 
         s = _State()
         placed = MagicMock(return_value={"placed": 3, "closed": 0, "skipped": 0, "cities": ["Testville"]})
-        with (
-            patch("bot_loop._get_market_count", return_value=0),
-            patch("bot_loop._get_open_target_dates", return_value={_day()}),
-            patch("bot_loop._next_two_day_target", return_value=(_day(), True)),
-            patch("bot_loop._get_open_market_count_for_date", return_value=6),
-            patch("bot_loop._is_midnight_window", return_value=False),
-            patch("jobs.scheduler.run_fetch_markets", AsyncMock(return_value="0")),
-            patch("jobs.scheduler.run_parse_markets", AsyncMock(return_value="0")),
-            patch("jobs.scheduler.run_fetch_weather", AsyncMock(return_value="0")),
-            patch("executor.spread_placer.place_spread_bets", placed),
-            patch("bot_loop._verify_ui", None),
-            patch("bot_loop._verify_poly", None),
-            patch("utils.model_run_detector.is_in_model_run_window", return_value=False),
-        ):
-            await _run_and_cancel(bot_loop.scan_and_bet_loop(s))
+        old_enabled = bot_config.strategy.spread_enabled
+        bot_config.strategy.spread_enabled = True
+        try:
+            with (
+                patch("bot_loop._get_market_count", return_value=0),
+                patch("bot_loop._get_open_target_dates", return_value={_day()}),
+                patch("bot_loop._next_two_day_target", return_value=(_day(), True)),
+                patch("bot_loop._get_open_market_count_for_date", return_value=6),
+                patch("bot_loop._is_midnight_window", return_value=False),
+                patch("jobs.scheduler.run_fetch_markets", AsyncMock(return_value="0")),
+                patch("jobs.scheduler.run_parse_markets", AsyncMock(return_value="0")),
+                patch("jobs.scheduler.run_fetch_weather", AsyncMock(return_value="0")),
+                patch("executor.spread_placer.place_spread_bets", placed),
+                patch("bot_loop._verify_ui", None),
+                patch("bot_loop._verify_poly", None),
+                patch("utils.model_run_detector.is_in_model_run_window", return_value=False),
+            ):
+                await _run_and_cancel(bot_loop.scan_and_bet_loop(s))
 
-        placed.assert_called_once()
-        assert s.fast_price_until is None, "spread modunda fast_price_until ayarlanmamali (edge davranisi)"
+            placed.assert_called_once()
+            assert s.fast_price_until is None, "spread modunda fast_price_until ayarlanmamali (edge davranisi)"
+        finally:
+            bot_config.strategy.spread_enabled = old_enabled
+
+    @pytest.mark.asyncio
+    async def test_spread_disabled_skips_spread_placer(self):
+        """SPREAD_ENABLED=false: yeni tarih acilsa da place_spread_bets CAGIRILMAZ."""
+        import bot_loop
+
+        s = _State()
+        placed = MagicMock(return_value={"placed": 0, "closed": 0, "skipped": 0, "cities": []})
+        old_enabled = bot_config.strategy.spread_enabled
+        bot_config.strategy.spread_enabled = False
+        try:
+            with (
+                patch("bot_loop._get_market_count", return_value=0),
+                patch("bot_loop._get_open_target_dates", return_value={_day()}),
+                patch("bot_loop._next_two_day_target", return_value=(_day(), True)),
+                patch("bot_loop._get_open_market_count_for_date", return_value=6),
+                patch("bot_loop._is_midnight_window", return_value=False),
+                patch("jobs.scheduler.run_fetch_markets", AsyncMock(return_value="0")),
+                patch("jobs.scheduler.run_parse_markets", AsyncMock(return_value="0")),
+                patch("jobs.scheduler.run_fetch_weather", AsyncMock(return_value="0")),
+                patch("executor.spread_placer.place_spread_bets", placed),
+                patch("bot_loop._verify_ui", None),
+                patch("bot_loop._verify_poly", None),
+                patch("utils.model_run_detector.is_in_model_run_window", return_value=False),
+            ):
+                await _run_and_cancel(bot_loop.scan_and_bet_loop(s))
+
+            placed.assert_not_called()
+        finally:
+            bot_config.strategy.spread_enabled = old_enabled
 
     @pytest.mark.asyncio
     async def test_edge_mode_sets_fast_price_until(self):

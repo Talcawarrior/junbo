@@ -1,6 +1,6 @@
 """Junbo data watchdog -- backtest veri setini kendi kendine tam tutar.
 
-Task Scheduler'dan her 5 dakikada bir calisir (JunboDataWatchdog).
+Task Scheduler'dan her 6 dakikada bir calisir (JunboDataWatchdog, PT6M).
 Her veri kaynaginin tazeligini kontrol eder; bayat ise ilgili toplayiciyi
 KENDI kendine baslatir (kullanici mudahalesi gerekmez):
 
@@ -8,12 +8,12 @@ KENDI kendine baslatir (kullanici mudahalesi gerekmez):
   - orderbook_snapshots        : son kayit > 10dk -> collect_orderbook.py
   - actuals (actuals.db)       : son kayit > 7 saat -> collect_actuals.py
   - backtest.db sync           : son sync > 7 saat -> sync_backtest_db.py
-  - backups                    : son backup > 7 saat -> backup_databases.py
+  - backups                    : gunluk yedek marker'i > 26 saat -> backup_databases.py
 
 Ayrica her 15 dakikada bir Task Scheduler gorev durumlarini kontrol eder;
 bir gorev disabled olduysa yeniden enable eder (kendi kendini duzeltir).
 
-Log: data/logs/data_watchdog.log
+Log: <JUNBO_DATA_DIR>/logs/data_watchdog.log
 """
 
 import os
@@ -22,17 +22,23 @@ import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+import sys as _sys
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+from utils.db_paths import get_data_dir  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 PY = r"C:\Users\fdemir\AppData\Local\Programs\Python\Python312\python.exe"
-DATA = Path(os.getenv("JUNBO_DATA_DIR", r"D:\JUNBO data"))
+DATA = Path(os.getenv("JUNBO_DATA_DIR", get_data_dir()))
 LOG = DATA / "logs" / "data_watchdog.log"
 
 SNAPSHOT_MAX_AGE = 40 * 60  # saniye
 ORDERBOOK_MAX_AGE = 10 * 60  # 2026-08-21: 45dk -> 10dk (paralel collect ~4dk'ya indi)
 ACTUALS_MAX_AGE = 7 * 3600
 SYNC_MAX_AGE = 7 * 3600
-BACKUP_MAX_AGE = 7 * 3600
+# 2026-11-18: backup_databases.py artik gunde 1 kez (UTC marker) calisir.
+BACKUP_MAX_AGE = 26 * 3600
 
 TASKS = {
     "JunboSnapshot": r"snapshot_only.py",
@@ -101,24 +107,50 @@ def run_script(rel_path: str) -> bool:
         return False
 
 
+TASK_ENSURE_NAMES = (
+    "JunboSnapshot",
+    "Junbo-BackupDatabases",
+    "Junbo-OrderbookCollect",
+    "Junbo-ActualsCollect",
+    "Junbo-SyncBacktest",
+    "Junbo-ArchiveForecasts",
+    "Junbo-DataCatalog",
+    "Junbo-StrategySleeves",
+    "JunboBotWatchdog",
+    "JunboForecastRunner",
+    "JunboForecastRunnerWatchdog",
+    "JunboDataWatchdog",
+)
+
+
 def ensure_task_enabled() -> None:
-    """Task'lar disabled ise psutil yok; schtasks ile enable et."""
+    """Disabled veri gorevlerini geri ac.
+
+    2026-11-18 fix: eski PowerShell komutu fazladan '}}' ile parse hatasi
+    veriyor ve 30 sn timeout'a dusuyordu; JunboSnapshot/Junbo-BackupDatabases
+    listede yoktu. Artik gecerli tek PowerShell blogu + tam liste.
+    """
     try:
+        names = ",".join(f"'{n}'" for n in TASK_ENSURE_NAMES)
         shell = (
-            "Get-ScheduledTask | ForEach-Object { if ($_.State -ne 'Ready' -and "
-            "$_.TaskName -match '^(Junbo-OrderbookCollect|Junbo-ActualsCollect|"
-            "Junbo-SyncBacktest|Junbo-ArchiveForecasts|Junbo-DataCatalog|"
-            "Junbo-StrategySleeves|JunboBotWatchdog)$') { Enable-ScheduledTask -TaskName "
-            "$_.TaskName | Out-Null; Write-Output ('ENABLED ' + $_.TaskName) }} }}"
+            f"$names=@({names}); "
+            "Get-ScheduledTask | Where-Object { $_.State -eq 'Disabled' -and "
+            "$names -contains $_.TaskName } | ForEach-Object { "
+            "Enable-ScheduledTask -TaskName $_.TaskName | Out-Null; "
+            "Write-Output ('ENABLED ' + $_.TaskName) }"
         )
         out = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", shell],
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", shell],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=60,
         )
-        for line in (out.stdout or "").splitlines():
-            log(f"TASK-FIX {line.strip()}")
+        lines = (out.stdout or "") + (out.stderr or "")
+        for line in lines.splitlines():
+            if line.strip():
+                log(f"TASK-FIX {line.strip()}")
+        if out.returncode != 0:
+            log(f"TASK-FIX rc={out.returncode}")
     except Exception as e:  # noqa: BLE001
         log(f"TASK-FIX FAIL: {e}")
 
@@ -166,18 +198,17 @@ def main() -> None:
     else:
         log(f"SYNC ok (age={age:.0f}s)")
 
-    # 5) backups -- klasordeki en genc dosya yasi
-    backup_dir = DATA / "backups"
-    if backup_dir.exists():
-        files = list(backup_dir.iterdir())
-        if files:
-            newest = max(f.stat().st_mtime for f in files)
-            age = now_ts - newest
-            if age > BACKUP_MAX_AGE:
-                log(f"BACKUP stale (age={age:.0f}s) -> run")
-                run_script(r"scripts\backup_databases.py")
-            else:
-                log(f"BACKUP ok (age={age:.0f}s)")
+    # 5) backups -- backup_databases.py'nin gunluk calisma marker'i.
+    # 2026-11-18: eskiden klasordeki en genc dosyanin yasina bakiliyordu (copy2
+    # kaynak mtime'ini tasir, katalog -shm dosyalari olusturur -> guvenilmez);
+    # gunluk yedege gecince 7 saat esigi her tick'te bos calistirma tetiklerdi.
+    marker = DATA / ".last_backup_databases_run"
+    age = (now_ts - marker.stat().st_mtime) if marker.exists() else None
+    if age is None or age > BACKUP_MAX_AGE:
+        log(f"BACKUP stale (age={age}) -> run")
+        run_script(r"scripts\backup_databases.py")
+    else:
+        log(f"BACKUP ok (age={age:.0f}s)")
 
     # 6) Task durum denetimi -- her 2 gorselde 1
     ensure_task_enabled()

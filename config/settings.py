@@ -202,6 +202,10 @@ class StrategyConfig:
     # dereceye YES bet acar (ilk snapshot fiyati). Eski edge-tabanli mod
     # BETTING_STRATEGY=edge ile geri donulebilir.
     betting_strategy: str = "spread"
+    # 2026-11-18 kullanici karari (backtest: 1.067 bet, %22.3 win, -$854.67):
+    # spread KAPATILDI. False -> spread placer ve edge dongusu bet acmaz;
+    # yalnizca METAR-peak dongusu calisir. PAPER mod degismez.
+    spread_enabled: bool = True
     # 2026-08-14 kullanici karari: 7'li spread KALDIRILDI. RANGE marketlerde
     # sadece 1 esik kazanir (7'den 6'si matematiksel kayip). Tek esik = merkez.
     # Backtest (orderbook, gercek fiyat, empirical CDF, 99 gunluk bias):
@@ -582,6 +586,7 @@ class BotConfig:
         s.min_entry_price = float(os.getenv("MIN_ENTRY_PRICE", str(s.min_entry_price)))
         s.max_entry_price = float(os.getenv("MAX_ENTRY_PRICE", str(s.max_entry_price)))
         s.betting_strategy = os.getenv("BETTING_STRATEGY", s.betting_strategy)
+        s.spread_enabled = os.getenv("SPREAD_ENABLED", str(s.spread_enabled)).lower() == "true"
         s.betting_window_enabled = os.getenv("BETTING_WINDOW_ENABLED", str(s.betting_window_enabled)).lower() == "true"
         s.spread_radius = int(os.getenv("SPREAD_RADIUS", str(s.spread_radius)))
         s.spread_max_cities = int(os.getenv("SPREAD_MAX_CITIES", str(s.spread_max_cities)))

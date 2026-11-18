@@ -1,0 +1,56 @@
+{
+  "intervalMinutes": 60,
+  "forecastDays": 3,
+  "apiPort": 8787,
+  "userAgent": "TempMarketEdge/1.0 (local-monitor)",
+  "stations": [
+    {
+      "id": "jfk",
+      "icao": "KJFK",
+      "city": "New York",
+      "country": "US",
+      "latitude": 40.6413,
+      "longitude": -73.7781,
+      "elevationM": 4,
+      "timezone": "America/New_York",
+      "marketSlug": "",
+      "settlementSource": "NWS CLI"
+    },
+    {
+      "id": "lax",
+      "icao": "KLAX",
+      "city": "Los Angeles",
+      "country": "US",
+      "latitude": 33.9425,
+      "longitude": -118.4081,
+      "elevationM": 38,
+      "timezone": "America/Los_Angeles",
+      "marketSlug": "",
+      "settlementSource": "NWS CLI"
+    },
+    {
+      "id": "sfo",
+      "icao": "KSFO",
+      "city": "San Francisco",
+      "country": "US",
+      "latitude": 37.6213,
+      "longitude": -122.379,
+      "elevationM": 4,
+      "timezone": "America/Los_Angeles",
+      "marketSlug": "",
+      "settlementSource": "NWS CLI"
+    },
+    {
+      "id": "ank",
+      "icao": "LTAC",
+      "city": "Ankara",
+      "country": "TR",
+      "latitude": 40.1281,
+      "longitude": 32.9951,
+      "elevationM": 953,
+      "timezone": "Europe/Istanbul",
+      "marketSlug": "",
+      "settlementSource": "WU history import"
+    }
+  ]
+}
