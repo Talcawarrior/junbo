@@ -264,9 +264,9 @@ def _write_fidelity(path: str, result: RunResult) -> None:
     try:
         import sqlite3
 
-        from replay.archive import BOT_DB
+        from utils.db_paths import get_db_path
 
-        con = sqlite3.connect(f"file:{BOT_DB}?mode=ro", uri=True, timeout=60)
+        con = sqlite3.connect(f"file:{get_db_path()}?mode=ro", uri=True, timeout=60)
         try:
             for mid, placed, entry, order_id in con.execute(
                 "SELECT market_id, placed_at, entry_price, order_id FROM bets "

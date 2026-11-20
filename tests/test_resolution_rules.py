@@ -15,7 +15,9 @@ def test_table_exists_and_covers_traded_cities():
 
     rules = _load()
     assert len(rules) >= 40
-    con = sqlite3.connect(Path(__file__).parent.parent / "data" / "bot.db")
+    from utils.db_paths import get_db_path
+
+    con = sqlite3.connect(get_db_path())
     cur = con.cursor()
     cur.execute("SELECT DISTINCT city_code FROM bets WHERE city_code IS NOT NULL AND city_code != ''")
     missing = [r[0] for r in cur.fetchall() if r[0] not in rules]

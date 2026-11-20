@@ -67,7 +67,7 @@ def test_import_all_modules():
         rel = fpath.relative_to(REPO_ROOT)
         dotted = str(rel.with_suffix("")).replace(os.sep, ".")
         # Skip test files, __init__, and scripts with leading underscore.
-        if rel.parts and rel.parts[0] in ("tests", "scripts", "backtest_archive", "forecast_runner"):
+        if rel.parts and rel.parts[0] in ("tests", "scripts", "backtest_archive", "forecast_runner", "data"):
             continue
         if dotted.endswith("__init__"):
             continue

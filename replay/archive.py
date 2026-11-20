@@ -26,19 +26,23 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(REPO_ROOT, "data")
+# 2026-11-20: yollar CALL TIME'da cozulur. Onceden REPO_ROOT/data sabitti;
+# canli DB 2026-11-18'de C:\JUNBO data'ya tasindi ve testler DB_PATH'i
+# degistirdigi icin import-anindaki sabit yol bos DB'ye isaret ediyordu.
 
-BOT_DB = os.path.join(DATA_DIR, "bot.db")
-BACKTEST_DB = os.path.join(DATA_DIR, "backtest.db")
-ORDERBOOK_DB = os.path.join(DATA_DIR, "orderbook.db")
-PRICES_DB = os.path.join(DATA_DIR, "backtest_prices.db")
-ACTUALS_DB = os.path.join(DATA_DIR, "actuals.db")
 
-#: Forecast kaynagi onceligi. `bot.db` yalnizca SON gunleri tutar
-#: (2026-10-27 olcumu: 2026-10-17..10-29); gecmis pencere `backtest.db`'de
-#: (1.106.701 satir, 2026-08-01..09-30). Ikisi zaman olarak cakismaz, birlikte
-#: okunur.
-FORECAST_DBS = (BOT_DB, BACKTEST_DB)
+def _path(name: str) -> str:
+    """Live data dizinindeki DB yolu (JUNBO_DATA_DIR/DB_PATH aware)."""
+    from utils.db_paths import get_data_dir
+
+    return os.path.join(get_data_dir(), name)
+
+
+def _forecast_dbs() -> tuple[str, str]:
+    #: bot.db yalnizca SON gunleri tutar (2026-10-27: 2026-10-17..10-29);
+    #: gecmis pencere backtest.db'de (2026-08-01..09-30). Cakismaz, birlikte okunur.
+    return (_path("bot.db"), _path("backtest.db"))
+
 
 #: Arsivde look-ahead'e karsi okunacak en fazla geri gun (METAR/forecast).
 META_LOOKBACK_DAYS = 2
@@ -113,7 +117,7 @@ class Archive:
         return con
 
     def _load_markets(self) -> None:
-        con = self._open(BOT_DB)
+        con = self._open(_path("bot.db"))
         if con is None:
             return
         rows = con.execute(
@@ -153,7 +157,7 @@ class Archive:
                         pass
 
     def _load_actuals(self) -> None:
-        con = self._open(ACTUALS_DB)
+        con = self._open(_path("actuals.db"))
         if con is None:
             return
         for city, day, tmax in con.execute(
@@ -173,7 +177,7 @@ class Archive:
         """
         market_ids = {m["id"] for m in self.markets.values()}
 
-        con = self._open(BOT_DB)
+        con = self._open(_path("bot.db"))
         if con is not None:
             try:
                 for mid, py, st in con.execute(
@@ -186,7 +190,7 @@ class Archive:
             except sqlite3.OperationalError:
                 pass
 
-        con = self._open(ORDERBOOK_DB)
+        con = self._open(_path("orderbook.db"))
         if con is not None:
             try:
                 for mid, ask, st in con.execute(
@@ -199,7 +203,7 @@ class Archive:
             except sqlite3.OperationalError:
                 pass
 
-        con = self._open(PRICES_DB)
+        con = self._open(_path("backtest_prices.db"))
         if con is not None and market_ids:
             ids = list(market_ids)
             try:
@@ -228,7 +232,7 @@ class Archive:
         self.price_rows.append((str(market_id), source, t, p))
 
     def _load_metar(self) -> None:
-        con = self._open(BOT_DB)
+        con = self._open(_path("bot.db"))
         if con is None:
             return
         for code, temp, obs in con.execute(
@@ -246,7 +250,7 @@ class Archive:
 
     def _load_forecasts(self) -> None:
         seen: set[tuple[str, str, float, str]] = set()
-        for path in FORECAST_DBS:
+        for path in _forecast_dbs():
             con = self._open(path)
             if con is None:
                 continue
@@ -277,7 +281,7 @@ class Archive:
             rows.sort(key=lambda r: r[0])
 
     def _load_bias(self) -> None:
-        con = self._open(BOT_DB)
+        con = self._open(_path("bot.db"))
         if con is None:
             return
         acc: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])

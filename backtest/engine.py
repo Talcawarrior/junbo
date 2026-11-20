@@ -118,7 +118,10 @@ def load_data(cutoff_days: int = 12):  # noqa: C901
         except (ValueError, TypeError):
             continue
     bot.close()
-    ob = sqlite3.connect(f"file:{OB_DB}?mode=ro", uri=True, timeout=30)
+    # Live collector writes orderbook.db in DELETE journal mode; a big commit
+    # can hold an exclusive lock for minutes -> wait longer instead of failing.
+    ob = sqlite3.connect(f"file:{OB_DB}?mode=ro", uri=True, timeout=120)
+    ob.execute("PRAGMA busy_timeout=120000")
     oc = ob.cursor()
     oc.execute("SELECT market_id, best_ask, snapshot_time FROM orderbook_snapshots WHERE best_ask IS NOT NULL")
     ob_series: dict[str, list] = defaultdict(list)

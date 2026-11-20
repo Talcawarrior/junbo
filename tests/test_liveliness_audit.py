@@ -273,8 +273,10 @@ def test_no_stray_root_modules():
 
 
 def test_production_database_present():
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    assert os.path.exists(os.path.join(root, "data", "bot.db")), "data/bot.db missing - bot has no production database"
+    from utils.db_paths import get_db_path
+
+    db = get_db_path()
+    assert os.path.exists(db), f"production DB missing: {db}"
 
 
 # ── E. Speed benchmarks (hot decision-loop paths) ────────────────────────
