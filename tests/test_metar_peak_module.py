@@ -218,7 +218,8 @@ class TestBlacklistRemoved:
                 return_value=[(int(_time.time()) - 120, 30.0), (int(_time.time()) - 60, 30.0)],
             ),
             patch("scrapers.metar.archive_metar_observations", return_value=0),
-            patch.object(mp, "_avg_peak_hour", return_value=0.0),  # saat gelmis
+            patch.object(mp, "_avg_peak_hour", return_value=0.0),
+            patch.object(mp.bot_config.strategy, "metar_early_entry", True),  # saat gelmis
             patch.object(mp, "_open_metar_bet", side_effect=_fake_bet),
             patch.object(mp, "_close_wrong_bucket_bets", return_value=0),
         ):
@@ -269,6 +270,7 @@ class TestMetarPeakStaleRefresh:
             patch("scrapers.metar.fetch_metar_day", side_effect=_fetch_side),
             patch("scrapers.metar.archive_metar_observations", return_value=0),
             patch.object(mp, "_avg_peak_hour", return_value=0.0),
+            patch.object(mp.bot_config.strategy, "metar_early_entry", True),
             patch.object(mp, "_open_metar_bet", side_effect=_fake_bet),
             patch.object(mp, "_close_wrong_bucket_bets", return_value=0),
         ):
@@ -305,6 +307,7 @@ class TestMetarPeakStaleRefresh:
             patch("scrapers.metar.fetch_metar_day", return_value=[(stale, 24.0)]),
             patch("scrapers.metar.archive_metar_observations", return_value=0),
             patch.object(mp, "_avg_peak_hour", return_value=0.0),
+            patch.object(mp.bot_config.strategy, "metar_early_entry", True),
             patch.object(mp, "_open_metar_bet", side_effect=_fake_bet),
             patch.object(mp, "_close_wrong_bucket_bets", return_value=0),
         ):
@@ -345,6 +348,7 @@ class TestMetarPeakStaleRefresh:
             patch("scrapers.metar.archive_metar_observations", return_value=0),
             patch("scrapers.metar.detect_peak", return_value=(24.0, True)),
             patch.object(mp, "_avg_peak_hour", return_value=0.0),
+            patch.object(mp.bot_config.strategy, "metar_early_entry", True),
             patch.object(mp, "_open_metar_bet", side_effect=_fake_bet),
             patch.object(
                 mp,
@@ -479,7 +483,8 @@ class TestMetarPeakDailyCap:
                     return_value=[(int(_time.time()) - 120, 23.0), (int(_time.time()) - 60, 24.0)],
                 ),
                 patch("scrapers.metar.archive_metar_observations", return_value=0),
-                patch.object(mp, "_avg_peak_hour", return_value=0.0),  # saat gelmis
+                patch.object(mp, "_avg_peak_hour", return_value=0.0),
+                patch.object(mp.bot_config.strategy, "metar_early_entry", True),  # saat gelmis
                 patch.object(mp, "_open_metar_bet", side_effect=_fake_bet),
                 patch.object(mp, "_close_wrong_bucket_bets", return_value=0),
             ):
@@ -562,7 +567,8 @@ class TestMetarPeakDailyCap:
                     return_value=[(int(_time.time()) - 120, 24.0), (int(_time.time()) - 60, 24.0)],
                 ),
                 patch("scrapers.metar.archive_metar_observations", return_value=0),
-                patch.object(mp, "_avg_peak_hour", return_value=0.0),  # saat gelmis
+                patch.object(mp, "_avg_peak_hour", return_value=0.0),
+                patch.object(mp.bot_config.strategy, "metar_early_entry", True),  # saat gelmis
                 patch.object(mp, "_open_metar_bet", side_effect=_fake_bet),
                 patch.object(mp, "_close_wrong_bucket_bets", return_value=0),
             ):
@@ -773,6 +779,7 @@ class TestNonMetarResolution:
             ),
             patch("scrapers.metar.archive_metar_observations", return_value=0),
             patch.object(mp, "_avg_peak_hour", return_value=0.0),
+            patch.object(mp.bot_config.strategy, "metar_early_entry", True),
             patch.object(mp, "_open_metar_bet", side_effect=_fake_bet),
             patch.object(mp, "_close_wrong_bucket_bets", return_value=0),
         ):
@@ -780,3 +787,87 @@ class TestNonMetarResolution:
 
         assert m_hk not in called_ids, "HK cozumu HKO -> METAR-peak bet acilmamali"
         assert m_sz in called_ids
+
+
+class TestEarlyEntryDisabled:
+    """2026-11-23 kullanici karari ("Evet, kapat"): METAR-peak ERKEN giris
+    varsayilan KAPALI. Kapaliyken ortalama peak saati hesaplanmaz; yalnizca
+    1-dusus kilidi (detect_peak, 30 dk onay) + aktar calisir. Replay: erken
+    ACIK -$132.24 / KAPALI +$14.67 (17 Kas haric)."""
+
+    def test_varsayilan_kapali(self):
+        from config.settings import StrategyConfig
+
+        assert StrategyConfig().metar_early_entry is False
+
+    def test_env_ile_geri_acilir(self, monkeypatch):
+        from config.settings import BotConfig, bot_config
+
+        monkeypatch.setenv("METAR_EARLY_ENTRY", "true")
+        cfg = BotConfig(polymarket=bot_config.polymarket, meteo=bot_config.meteo)
+        assert cfg.strategy.metar_early_entry is True
+        monkeypatch.setenv("METAR_EARLY_ENTRY", "false")
+        cfg = BotConfig(polymarket=bot_config.polymarket, meteo=bot_config.meteo)
+        assert cfg.strategy.metar_early_entry is False
+
+    @staticmethod
+    def _run(market_factory, rows, avg_mock):
+        from unittest.mock import patch
+
+        tgt = datetime.now(timezone.utc).replace(tzinfo=None)
+        m15 = market_factory(
+            city="London",
+            city_code="EGLC",
+            metric="temperature_max",
+            market_type="RANGE",
+            threshold=15.0,
+            target_date=tgt,
+            yes_price=0.30,  # ucuz: eski hibritte erken giris adayi olurdu
+        )
+        called_ids: list[str] = []
+
+        def _fake_bet(*args):
+            called_ids.append(str(args[1].id))
+            return None
+
+        with (
+            patch("scrapers.metar.fetch_metar_day", return_value=rows),
+            patch("scrapers.metar.archive_metar_observations", return_value=0),
+            patch("scrapers.metar.city_utc_offset", return_value=0.0),
+            patch.object(mp, "_avg_peak_hour", avg_mock),
+            patch.object(mp, "_stale_threshold_min", return_value=1e9),
+            patch.object(mp, "_open_metar_bet", side_effect=_fake_bet),
+            patch.object(mp, "_close_wrong_bucket_bets", return_value=0),
+            patch.object(mp.bot_config.strategy, "metar_early_entry", False),
+        ):
+            mp.run_metar_peak_bets()
+        return m15, called_ids
+
+    def test_kapaliyken_kilit_yoksa_bet_acilmaz(self, market_factory):
+        from unittest.mock import MagicMock
+
+        base = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        # yukselen seri, dusus yok -> kilit yok (eski hibritte "saat gelmis" erken giris olurdu)
+        rows = [(int((base + timedelta(hours=h)).timestamp()), 10.0 + h * 0.5) for h in (10, 11, 12, 13, 14)]
+        avg_mock = MagicMock(return_value=0.0)
+        m15, called_ids = self._run(market_factory, rows, avg_mock)
+        assert m15 not in called_ids, f"erken giris kapali -> kilitsiz bet acilmamali: {called_ids}"
+        avg_mock.assert_not_called()  # kapaliyken ortalama peak saati hic hesaplanmaz
+
+    def test_kapaliyken_kilitle_bet_acilir(self, market_factory):
+        from unittest.mock import MagicMock
+
+        base = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        # 12:30'da 15C zirve; 13:05 ilk dusus, 13:40 onay (>= 30 dk) -> kilit 15C
+        rows = [
+            (int((base + timedelta(hours=12)).timestamp()), 14.0),
+            (int((base + timedelta(hours=12, minutes=30)).timestamp()), 15.0),
+            (int((base + timedelta(hours=13, minutes=5)).timestamp()), 14.0),
+            (int((base + timedelta(hours=13, minutes=40)).timestamp()), 14.0),
+        ]
+        avg_mock = MagicMock(return_value=0.0)
+        m15, called_ids = self._run(market_factory, rows, avg_mock)
+        # oturumun temp DB'sinde onceki testlerin marketleri de acik kalabilir; bu
+        # testin marketi (15C, kilitli bucket) mutlaka bet almali.
+        assert m15 in called_ids, f"kilit 15C -> 15C marketine bet acilmali: {called_ids}"
+        avg_mock.assert_not_called()

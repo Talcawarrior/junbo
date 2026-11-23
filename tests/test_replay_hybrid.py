@@ -121,8 +121,27 @@ CHEAP_PRICES = [
 
 def _run(archive, prices, **kw):
     clock = ReplayClock(_dt(0), _dt(0).replace(day=21), tick_minutes=10)
+    # bu dosyadaki senaryolar hibritin ERKEN girisini test eder; canli varsayilan
+    # 2026-11-23'ten beri KAPALI oldugu icin acikca verilmeyen testlerde acilir.
+    kw.setdefault("metar_early", True)
     sched = ReplayScheduler(archive, prices, clock, strategy="metar", metar_mode="hybrid", settle="polymarket", **kw)
     return sched.run()
+
+
+def test_replay_default_follows_live_early_setting():
+    """metar_early verilmezse replay CANLI `metar_early_entry` ayarini izler."""
+    from unittest.mock import patch
+
+    from config.settings import bot_config
+
+    clock = ReplayClock(_dt(0), _dt(1))
+    with patch.object(bot_config.strategy, "metar_early_entry", False):
+        assert ReplayScheduler(_archive(), PriceIndex(), clock, metar_mode="hybrid").metar_early is False
+    with patch.object(bot_config.strategy, "metar_early_entry", True):
+        assert ReplayScheduler(_archive(), PriceIndex(), clock, metar_mode="hybrid").metar_early is True
+    # acik parametre canli ayari ezer
+    with patch.object(bot_config.strategy, "metar_early_entry", True):
+        assert ReplayScheduler(_archive(), PriceIndex(), clock, metar_early=False).metar_early is False
 
 
 def test_utc_ts_ignores_machine_timezone():

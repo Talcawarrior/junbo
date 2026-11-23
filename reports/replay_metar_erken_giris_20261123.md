@@ -15,6 +15,10 @@ Motor: `python -m replay.main --strategy metar --metar-mode hybrid --settle poly
 
 ## Ozet ve yorum
 
+- **KARAR (2026-11-23, kullanici "Evet, kapat"): erken giris KAPATILDI** — `METAR_EARLY_ENTRY=false`
+  (varsayilan). Replay hibrit modu artik varsayilan olarak canli ayari izler; erken ACIK senaryosunu
+  yeniden uretmek icin `--early`, KAPALI icin `--no-early` verin.
+
 - **Yon kesin, buyukluk belirsiz.** Erken girisi kapatmak her iki fiyat varsayiminda da daha iyi:
   tutucu (bilgi-sonrasi fiyat) +$146.91, iyimser (bilgi-oncesi fiyat, look-ahead) +$165.97 fark.
   Canli veri de ayni yonde: giris <=0.50 betler -$44.66, >0.50 betler +$11.84.

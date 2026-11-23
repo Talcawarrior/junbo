@@ -112,14 +112,15 @@ Bulunan her bug düzeltilip test edilmeli, sonra commit atılmalı.
 - Eski parametreler: `spread_radius=0`, `spread_max_cities=40`, `spread_max_entry=0.50`, `spread_stake_usd=2.0`, gunluk limit 120.
 - Acilan betler settlement'a kadar TUTULUR; erken kapanis mekanizmalari YOKTUR.
 
-**2) METAR-peak modu (HIBRIT, 2026-08-20):**
-- `_avg_peak_hour`: sehir bazli gecmis ortalama peak saati (bugun haric, >=3 gun) — saat gelmeden bet acilmaz
-- Saat gelince cur_max'a ERKEN giris adayi; bucket fiyati **0.50 ustunde** ise 1-dusus kilidi beklenir, altinda dusus beklemeden girilir
+**2) METAR-peak modu (HIBRIT 2026-08-20; ERKEN GIRIS KAPALI 2026-11-23):**
+- **2026-11-23 kullanici karari ("Evet, kapat"): ERKEN giris KAPALI** — `StrategyConfig.metar_early_entry=False` (env `METAR_EARLY_ENTRY`). Kapaliyken `_avg_peak_hour` hesaplanmaz; YALNIZCA 1-dusus kilidi (detect_peak, 30 dk onay) + aktar. Asagidaki iki madde yalnizca bayrak `true` iken gecerlidir. Kullanici istemedikce geri ACMA
+- (bayrak true) `_avg_peak_hour`: sehir bazli gecmis ortalama peak saati (bugun haric, >=3 gun) — saat gelmeden bet acilmaz
+- (bayrak true) Saat gelince cur_max'a ERKEN giris adayi; bucket fiyati **0.50 ustunde** ise 1-dusus kilidi beklenir, altinda dusus beklemeden girilir
 - Aktar: zirve asilirsa (cur_max > kilitli peak) eski bet kapatilir + yenisine acilir (zincir 22->23->24)
 - `MIN_ENTRY=0.05`, stake $3, SADECE `temperature_max` + `RANGE` (tam bucket)
 - **KARA LISTE KALDIRILDI (2026-08-21):** `METAR_PEAK_BLACKLIST` bos — TUM sehirlerde METAR-peak bet acilir (eski liste VHHH, ZGSZ, KBKF, KATL, KSEA, KSFO, NZWN %20-57 tutma oraniyla kullanici riski kabul etti; veri toplama + spread zaten devam ediyordu). Ileride tekrar kisitlamak icin set doldurulur
 - **POLYMARKET METAR KURALI (2026-11-23):** HK disi tum sehirler RUTIN METAR (SPECI sayilmaz) + RMK T grubu (onda bir) + `floor(x+0.5)` ile cozulur; tek yuvarlama `scrapers.metar.polymarket_round`. Hong Kong HKO ile cozuldugu icin `NON_METAR_RESOLUTION={"VHHH"}` -> HK'de METAR-peak YOK (bu kara liste DEGIL). Panama = MPMG
-- **ERKEN GIRIS KIYASI (2026-11-23, KARAR KULLANICIDA):** replay (gercek Polymarket sonucu, 17 Kas kirli gun haric) erken ACIK -$132.24 / KAPALI +$14.67; canli giris <=0.50 -$44.66, >0.50 +$11.84. Kod DEGISMEDI; `EARLY_MAX_PRICE=0.50` duruyor
+- **ERKEN GIRIS KIYASI (2026-11-23) -> KARAR: KAPATILDI:** replay (gercek Polymarket sonucu, 17 Kas kirli gun haric) erken ACIK -$132.24 / KAPALI +$14.67; canli giris <=0.50 -$44.66, >0.50 +$11.84. Kullanici "Evet, kapat" dedi; `METAR_EARLY_ENTRY=false` (varsayilan). `EARLY_MAX_PRICE=0.50` kodda durur (bayrak acilirsa)
 - Bayat METAR (>45 dk): DERHAL yeniden cekim denenir; taze gelirse devam, gelmezse atla (aktif duzeltme)
 
 **3) Korumalar:** stale fiyat guard (CLOB, %15 sapma), orderbook.db stale guard yedegi, 45dk bayat METAR, PAPER MODE kalici (`_live_allowed=False`).
@@ -326,8 +327,8 @@ Degisiklik oldugunda bu bolumu de guncelle.
   4b. **`spread_max_entry=0.30`.** Backtest en iyi config (kayan pencere + 0.30
      -> +$53,284). 0.30 ustu fiyatli esiklere girilmez. (Onceden 0.99 denenmis,
      kullanici "fiyat onemsiz" demisti; sonra veri 0.30'u gosterdi.)
-- **Son suite durumu:** 837 passed, 7 skipped, 0 failed (2026-11-23, 569 sn; Cowork METAR kurali +
-  hibrit replay + uretim-makinesi kapisi). (Onceki: 797/8/2 — 2026-11-18 aksam, 2 hata WARP kopuklugu.)
+- **Son suite durumu:** 842 passed, 7 skipped, 0 failed (2026-11-23, 705 sn; METAR erken giris kapali +
+  TestEarlyEntryDisabled). (Onceki: 837/7/0 ayni gun; 797/8/2 — 2026-11-18 aksam, 2 hata WARP kopuklugu.)
   (Ignore: test_betting_idempotency, test_comprehensive).
 - **Uretim makinesi kapisi (2026-11-23):** canli `bot.db`/WARP'i dogrulayan testler `live_bot_db` /
   `production_host` fixture'larini kullanir (conftest): uretimde HER ZAMAN kosar (ariza = FAIL),

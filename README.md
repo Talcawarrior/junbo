@@ -147,6 +147,7 @@ python main.py bot
 | `MAX_ENTRY_PRICE` | `0.99` | 0.99+ fiyata bet acilmaz |
 | `HOST` / `PORT` | `127.0.0.1` / `8091` | Sunucu |
 | `DB_PATH` | `D:\JUNBO data\bot.db` (.env) | Ana DB; repo `data/bot.db` ticaret icin KULLANILMAZ (eski kopya) |
+| `METAR_EARLY_ENTRY` | `false` | METAR-peak ERKEN giris (2026-11-23 kullanici karari: KAPALI). `false` = yalnizca 1-dusus kilidi + aktar; `true` = eski hibrit (ortalama peak saati + <=0.50 fiyatta dusussuz giris). Degisiklik restart ister |
 | `POLY_PROXY` | `socks5h://127.0.0.1:40000` | Polymarket SOCKS5 proxy — sistem PAC'i (`polymarket.pac`) WARP'a yonlendirir; **zorunlu** (2026-08-16: proxy yoksa bot `10054` alir, market cekemez) |
 
 ---
@@ -210,6 +211,12 @@ python main.py bot
   altindaysa dusus beklemeden girer. Aktar (zirve asilmasi -> kapat + yenisine ac)
   her iki modda da calisir. Backtest (05-19 Agu, cap 6/gun + 30dk dongu gecikmesi):
   hibrit compound $200 -> $4,070 (kilit $3,629, erken saf $2,973).
+  **2026-11-23 ERKEN GIRIS KAPATILDI (kullanici karari):** ucuz erken betler zirveden
+  once acilip sicaklik yukselince aktar'da ~0.01'den kapaniyordu. Replay (gercek
+  Polymarket sonucu, 17 Kas haric): erken ACIK -$132.24 / KAPALI +$14.67; canli giris
+  <=0.50 betler -$44.66. Artik `METAR_EARLY_ENTRY=false` (varsayilan): ortalama peak
+  saati hesaplanmaz, YALNIZCA 1-dusus kilidi (30 dk onay) + aktar. Geri acmak:
+  `.env` `METAR_EARLY_ENTRY=true` + restart.
   **2026-08-21 KARA LISTE KALDIRILDI:** `METAR_PEAK_BLACKLIST` bosaltildi
   (kullanici karari) — eski listedeki sehirlerde (VHHH %20, ZGSZ %29, KBKF/KATL
   %43, KSEA/KSFO/NZWN %57 tutma) METAR-peak bet yeniden acilir. Gecmis karar
@@ -345,7 +352,8 @@ zaman-pencereli, settlement yalnizca D+1 00:00 UTC'de).
 >    kurali — sehir bazli gecmis ortalama peak saati, ucuz (`<= EARLY_MAX_PRICE`) ERKEN giris,
 >    pahaliysa 1-dusus kilidi (30 dk onay), AKTAR zinciri (yanlis bucket CLOB bid'den kapatilir,
 >    yeni bucket'a girilir), bayat METAR korumasi (45/90 dk), gunluk cap, `NON_METAR_RESOLUTION`
->    (HK) haric. `--no-early` erken girisi kapatir; `--early-max-price X` esigi degistirir.
+>    (HK) haric. Erken giris varsayilani CANLI ayardir (`METAR_EARLY_ENTRY`, 2026-11-23'ten
+>    beri kapali); `--early` / `--no-early` zorlar; `--early-max-price X` esigi degistirir.
 > 3. **Look-ahead korumasi (yeni):** METAR gozlemi botun ilk gordugu an (`recorded_at`) oncesi
 >    gorulmez; **dolum/satis/esik fiyati o bilgiden SONRA kaydedilmis olmali** (piyasa METAR'a
 >    saniyeler icinde tepki verir; bilgi-oncesi fiyatla dolum replay'i yapay iyimser yapiyordu).
@@ -357,9 +365,9 @@ zaman-pencereli, settlement yalnizca D+1 00:00 UTC'de).
 >    dislanmali. METAR arsivi 2026-10-28..11-06 bos.
 >
 > ```powershell
-> # erken giris ACIK (canli kural) vs KAPALI, gercek Polymarket sonucu, 10 dk tick (canli dongu)
+> # erken giris ACIK (2026-11-23 oncesi canli kural) vs KAPALI, gercek Polymarket sonucu, 10 dk tick
 > python -m replay.main --strategy metar --metar-mode hybrid --settle polymarket --tick-minutes 10 `
->   --window 2026-10-23..2026-11-22 --out-dir reports/replay/hibrit_acik
+>   --early --window 2026-10-23..2026-11-22 --out-dir reports/replay/hibrit_acik
 > python -m replay.main --strategy metar --metar-mode hybrid --settle polymarket --tick-minutes 10 `
 >   --no-early --window 2026-10-23..2026-11-22 --out-dir reports/replay/hibrit_kapali
 > ```
@@ -554,6 +562,7 @@ python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=test
 
 ## 12. Kararlar Log
 
+- **2026-11-23 (karar: METAR-peak erken giris KAPATILDI):** Kullanici "Evet, kapat" dedi (asagidaki kiyasa dayanarak). `config/settings.py` `StrategyConfig.metar_early_entry=False` (env `METAR_EARLY_ENTRY`); `jobs/metar_peak.py` bayrak kapaliyken `_avg_peak_hour` hesaplamaz -> yalnizca 1-dusus kilidi (30 dk onay) + aktar. `EARLY_MAX_PRICE=0.50` kodda durur (bayrak acilirsa kullanilir). Replay hibrit modu varsayilan olarak canli ayari izler (`--early` / `--no-early` zorlar). Beklenti: gunluk bet sayisi belirgin duser (replay ~2/gun), zarar eden ucuz erken betler biter. Geri donus: `.env` `METAR_EARLY_ENTRY=true` + restart.
 - **2026-11-23 (Polymarket METAR kurali + test kok nedenleri + erken giris replay'i):** (1) **Cowork yamasi uygulandi** (commit oncesi bu makinede dogrulandi): Polymarket 2026-10-23'ten beri HK disi tum sehirleri RUTIN METAR (SPECI sayilmaz), T grubu (onda bir) ve `floor(x+0.5)` yuvarlamayla cozer -> `scrapers/metar.py` SPECI'yi atar, sicakligi bu kurala gore okur; METAR-peak/spread/replay tek `polymarket_round`; Panama MPMG; Hong Kong HKO ile cozuldugu icin `NON_METAR_RESOLUTION` (HK'de METAR-peak yok — kara liste DEGIL, `METAR_PEAK_BLACKLIST` bos). (2) **Kirik testlerin gercek nedeni:** bu makinede tek kirik `test_placed_is_only_open` idi — spread'i (2026-11-18'de kapatildi) acik pozisyonlarda zorunlu sayiyordu -> bilinen-strateji kontrolu. Cowork'teki 9 kirik "ortama ozgu" degildi: testler uretim makinesini (canli `bot.db`, WARP) beyan etmeden dogruluyor ve rw `sqlite3.connect` yol yoksa BOS bot.db uretiyordu -> `live_bot_db`/`production_host` kapisi + salt-okunur baglanti. (3) **Replay:** naive timestamp yuzunden 3 saat eski veriyle karar veriyordu (duzeltildi); canli hibrit kurali yeni `--metar-mode hybrid` ile modellendi; bilgi-oncesi fiyat look-ahead'i engellendi. (4) **Erken giris kiyasi** (23-27 Eki + 8-22 Kas, 17 Kas kirli fiyat gunu HARIC, gercek Polymarket sonucu, $2 stake): erken ACIK (canli kural) **197 bet -$132.24**, erken KAPALI (yalnizca 1-dusus kilidi) **37 bet +$14.67**; fark bilgi-oncesi fiyat (iyimser) varsayiminda da ayni yonde (+$225.88 vs +$391.85). Canli: giris <=0.50 155 bet **-$44.66**, >0.50 40 bet **+$11.84**. Erken girisi kapatmak canli davranisi degistirir -> **KARAR KULLANICIDA, kod degismedi.** Rapor: `reports/replay_metar_erken_giris_20261123.md`.
 - **2026-11-20 (test altyapisi duzeltmeleri):** Tam suite 5 kirik veriyordu. (1) `test_liveliness_audit` + `test_resolution_rules` hala repo `data/bot.db`'yi ariyordu (canli DB 2026-11-18'de `C:\JUNBO data`'ya tasindi) -> `utils.db_paths.get_db_path()`. (2) `backtest/run.py` import aninda `load_data(12)` calistiriyordu -> `main()` + `__main__` guard. (3) `data/backtest_results/*.py` import taramasina giriyordu -> `data` dizini haric. (4) `backtest/engine.py` orderbook okumasi canli yazici kilidi altinda 30 sn'de dusuyordu -> `busy_timeout` 120 sn. (5) `replay/archive.py` DB yollari sabit `REPO_ROOT/data`'ydi (canli DB tasindi) -> call-time `get_data_dir()`; `replay/main.py` `get_db_path()`. (6) `backtest/run_combos.py` import aninda `load_data` calistiriyordu + kullanilmayan degisken + mukerrer print -> `main()` guard + temizlik.
 - **2026-11-20 (terminal pencere flasi):** Kullanici "surekli terminal acilip kapaniyor" bildirdi. WinEvent kancasi + process izleme ile olculdu: kaynak `JunboWARP` gorevi (her 5 dk, Interactive, `powershell -WindowStyle Hidden -File warp_health.ps1`). Windows 11'de varsayilan terminal Windows Terminal oldugu icin `-WindowStyle Hidden` yeni bir terminal sekmesi aciyor ve script bitene kadar (~40 sn) acik kaliyor; saatlik `JunboForecastRunnerWatchdog` da ayni. Cozum: yeni `scripts/run_hidden.py` (`pythonw.exe` + `CREATE_NO_WINDOW` sarmalayici); uc gorevin action'i (`JunboWARP`, `JunboForecastRunnerWatchdog`, `JunboForecastRunner`) `pythonw.exe run_hidden.py powershell.exe ...` yapildi; `JunboForecastRunner` calisirken yalnizca tanim degistirildi, yeni tanim bir sonraki baslatmada devreye girer. Dogrulama: `JunboWARP` ve `JunboForecastRunnerWatchdog` elle tetiklendi -> `LastTaskResult=0`, WinEvent izlemede **0 pencere olayi**. Yedek/geri donus: `C:\JUNBO data\state\JunboWARP_task_backup_20261120.xml` ve `JunboForecastRunnerWatchdog_task_backup_20261120.xml` -> `Register-ScheduledTask -Xml (Get-Content <yedek>) -TaskName <ad> -Force`.

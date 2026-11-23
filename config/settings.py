@@ -229,6 +229,11 @@ class StrategyConfig:
     turkey_cities: str = "Istanbul,Ankara,Izmir,Antalya"
     metar_peak_max_bets_per_day: int = 15  # METAR-peak gunluk cap (2026-09-06: 12->15, backtest $285)
     metar_stake_usd: float = 5.0  # METAR tek bet stake (2026-09-06: 3->5, backtest $285)
+    # 2026-11-23 kullanici karari ("Evet, kapat"): METAR-peak ERKEN giris KAPALI.
+    # Replay (gercek Polymarket sonucu, 17 Kas haric): erken ACIK -$132.24 / KAPALI
+    # +$14.67; canli giris<=0.50 betler -$44.66. Kapaliyken yalnizca 1-dusus kilidi
+    # (detect_peak, 30 dk onay) + aktar calisir. Geri acmak: .env METAR_EARLY_ENTRY=true.
+    metar_early_entry: bool = False
 
     # ── Daily rotation limit: gunde max N rotasyon ───────────────────
     max_daily_rotations: int = 3  # gunde en fazla 3 rotasyon (maliyet kontrolu)
@@ -602,6 +607,12 @@ class BotConfig:
             os.getenv("METAR_PEAK_MAX_BETS_PER_DAY", str(s.metar_peak_max_bets_per_day))
         )
         s.metar_stake_usd = float(os.getenv("METAR_STAKE_USD", str(s.metar_stake_usd)))
+        s.metar_early_entry = os.getenv("METAR_EARLY_ENTRY", str(s.metar_early_entry)).strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
 
 
 # ── Config backward-compatibility proxy ────────────────────────────────────

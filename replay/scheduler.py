@@ -15,8 +15,9 @@ Iki kol calisir (canli botun 2026-08-20 hibrit stratejisi):
     kurallari — sehir bazli gecmis ortalama peak saati + ucuz
     (<= EARLY_MAX_PRICE) ERKEN giris, pahaliysa 1-dusus kilidi (30 dk onay),
     zirve asilinca AKTAR zinciri (yanlis bucket canli bid'den kapatilir,
-    yenisine girilir), bayat METAR korumasi, gunluk cap. ``metar_early=False``
-    erken girisi kapatir (yalnizca 1-dusus kilidi, 2026-08-20 oncesi kural).
+    yenisine girilir), bayat METAR korumasi, gunluk cap. ``metar_early``
+    verilmezse CANLI ayar (`metar_early_entry`, 2026-11-23'ten beri KAPALI)
+    kullanilir; ``False`` = yalnizca 1-dusus kilidi, ``True`` = erken giris acik.
 
 Butun karar parametreleri CANLI config'den (`bot_config.strategy`) okunur;
 `--spread-max-cities` gibi override'lar config drift'ini telafi eder.
@@ -119,7 +120,7 @@ class ReplayScheduler:
         metar_max_per_day: int | None = None,
         allow_price_after: bool = False,
         metar_mode: str = "lock",
-        metar_early: bool = True,
+        metar_early: bool | None = None,
         early_max_price: float | None = None,
         settle: str = "actuals",
         include_non_metar: bool = False,
@@ -135,7 +136,6 @@ class ReplayScheduler:
         self.strategy = strategy
         self.allow_price_after = allow_price_after
         self.metar_mode = metar_mode
-        self.metar_early = bool(metar_early)
         self.early_max_price = early_max_price
         self.settle = settle
         self.include_non_metar = bool(include_non_metar)
@@ -147,6 +147,9 @@ class ReplayScheduler:
         from config.settings import bot_config
 
         s = bot_config.strategy
+        #: hybrid erken giris: None = CANLI ayar (`metar_early_entry`, 2026-11-23'ten
+        #: beri varsayilan KAPALI) -> replay canliyi birebir yansitir.
+        self.metar_early = bool(_cfg(s, "metar_early_entry", False) if metar_early is None else metar_early)
         self.spread_stake = float(_cfg(s, "spread_stake_usd", 2.0))
         self.max_entry = float(_cfg(s, "spread_max_entry", 0.95))
         self.max_cities = int(max_cities if max_cities is not None else _cfg(s, "spread_max_cities", 15))

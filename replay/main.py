@@ -359,7 +359,13 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=METAR_MODES,
         help="lock: eski tek-kilit girisi; hybrid: canli run_metar_peak_bets kurali (erken+kilit+aktar)",
     )
-    p.add_argument("--no-early", action="store_true", help="hybrid: ERKEN girisi kapat (yalnizca 1-dusus kilidi)")
+    early = p.add_mutually_exclusive_group()
+    early.add_argument(
+        "--early", action="store_true", help="hybrid: ERKEN girisi zorla AC (varsayilan: canli METAR_EARLY_ENTRY)"
+    )
+    early.add_argument(
+        "--no-early", action="store_true", help="hybrid: ERKEN girisi zorla KAPAT (yalnizca 1-dusus kilidi)"
+    )
     p.add_argument(
         "--early-max-price",
         type=float,
@@ -409,7 +415,7 @@ def main(argv=None) -> int:
                     max_cities=args.spread_max_cities,
                     allow_price_after=args.allow_price_after,
                     metar_mode=args.metar_mode,
-                    metar_early=not args.no_early,
+                    metar_early=True if args.early else (False if args.no_early else None),
                     early_max_price=args.early_max_price,
                     settle=args.settle,
                     include_non_metar=args.include_non_metar,

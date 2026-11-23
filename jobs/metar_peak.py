@@ -739,7 +739,12 @@ def run_metar_peak_bets() -> int:
             # saat gelince cur_max'a ERKEN giris adayi olur (dusus beklenmez).
             # Fiyat EARLY_MAX_PRICE ustundeyse (piyasa bucket'i biliyor)
             # 1-dusus kilidini bekleriz. Backtest: hibrit 0.50 en iyi.
-            avg_hour = _avg_peak_hour(session, m.city_code, m.longitude)
+            # 2026-11-23 kullanici karari ("Evet, kapat"): ERKEN giris varsayilan
+            # KAPALI (`bot_config.strategy.metar_early_entry=False`). Kapaliyken
+            # ortalama peak saati hesaplanmaz -> yalnizca 1-dusus kilidi + aktar
+            # (replay: erken ACIK -$132.24 / KAPALI +$14.67, 17 Kas haric).
+            early_enabled = bool(getattr(bot_config.strategy, "metar_early_entry", False))
+            avg_hour = _avg_peak_hour(session, m.city_code, m.longitude) if early_enabled else None
             early_attempt = avg_hour is not None
             # 2026-08-19 PEAK TAKIBI (kullanici): su anki sicaklik + yon +
             # durum (kilitli/takip/bekleme) — dashboard'da gorunur.
