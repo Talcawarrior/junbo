@@ -337,6 +337,35 @@ zaman-pencereli, settlement yalnizca D+1 00:00 UTC'de).
 > Ciktilar: `rapor.md` (Gunluk Ozet), `ledger_bets.csv`, `mechanism_trace.csv`,
 > `activity_events.csv`; `fidelity.md` yalnizca `--fidelity` verilirse.
 
+> **2026-11-23 Hibrit METAR modu + zaman duzeltmesi:**
+> 1. **Zaman hatasi:** scheduler tick epoch'u naive `datetime.timestamp()` ile aliniyordu ->
+>    makine saat dilimi (UTC+3) yuzunden her karar **3 saat eski** veriyle veriliyordu ve UTC
+>    gununun son 3 saati gorulmuyordu. Artik `_utc_ts()` (naive = UTC).
+> 2. **`--metar-mode hybrid`** (varsayilan `lock` eski davranis): canli `run_metar_peak_bets`
+>    kurali — sehir bazli gecmis ortalama peak saati, ucuz (`<= EARLY_MAX_PRICE`) ERKEN giris,
+>    pahaliysa 1-dusus kilidi (30 dk onay), AKTAR zinciri (yanlis bucket CLOB bid'den kapatilir,
+>    yeni bucket'a girilir), bayat METAR korumasi (45/90 dk), gunluk cap, `NON_METAR_RESOLUTION`
+>    (HK) haric. `--no-early` erken girisi kapatir; `--early-max-price X` esigi degistirir.
+> 3. **Look-ahead korumasi (yeni):** METAR gozlemi botun ilk gordugu an (`recorded_at`) oncesi
+>    gorulmez; **dolum/satis/esik fiyati o bilgiden SONRA kaydedilmis olmali** (piyasa METAR'a
+>    saniyeler icinde tepki verir; bilgi-oncesi fiyatla dolum replay'i yapay iyimser yapiyordu).
+>    `--pre-info-prices` yalnizca duyarlilik analizi icindir (look-ahead icerir).
+> 4. **`--settle polymarket`:** marketin GERCEK Polymarket sonucu (`raw_data`) > canli betin
+>    won/lost'u > arsiv METAR max (yedek; Polymarket'la %88.7, C-bucket'li sehirlerde %95.5 ayni).
+> 5. **fixed stake:** METAR stake artik canli `METAR_STAKE_USD` (eski sabit $3 drift'ti).
+> 6. **Kirli veri:** 2026-11-17 (restart sonrasi bayat fiyat olayi) snapshot tabanli kiyaslarda
+>    dislanmali. METAR arsivi 2026-10-28..11-06 bos.
+>
+> ```powershell
+> # erken giris ACIK (canli kural) vs KAPALI, gercek Polymarket sonucu, 10 dk tick (canli dongu)
+> python -m replay.main --strategy metar --metar-mode hybrid --settle polymarket --tick-minutes 10 `
+>   --window 2026-10-23..2026-11-22 --out-dir reports/replay/hibrit_acik
+> python -m replay.main --strategy metar --metar-mode hybrid --settle polymarket --tick-minutes 10 `
+>   --no-early --window 2026-10-23..2026-11-22 --out-dir reports/replay/hibrit_kapali
+> ```
+>
+> Sonuc (2026-11-23): `reports/replay_metar_erken_giris_20261123.md` (bkz. Kararlar Log).
+
 **SAHTE VERI YOK**: tum girdiler arsivden gelir (`data/*.db` 6 DB + `unified/markets.parquet`
 + 30 kalibrasyon parquet). Arsiv DB'leri `mode=ro` ile okunur; bot kendi temp DB'sine yazar.
 Production DB'lere HICBIR yazi yok. Market `city_code`'u bot.db'den gelir (canli botun
@@ -345,7 +374,7 @@ oldugundan replay bunlari islemez.
 
 ```powershell
 # Tam pencere: her iki strateji + her iki stake modu
-#   fixed: $2 spread / $3 metar   compound: bankroll*0.03
+#   fixed: $2 spread / METAR = canli METAR_STAKE_USD   compound: bankroll*0.03
 python -m replay.main --strategy both --stake-mode both --fidelity `
   --window 2026-08-04..2026-08-22 --tick-minutes 5 --out-dir reports/replay/final
 
@@ -366,7 +395,7 @@ Ciktilari (`reports/replay/<run>/<mode>/`):
 **Dogruluk kaniti**: replay betleri canli `bot.db.bets` ile birebir karsilastirilir
 (precision = eslesen replay / toplam replay; recall = eslesen canli / toplam canli).
 
-Test: `python -m pytest tests/test_replay_engine.py tests/test_replay_fidelity.py -q`.
+Test: `python -m pytest tests/test_replay_engine.py tests/test_replay_fidelity.py tests/test_replay_hybrid.py -q`.
 
 Not: bot su an CALISIYOR olsa da replay guvenlidir — arsivler `mode=ro`, bot yalnizca
 kendi temp DB'sine yazar.
@@ -478,7 +507,7 @@ python main.py reset     # SIFIRLA (backup alir)
 | **5. E2E + Liveliness** | `test_e2e_system.py`, `test_integration_e2e.py`, `test_faz2_e2e_mock.py`, `test_liveliness_audit.py` | Her değişiklikte (bot uç-uça akış) |
 | **6. Muhasebe + Settlement** | `test_accounting.py`, `test_settler_polymarket.py`, `test_betting_idempotency.py`, `test_signals_active_positions.py` | DRY_RUN / muhasebe / settlement / debit_stake değişikliklerinde |
 | **7. METAR / Spread** | `test_metar_peak.py`, `test_metar_peak_module.py`, `test_metar_peak_config.py`, `test_spread_placer.py` | METAR-peak / spread strateji değişikliklerinde |
-| **8. Replay / Backtest** | `test_replay_engine.py`, `test_replay_fidelity.py`, `test_realistic_backtest.py` | Replay motoru / backtest scripti değişikliklerinde |
+| **8. Replay / Backtest** | `test_replay_engine.py`, `test_replay_fidelity.py`, `test_replay_hybrid.py`, `test_realistic_backtest.py` | Replay motoru / backtest scripti değişikliklerinde |
 | **9. Regression** | `test_regression_fixes.py`, `test_bugfix_coverage.py` | Bugfix sonrası |
 | **10. Full Suite (Push Öncesi)** | `pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --ignore=tests/test_replay_engine.py --tb=short -q` | **Push öncesi — 0 failed hedefi** |
 
@@ -518,12 +547,14 @@ python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=test
 | Gamma API `HTTP 421` | `gamma-api` CloudFront'a tasindi; `utils/poly_dns.py` DoH ile cozer (`POLY_DNS_FIX=0` kapatir, `POLY_GAMMA_IP=1.2.3.4` sabit IP verir) |
 | Bot `unable to open database file` | `D:\JUNBO data` kok dizini var mi; `data\bot.db` symlink hedefi erisilebilir mi |
 | Dashboard yok | `npm run build` sonrasi `Copy-Item out dashboard\out` |
+| Testler baska ortamda (Cowork/CI) "no such table: bets" / "connection refused" ile kiriliyor | Bu testler uretim makinesinin durumunu (canli `bot.db`, WARP) dogrular. 2026-11-23'ten beri `tests/conftest.py` `live_bot_db` / `production_host` kapisi: canli DB yoksa "uretim verisi yok" nedeniyle atlanir, uretim makinesinde her zaman kosar (ariza = FAIL). Canli DB'yi okuyan yeni testler bu fixture'i kullanir ve `mode=ro` acar |
 | Gorevler terminal penceresi acip kapiyor | Windows 11 + Windows Terminal varsayilan terminal; `-WindowStyle Hidden` yetmez (yeni sekme acar). Cozum: gorev action'i `pythonw.exe scripts\run_hidden.py <komut>` (CREATE_NO_WINDOW). 2026-11-20'de `JunboWARP`, `JunboForecastRunnerWatchdog` ve `JunboForecastRunner` bu sekilde degistirildi; XML yedekleri `C:\JUNBO data\state\*_task_backup_20261120.xml` |
 
 ---
 
 ## 12. Kararlar Log
 
+- **2026-11-23 (Polymarket METAR kurali + test kok nedenleri + erken giris replay'i):** (1) **Cowork yamasi uygulandi** (commit oncesi bu makinede dogrulandi): Polymarket 2026-10-23'ten beri HK disi tum sehirleri RUTIN METAR (SPECI sayilmaz), T grubu (onda bir) ve `floor(x+0.5)` yuvarlamayla cozer -> `scrapers/metar.py` SPECI'yi atar, sicakligi bu kurala gore okur; METAR-peak/spread/replay tek `polymarket_round`; Panama MPMG; Hong Kong HKO ile cozuldugu icin `NON_METAR_RESOLUTION` (HK'de METAR-peak yok — kara liste DEGIL, `METAR_PEAK_BLACKLIST` bos). (2) **Kirik testlerin gercek nedeni:** bu makinede tek kirik `test_placed_is_only_open` idi — spread'i (2026-11-18'de kapatildi) acik pozisyonlarda zorunlu sayiyordu -> bilinen-strateji kontrolu. Cowork'teki 9 kirik "ortama ozgu" degildi: testler uretim makinesini (canli `bot.db`, WARP) beyan etmeden dogruluyor ve rw `sqlite3.connect` yol yoksa BOS bot.db uretiyordu -> `live_bot_db`/`production_host` kapisi + salt-okunur baglanti. (3) **Replay:** naive timestamp yuzunden 3 saat eski veriyle karar veriyordu (duzeltildi); canli hibrit kurali yeni `--metar-mode hybrid` ile modellendi; bilgi-oncesi fiyat look-ahead'i engellendi. (4) **Erken giris kiyasi** (23-27 Eki + 8-22 Kas, 17 Kas kirli fiyat gunu HARIC, gercek Polymarket sonucu, $2 stake): erken ACIK (canli kural) **197 bet -$132.24**, erken KAPALI (yalnizca 1-dusus kilidi) **37 bet +$14.67**; fark bilgi-oncesi fiyat (iyimser) varsayiminda da ayni yonde (+$225.88 vs +$391.85). Canli: giris <=0.50 155 bet **-$44.66**, >0.50 40 bet **+$11.84**. Erken girisi kapatmak canli davranisi degistirir -> **KARAR KULLANICIDA, kod degismedi.** Rapor: `reports/replay_metar_erken_giris_20261123.md`.
 - **2026-11-20 (test altyapisi duzeltmeleri):** Tam suite 5 kirik veriyordu. (1) `test_liveliness_audit` + `test_resolution_rules` hala repo `data/bot.db`'yi ariyordu (canli DB 2026-11-18'de `C:\JUNBO data`'ya tasindi) -> `utils.db_paths.get_db_path()`. (2) `backtest/run.py` import aninda `load_data(12)` calistiriyordu -> `main()` + `__main__` guard. (3) `data/backtest_results/*.py` import taramasina giriyordu -> `data` dizini haric. (4) `backtest/engine.py` orderbook okumasi canli yazici kilidi altinda 30 sn'de dusuyordu -> `busy_timeout` 120 sn. (5) `replay/archive.py` DB yollari sabit `REPO_ROOT/data`'ydi (canli DB tasindi) -> call-time `get_data_dir()`; `replay/main.py` `get_db_path()`. (6) `backtest/run_combos.py` import aninda `load_data` calistiriyordu + kullanilmayan degisken + mukerrer print -> `main()` guard + temizlik.
 - **2026-11-20 (terminal pencere flasi):** Kullanici "surekli terminal acilip kapaniyor" bildirdi. WinEvent kancasi + process izleme ile olculdu: kaynak `JunboWARP` gorevi (her 5 dk, Interactive, `powershell -WindowStyle Hidden -File warp_health.ps1`). Windows 11'de varsayilan terminal Windows Terminal oldugu icin `-WindowStyle Hidden` yeni bir terminal sekmesi aciyor ve script bitene kadar (~40 sn) acik kaliyor; saatlik `JunboForecastRunnerWatchdog` da ayni. Cozum: yeni `scripts/run_hidden.py` (`pythonw.exe` + `CREATE_NO_WINDOW` sarmalayici); uc gorevin action'i (`JunboWARP`, `JunboForecastRunnerWatchdog`, `JunboForecastRunner`) `pythonw.exe run_hidden.py powershell.exe ...` yapildi; `JunboForecastRunner` calisirken yalnizca tanim degistirildi, yeni tanim bir sonraki baslatmada devreye girer. Dogrulama: `JunboWARP` ve `JunboForecastRunnerWatchdog` elle tetiklendi -> `LastTaskResult=0`, WinEvent izlemede **0 pencere olayi**. Yedek/geri donus: `C:\JUNBO data\state\JunboWARP_task_backup_20261120.xml` ve `JunboForecastRunnerWatchdog_task_backup_20261120.xml` -> `Register-ScheduledTask -Xml (Get-Content <yedek>) -TaskName <ad> -Force`.
 - **2026-11-18 aksam (denetim duzeltmeleri):** (1) **Yedek C:'yi dolduracakti:** `backup_databases.py` 6 saatte bir 4 DB'yi (~7 GB) kopyalayip 90 gun sakliyordu (~28 GB/gun, C: ~5 gunde dolacakti). Artik UTC gununde 1 kez (marker `.last_backup_databases_run`) + prefix basina son 7 kopya; bot.db'nin 30 gunluk dogrulanmis serisi `db_backup.py` `bot_scheduled`'da. (2) `.env` `JUNBO_HEAT_DB`/`HEAT_MAIN_DB`/`OM_CACHE_DB` hala D:'yi gosteriyordu (runner tasindiktan sonra donmus kopya) -> C:. (3) **CLOB REST yedegi hic calismamisti:** `get_session()` commit'i ORM nesnelerini expire ediyor, `raw_data` session disinda okununca `DetachedInstanceError` yutuluyordu -> 0 HTTP istegi, `token_id='0'` arsiv satiri 0. Duzeltildi (kolon sorgusu + duz kopya); arsiv toplu tek transaction; WS arsiv yazimi `asyncio.to_thread`; `collect_orderbook.py` 100 satirda bir commit (tek transaction kilidi 3-19 dk tutuyordu). (4) **WeatherNext 3+ gun cekilmedi:** runner kapisi `utcHour % 12` tur basinda sabitti, uzun/kayan turlar 00/12'yi atliyordu; ayni sorun Open-Meteo (6s) ve IEM (24s). Artik UTC slot kapisi (`forecast_runner/windows-runner/gates.mjs`, durum `state\gated_slots_utc.json`). (5) `JunboWARP` gorevi `scripts\warp_health.ps1`'e yonlendirildi (5 dk, proxy yoklamasi + reconnect, mod degismez); eski `start_warp.ps1` `mode warp` ile SOCKS'u kapatiyordu. (6) `bot_watchdog` uzun data-watchdog tick'ini artik "stale" saymaz (gorev Running ise 40 dk'ya kadar normal). (7) `backtest/*.py` ve 2 testteki D: varsayilanlari `utils/db_paths`'e baglandi. Not: `gamma-api` HTTP 421 makine hosts sabitlemesinden; bot `utils/poly_dns.py` ile asiyor.

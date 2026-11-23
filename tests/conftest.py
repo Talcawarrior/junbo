@@ -162,6 +162,59 @@ def _rebind_module_get_session():
     yield
 
 
+# ── Uretim makinesi kapisi (2026-11-23) ───────────────────────────────────
+# Bazi testler KODU degil uretim makinesinin DURUMUNU dogrular (canli bot.db
+# icerigi, WARP proxy). Bu testler baska ortamda (Cowork Linux VM, CI) "no such
+# table" / "connection refused" ile kiriliyordu: .env JUNBO_DATA_DIR orada yok
+# ve sqlite3.connect() rw modda BOS bir bot.db URETIYORDU (yanlis yolda sahte
+# DB). Kapi: canli bot.db VAR + `bets` tablosu iceriyorsa test KOSAR (uretimde
+# hata = gercek hata, atlanmaz); yoksa acik nedenle atlanir. Erisim salt-okunur.
+_PRODUCTION_SKIP_REASON = (
+    "uretim verisi yok (canli bot.db + bets tablosu bulunamadi): bu test uretim makinesinin durumunu dogrular"
+)
+
+
+def _live_bot_db_path() -> str | None:
+    """Canli bot.db yolu (salt-okunur yoklanir); yoksa / test DB'si ise None."""
+    import sqlite3
+
+    from utils.db_paths import get_db_path
+
+    path = get_db_path()
+    if not path or not os.path.isfile(path) or os.path.getsize(path) == 0:
+        return None
+    if _TMP_DB_PATH and os.path.abspath(path) == os.path.abspath(_TMP_DB_PATH):
+        return None  # testlerin gecici DB'si uretim verisi DEGILDIR
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=30)
+        try:
+            found = con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bets'").fetchone()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return None
+    return path if found else None
+
+
+@pytest.fixture
+def live_bot_db():
+    """Canli bot.db yolu — YALNIZCA salt-okunur (`mode=ro`) acilmali."""
+    path = _live_bot_db_path()
+    if path is None:
+        pytest.skip(_PRODUCTION_SKIP_REASON)
+    return path
+
+
+@pytest.fixture
+def production_host(live_bot_db):
+    """Uretim makinesi kapisi: canli altyapi testleri (WARP proxy vb.) icin.
+
+    Uretim makinesinde test HER ZAMAN kosar — proxy kopuksa FAIL eder
+    (gercek ariza sinyali, 2026-11-18 WARP kesintisi boyle yakalandi).
+    """
+    return live_bot_db
+
+
 # ── Shared market factory ─────────────────────────────────────────────────
 
 _FAKE_MARKET_SEQ = [0]

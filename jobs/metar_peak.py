@@ -21,6 +21,7 @@ from typing import Optional
 from database.db import get_session
 from database.models import Bet, MetarObservation, Portfolio, WeatherMarket
 from config.settings import bot_config
+from scrapers.metar import polymarket_round
 
 logger = logging.getLogger("SCHEDULER_METAR_PEAK")
 
@@ -40,6 +41,15 @@ MIN_PEAK_HISTORY_DAYS = 3
 # (13-19 Agu): VHHH %20, ZGSZ %29, KBKF/KATL %43, KSEA/KSFO/NZWN %57, diger
 # 35 sehir %100. Ileride tekrar kisitlamak istenirse bu set doldurulur.
 METAR_PEAK_BLACKLIST: set[str] = set()
+
+# 2026-11-22: kara listeden FARKLI kavram — bu sehirlerin Polymarket cozum
+# kaynagi METAR DEGIL, dolayisiyla METAR'dan "kazanan bucket" bilinemez.
+# Hong Kong: "Hong Kong Observatory ... Absolute Daily Max" (market
+# description). VHHH (Chek Lap Kok havalimani) METAR'i cozum degerini
+# vermez: canli METAR-peak HK 30 bet / 6 kazanc / -$23.89; 15 Kas'ta
+# VHHH max 26C iken 26C bet kaybetti. HKO veri kaynagi eklenince bu set
+# bosaltilir (PolyWeather hko_obs_sources.py referans alinabilir).
+NON_METAR_RESOLUTION: dict[str, str] = {"VHHH": "Hong Kong Observatory"}
 
 # Son tam arsiv toplama zamani (time.monotonic) — metar_loop 10 dk'ya inince
 # aviationweather.gov'u yormamak icin arsiv 25 dk'da bir toplanir.
@@ -249,7 +259,7 @@ def _close_wrong_bucket_bets(session, city_code: str, target_date, winning_bucke
             continue
         if wm.threshold is None:
             continue
-        if int(float(wm.threshold) + 0.5) == winning_bucket:
+        if polymarket_round(float(wm.threshold)) == winning_bucket:
             continue  # kazanan bucket TUTULUR
         # 2026-11-18: satis fiyati = canli CLOB BID (gercekte satilabilecek fiyat).
         # Eskiden DB yes_price (bayat olabilir, mid/last) kullaniliyordu ->
@@ -587,6 +597,9 @@ def run_metar_peak_bets() -> int:
             # 2026-08-21: kara liste KALDIRILDI (METAR_PEAK_BLACKLIST bos) —
             # tum sehirler adaydir. (2026-08-20'de VHHH/ZGSZ/KBKF/KATL/KSEA/
             # KSFO/NZWN burada atlaniyordu; kullanici riski kabul etti.)
+            # 2026-11-22: cozumu METAR olmayan sehir (HK=HKO) -> METAR-peak yok.
+            if str(m.city_code or "").upper() in NON_METAR_RESOLUTION:
+                continue
             if _existing_metar_bet(session, str(m.id)):
                 continue
             day = m.target_date.date().isoformat() if m.target_date else today
@@ -812,7 +825,7 @@ def run_metar_peak_bets() -> int:
                         and mm.target_date is not None
                         and mm.target_date.date().isoformat() == day
                         and mm.threshold is not None
-                        and int(float(mm.threshold) + 0.5) == int(cur_max + 0.5)
+                        and polymarket_round(float(mm.threshold)) == polymarket_round(cur_max)
                     ),
                     None,
                 )
@@ -830,7 +843,7 @@ def run_metar_peak_bets() -> int:
             # degistiginde kapatma yeniden cagrilir (last_closed guard).
             cur_max = max(t for _, t in day_rows)
             winner_val = float(cur_max) if cur_max > peak else peak
-            winner_bucket = int(winner_val + 0.5) if winner_val >= 0 else int(winner_val - 0.5)
+            winner_bucket = polymarket_round(winner_val)
             key = (m.city_code, day)
             # 2026-08-19 AKTIVITE: bulunan peak sehir basina 1 kez kaydedilir
             # (market basina loglanirsa 9 marketli sehir 9 kere yazar).
@@ -852,7 +865,7 @@ def run_metar_peak_bets() -> int:
             # half-up (2026-08-18 audit): US sehirlerinde esikler float C'dir
             # (F'den donusturulur) — int() truncate yanlis bucket uretir;
             # Austin 35.9C marketi bucket 36'ya karsilik gelir.
-            if int(float(m.threshold) + 0.5) != winner_bucket:
+            if polymarket_round(float(m.threshold)) != winner_bucket:
                 continue  # bu market kazanan bucket degil — diger marketler denenir
             matched_markets.add(key)
             # 2026-08-21 kullanici karari: gunluk METAR-peak cap. Cap dolunca
@@ -899,7 +912,7 @@ def run_metar_peak_bets() -> int:
                 )
                 .all()
             ]
-            if any(t is not None and int(float(t) + 0.5) == bucket for t in bet_thr):
+            if any(t is not None and polymarket_round(float(t)) == bucket for t in bet_thr):
                 continue  # bu bucket'ta bet zaten acik — eksik market yok
             any_thr = [
                 r[0]
@@ -911,7 +924,7 @@ def run_metar_peak_bets() -> int:
                 )
                 .all()
             ]
-            if any(t is not None and int(float(t) + 0.5) == bucket for t in any_thr):
+            if any(t is not None and polymarket_round(float(t)) == bucket for t in any_thr):
                 continue  # market var ama RANGE/temperature_max degil — tasarim geregi atlanir
             logger.warning(
                 "metar_peak: KILITLI BUCKET MARKETI YOK %s %sC — Polyde yeni acildiysa bir sonraki dongude yakalanir",

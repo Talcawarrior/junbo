@@ -102,6 +102,10 @@ class TestPolymarketProxyConfig:
 
 
 @pytest.mark.skipif(os.environ.get("NO_NETWORK") == "1", reason="NO_NETWORK=1")
+# 2026-11-23: canli WARP proxy'si yalnizca uretim makinesinde vardir. Kapi
+# `production_host` (conftest): uretimde HER ZAMAN kosar (proxy kopuksa FAIL =
+# gercek ariza); uretim verisi olmayan ortamda (Cowork/CI) acik nedenle atlanir.
+@pytest.mark.usefixtures("production_host")
 class TestPolymarketProxyLive:
     def test_gamma_api_via_proxy(self):
         """Proxy ile Polymarket Gamma API erisilebilir (2026-08-16 bug)."""

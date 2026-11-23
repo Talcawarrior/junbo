@@ -185,16 +185,20 @@ class TestBlacklistRemoved:
         assert mp.METAR_PEAK_BLACKLIST == set()
 
     def test_eski_kara_liste_sehri_bet_acilir(self, market_factory):
-        """2026-08-20'de VHHH kara listedeydi ve bet acilmazdi; kara liste
-        kaldirildigi icin VHHH artik normal akisla _open_metar_bet'e gider."""
+        """2026-08-20'de ZGSZ kara listedeydi ve bet acilmazdi; kara liste
+        kaldirildigi icin ZGSZ artik normal akisla _open_metar_bet'e gider.
+
+        2026-11-22: ornek sehir VHHH -> ZGSZ. VHHH (Hong Kong) cozumu METAR
+        degil HKO oldugu icin NON_METAR_RESOLUTION ile ayrica atlanir
+        (bkz. TestNonMetarResolution); kara liste kavrami degismedi."""
         import time as _time
 
         from unittest.mock import patch
 
         tgt = datetime.now(timezone.utc).replace(tzinfo=None)
         m_hk = market_factory(
-            city="Hong Kong",
-            city_code="VHHH",
+            city="Shenzhen",
+            city_code="ZGSZ",
             metric="temperature_max",
             market_type="RANGE",
             threshold=30.0,
@@ -221,7 +225,7 @@ class TestBlacklistRemoved:
             mp.run_metar_peak_bets()
 
         assert called_ids == [m_hk], f"kara liste kaldirildi -> bet acilmali: {called_ids}"
-        assert "VHHH" not in mp.METAR_PEAK_BLACKLIST
+        assert "ZGSZ" not in mp.METAR_PEAK_BLACKLIST
 
 
 class TestMetarPeakStaleRefresh:
@@ -722,3 +726,57 @@ class TestMetarPeakAccounting:
             )
             # Fee gercekten kasadan cikti mi (yalnizca stake olsaydi 998.00 kalirdi)?
             assert cash_after < cash_before - float(bet.amount) + 1e-9, "entry_fee kasadan dusulmemis"
+
+
+class TestNonMetarResolution:
+    """2026-11-22: cozum kaynagi METAR olmayan sehirde (Hong Kong = Hong Kong
+    Observatory) METAR-peak bet ACILMAZ. Kara listeden farkli: tutma orani
+    degil, veri kaynagi uyumsuzlugu."""
+
+    def test_hong_kong_metar_disi(self):
+        assert "VHHH" in mp.NON_METAR_RESOLUTION
+
+    def test_hong_kong_bet_acilmaz_diger_sehir_acilir(self, market_factory):
+        import time as _time
+
+        from unittest.mock import patch
+
+        tgt = datetime.now(timezone.utc).replace(tzinfo=None)
+        m_hk = market_factory(
+            city="Hong Kong",
+            city_code="VHHH",
+            metric="temperature_max",
+            market_type="RANGE",
+            threshold=30.0,
+            target_date=tgt,
+            yes_price=0.30,
+        )
+        m_sz = market_factory(
+            city="Shenzhen",
+            city_code="ZGSZ",
+            metric="temperature_max",
+            market_type="RANGE",
+            threshold=30.0,
+            target_date=tgt,
+            yes_price=0.30,
+        )
+        called_ids: list[str] = []
+
+        def _fake_bet(*args):
+            called_ids.append(str(args[1].id))
+            return None
+
+        with (
+            patch(
+                "scrapers.metar.fetch_metar_day",
+                return_value=[(int(_time.time()) - 120, 30.0), (int(_time.time()) - 60, 30.0)],
+            ),
+            patch("scrapers.metar.archive_metar_observations", return_value=0),
+            patch.object(mp, "_avg_peak_hour", return_value=0.0),
+            patch.object(mp, "_open_metar_bet", side_effect=_fake_bet),
+            patch.object(mp, "_close_wrong_bucket_bets", return_value=0),
+        ):
+            mp.run_metar_peak_bets()
+
+        assert m_hk not in called_ids, "HK cozumu HKO -> METAR-peak bet acilmamali"
+        assert m_sz in called_ids

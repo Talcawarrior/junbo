@@ -238,6 +238,8 @@ python -m pytest tests/test_accounting.py tests/test_settler_polymarket.py tests
 
 # 6) FULL suite (push oncesi)
 python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q
+# 2026-11-23 gercek: 837 passed, 7 skipped, 0 failed (569 sn; Cowork METAR kurali +23, hibrit replay +14,
+#   uretim-makinesi kapisi). Ayni testler canli veri olmayan ortamda: kirik 0, 10 acik nedenli skip.
 # 2026-11-18 gercek: 784 passed, 6 skipped, 0 failed (523 sn; spread kapatma + path + proxy retry testleri dahil).
 # 2026-11-18 aksam gercek: 797 passed, 8 skipped, 2 failed (892 sn; +17 denetim testi). 2 hata canli
 #   TestPolymarketProxyLive: WARP SOCKS o anda kopuktu; WARP toparlaninca sinif tekrar 3/3 passed.
@@ -353,6 +355,11 @@ Hangi dosya hangi kurali korur:
 
 | Hata | Cozum |
 |---|---|
+| **Polymarket METAR cozum kurali degisti, bot eski kuralla okuyordu (2026-11-22/23, Cowork yamasi)** | Polymarket 2026-10-23'ten itibaren (Panama 10 Kas) HK disindaki tum sehirleri **aviationweather.gov RUTIN METAR** ile cozer: SPECI sayilmaz; deger RMK **T grubu** (onda bir, `T01390133` -> 13.9C), yoksa govdedeki tam sayi (`M11/M17` -> -11); yuvarlama **tam yarim yukari** `floor(x+0.5)` (-8.5 -> -8). Bot SPECI'yi sayiyordu (15 gunde KHOU/KLGA max, FACT/KLAX/RPLL/SBGR min farkli cikti) ve `int(x+0.5)` / simetrik `int(x-0.5)` negatif yarimlarda yanlis bucket veriyordu. Cozum: `scrapers/metar.py` `polymarket_round`, `_parse_metar_temp`, `_is_speci` (fetch'te SPECI atilir); METAR-peak, spread ve replay ayni `polymarket_round`'u kullanir; Panama `MPTO` -> `MPMG` (market metni); Hong Kong HKO ile cozuldugu icin `jobs/metar_peak.py` `NON_METAR_RESOLUTION={"VHHH": ...}` — HK'de METAR-peak bet ACILMAZ (canli HK 30 bet / 6 kazanc / -$23.89). Bu kara liste DEGILDIR; `METAR_PEAK_BLACKLIST` bos kalir. Test: `tests/test_polymarket_metar_rule.py` + `test_metar_peak_*` (+23). Not: gecis gunu arsivde restart oncesi SPECI satirlari kalabilir (`_merged_day_rows`), ertesi gun temizdir. |
+| **Uretim makinesini dogrulayan testler baska ortamda kiriliyordu + rw sqlite BOS DB uretiyordu (2026-11-23)** | Cowork VM'inde (Linux) 9 test "no such table: bets" / "connection refused" ile kirildi; Cowork bunlari "ortama ozgu, onceden de kirik" diye gecmisti. Gercek neden: `test_backtest_engine` (4), `test_resolution_rules` (1), `test_settlement_gate` (2) canli `bot.db`'yi, `TestPolymarketProxyLive` (2) canli WARP proxy'sini dogrular ama bunu beyan etmez; `.env` `JUNBO_DATA_DIR=C:\JUNBO data` baska makinede yoktur ve `sqlite3.connect(yol)` rw modda o yolda **bos bot.db olusturuyordu** (olculdu: bos dizinde 0 baytlik `bot.db` dogdu). Cozum: `tests/conftest.py` `live_bot_db` / `production_host` fixture'lari — canli `bot.db` + `bets` tablosu salt-okunur yoklanir; varsa test KOSAR (uretimde proxy kopuksa FAIL = gercek ariza, atlanmaz), yoksa "uretim verisi yok" nedeniyle atlanir; tum baglantilar `mode=ro`. Dogrulama: uretimde 31/31 passed; bos veri dizini + olu proxy simulasyonunda 0 failed, 10 acik nedenli skip, sahte DB dosyasi olusmadi. |
+| **`test_placed_is_only_open` spread onekini ZORUNLU tutuyordu (2026-11-23)** | Bu makinedeki tek kirik test. 2026-11-18'den beri METAR-only (`SPREAD_ENABLED=false`); tek acik METAR betiyle "Expected spread prefix, found: ['metar_']" veriyordu (testin varsayimi bayatti, kod dogru). Cozum: her acik pozisyon BILINEN bir stratejiye ait olmali (`spread`/`metar_`); bilinmeyen onek = bug. |
+| **Replay her karari 3 saat ESKI veriyle veriyordu (2026-11-23)** | `replay/scheduler.py` tick epoch'unu naive `datetime.timestamp()` ile aliyordu; Windows bunu makine saat dilimiyle (UTC+3) yorumlar -> 12:00 UTC tick'i 09:00 UTC verisini goruyor, UTC gununun son 3 saati hic gorulmuyordu (arsiv tarafi 2026-08-23'te UTC'ye cevrilmis, scheduler unutulmustu). Cozum: `_utc_ts()` (naive = UTC). Test: `test_replay_hybrid.py::test_utc_ts_ignores_machine_timezone`. |
+| **Replay METAR bacagi canli hibriti modellemiyordu + bilgi-oncesi fiyat look-ahead (2026-11-23)** | Eski `lock` modu yalnizca tek kilit girisi yapiyordu (erken giris, aktar zinciri, bayat METAR korumasi, ortalama peak saati YOK) -> "erken giris acik/kapali" kiyasi yapilamiyordu. Yeni `--metar-mode hybrid` canli `run_metar_peak_bets` kuralini uygular (`--no-early`, `--early-max-price`, `--settle polymarket`, `--include-non-metar`). Ilk kosuda canli ayna +$240 / canli -$15 cikti: replay yeni METAR'i gordugu anda piyasanin O GOZLEMI FIYATLAMADAN onceki fiyatindan dolum yapiyordu (Munih 20:30 @0.095, canli 21:01 @0.870). Cozum: fiyat, karar bilgisinin (son gozlemin `recorded_at` ani) SONRASINDA kaydedilmis olmali; METAR da `recorded_at`'ten once gorulmez. Ayrica fixed modda METAR stake sabit $3'tu (canli `METAR_STAKE_USD`=$2) -> canli config okunur. Test: `tests/test_replay_hybrid.py` (14). |
 | **Zamanlanmis gorevler gorunur terminal penceresi aciyordu (2026-11-20)** | Kullanici: "surekli terminal acilip kapaniyor". WinEvent kancasi (`SetWinEventHook`, EVENT_OBJECT_SHOW) + process izleme ile olculdu: `JunboWARP` (5 dk, Interactive) `powershell -WindowStyle Hidden -File warp_health.ps1` calistiriyor; Windows 11'de varsayilan terminal Windows Terminal oldugu icin her tetiklemede gorunur sekme aciliyor ve script bitene kadar (~40 sn) acik kaliyor (ayni sorun saatlik `JunboForecastRunnerWatchdog`'da). `-WindowStyle Hidden` yetersiz. Cozum: `scripts/run_hidden.py` (pythonw.exe + `CREATE_NO_WINDOW`) sarmalayici; uc gorevin action'i (`JunboWARP`, `JunboForecastRunnerWatchdog`, `JunboForecastRunner`) `pythonw.exe "...\scripts\run_hidden.py" powershell.exe ...` yapildi; `JunboForecastRunner` calisirken yalnizca tanim degistirildi (calisan runner durdurulmadi), yeni tanim bir sonraki baslatmada devreye girer. Dogrulama: `JunboWARP` ve `JunboForecastRunnerWatchdog` elle tetiklendi -> `LastTaskResult=0`, izlemede **0 pencere olayi**. Geri donus: `C:\JUNBO data\state\*_task_backup_20261120.xml` -> `Register-ScheduledTask -Xml (Get-Content <yedek>) -TaskName <ad> -Force`. |
 | **Tam suite 5 kirik: DB yolu, import yan etkisi, orderbook kilidi (2026-11-20)** | (1) `tests/test_liveliness_audit` + `tests/test_resolution_rules` hala repo `data/bot.db`'yi ariyordu; canli DB 2026-11-18'de `C:\JUNBO data\bot.db`'ye tasindi -> iki test artik `utils.db_paths.get_db_path()` kullanir. (2) `backtest/run.py` modul govdesi import aninda `load_data(12)` calistiriyordu (DB acma/kilit); govde `main()` icine alindi + `if __name__ == "__main__"`. (3) `data/backtest_results/*.py` (uretilmis rapor scriptleri) `test_import_all_modules` taramasina girip DB aciyordu -> test `data` dizinini atlar. (4) `backtest/engine.py` orderbook okumasi canli toplayicinin DELETE-journal kilidi altinda 30 sn'de `database is locked` veriyordu -> `timeout`/`busy_timeout` 120 sn. (5) `replay/archive.py` DB yollari `REPO_ROOT/data` sabitiydi (canli DB `C:\JUNBO data`'ya tasindi) -> `_path()` call-time `get_data_dir()`; `replay/main.py` fidelity artik `get_db_path()` kullanir. (6) `backtest/run_combos.py` import aninda `load_data(12)` calistiriyordu; ayrica kullanilmayan `best_cities` (F841) ve mukerrer `print` vardi -> `main()` guard + temizlik. Dogrulama: tam suite **801 passed, 6 skipped, 0 failed** (test_betting_idempotency + test_comprehensive ignore). |
 | **Yedekler C:'yi dolduracakti (2026-11-18)** | `scripts/backup_databases.py` her 6 saatte 4 DB'yi (~7 GB) kopyalayip 90 gun sakliyordu; veri + yedek C:'ye tasininca ~28 GB/gun -> ~5 gunde disk dolu. Cozum: UTC gununde 1 kosu (`RUN_MARKER` `.last_backup_databases_run`, `--force` ile ek kosu) + `KEEP_LAST_BY_PREFIX` (bot/orderbook/backtest/actuals son 7; db_backup.py dosyalarina dokunulmaz). `data_watchdog` BACKUP kontrolu marker yasina bakar (>26 sa). Test: `tests/test_backup_retention.py`. |
@@ -701,6 +708,21 @@ walk-forward gercek-status yoludur).
   bayragi eklendi (gercek bot fill'iyle capraz dogrulama). Detay ve sayilar:
   `reports/backtest_gercekci_2026-08-18.md`.
 
+### 12.10 Polymarket METAR Cozum Kurali (2026-10-23+, dogrulandi 2026-11-23)
+
+- **Kaynak:** aviationweather.gov ham METAR; yalnizca RUTIN gozlemler. Satiri `SPECI` ile
+  baslayan ozel gozlem SAYILMAZ (`scrapers/metar.py::_is_speci`, fetch aninda atilir).
+- **Deger:** RMK T grubu (onda bir derece); yoksa govdedeki tam sayi
+  (`_parse_metar_temp`).
+- **Yuvarlama:** tam yarim YUKARI = `floor(x + 0.5)` (16.5 -> 17, -8.5 -> -8, -1.7 -> -2).
+  TEK kaynak `scrapers.metar.polymarket_round`; `int(x+0.5)` veya simetrik `int(x-0.5)`
+  KULLANILMAZ (negatiflerde yanlis bucket).
+- **Istisna:** Hong Kong Hong Kong Observatory ile cozulur -> `NON_METAR_RESOLUTION`
+  (HK'de METAR-peak yok). Panama MPMG (Tocumen MPTO DEGIL).
+- **Backtest:** gecmis METAR arsivi 2026-11-22 oncesi SPECI'leri de icerir; replay
+  karsilastirmalarinda iki senaryo ayni veriyi gordugu icin kiyas adildir ama mutlak
+  sonuc kurala gore hafif sapabilir.
+
 ---
 
 ## 13. ARIZA SENARYOLARI: BIR SEY BOZULURSA NE OLUR / NE YAPILIR
@@ -935,6 +957,31 @@ Bir ariza ile karsilasildiginda once buraya bak, sonra gerekirse kod kanitlarini
 - **2026-11-10 (isim):** `heat_runner` -> `forecast_runner`; gorevler `JunboForecastRunner` / `JunboForecastRunnerWatchdog`; eski `JunboHeatRunner` gorevleri silindi. Python `heat/` paketi (HEAT MOS veri kaynagi adaptoru) ayni kaldi.
 - **Ponytail temizlik (2026-11-10):** `forecast_runner` 1003 -> 31 dosya; kullanilmayan Heat scriptleri `D:\JUNBO data\_eski\heat_runner_unused_20261110`'a tasindi; `scripts/catalog` -> `D:\JUNBO data\catalog` (`_aiwp_forward`/`_aiwp_extract`/`_aiwp_catalog_build.py` env/default guncellendi). Dev-only `node_modules` (975 MB) ve `.next` silindi; dashboard `out/`'tan servis ediliyor (rebuild: `npm install && npm run build`). Cache/eski log temizlendi; root debug scriptleri `scripts/archive/debug/`'e tasindi; 9 F401 duzeltildi. Dogrulama: quick_check **7/7**, hedefli testler **38/38**, dashboard canli (tum API 200; tek 404 favicon). Tam suite: **763 passed, 7 skipped**; tek canli proxy testi ilk kosuda ag/proxy flake'i verdi, tekrar kosuda **1/1 passed**.
 - **2026-11-10 (konsolidasyon 2):** `D:\JUNBO datasia\` ve `D:\JUNBO data\heat\` dizinleri tamamen silindi; gerekli HEAT DB'leri kokte: `tempmarket-edge.sqlite` (LIVE), `tempmarket-main.sqlite` (MAIN), `kardesler.db`; kucuk `state/`, `models/`, `inbox/`, `reports/` kokte. `forecast_runner/data` junction -> `D:\JUNBO data`. Backtest verileri (bot.db, backtest.db, backtest_prices.db, orderbook.db, actuals.db, poly_history.db, snapshots.db, archive, unified) korundu.
+
+### S23. Replay sonucu canliyla tutmuyor / kirli fiyat gunu (2026-11-23)
+
+- **Belirti:** hibrit replay'in "canli ayna" senaryosu ayni pencerede canli bottan cok farkli
+  PnL verir (ilk kosu: replay +$240, canli -$15).
+- **Neden 1 — bilgi-oncesi fiyat:** piyasa METAR'a saniyeler icinde tepki verir; gozlemden ONCE
+  kaydedilmis snapshot/ask ile dolum look-ahead'dir. Replay artik fiyatin son gozlemin
+  `recorded_at` anindan SONRA kaydedilmis olmasini sart kosar (`--pre-info-prices` yalnizca
+  duyarlilik icindir).
+- **Neden 2 — kirli fiyat gunu:** 2026-11-17 21:07 UTC restart sonrasi DB/snapshot fiyatlari
+  BAYATTI (Londra/Paris/Amsterdam/Munih 0.30-0.52 gorunurken gercek ask 1.00). Snapshot tabanli
+  her backtest o gun sahte ucuz girisler "kazanir" -> 2026-11-17 kiyas disi tutulur.
+- **Neden 3 — cap tahsisi:** gunluk 15'lik cap dolunca hangi sehrin bet aldigi isleme sirasina ve
+  zamanlamaya baglidir; canli botun kesinti/blok gunleri (11-14 Kas) cap'i bos birakir. Ayni
+  markete giren betlerde replay-canli giris farki medyan 0.000 / zaman farki +1 dk (dogrulandi).
+- **Yapilacak:** mutlak PnL yerine senaryo FARKINA bak; iki fiyat varsayimiyla da kostur.
+  Rapor: `reports/replay_metar_erken_giris_20261123.md`.
+
+### S24. Testler baska ortamda (Cowork/CI) "no such table" / "connection refused" ile kiriliyor (2026-11-23)
+
+- **Neden:** canli `bot.db` veya WARP proxy'yi dogrulayan testler uretim makinesine baglidir.
+- **Davranis:** `tests/conftest.py` `live_bot_db` / `production_host` — uretim verisi yoksa test
+  "uretim verisi yok" nedeniyle ATLANIR; uretim makinesinde her zaman kosar ve ariza FAIL verir.
+- **Kural:** canli DB'yi okuyan yeni testler bu fixture'i kullanir ve DB'yi `mode=ro` acar
+  (`sqlite3.connect(yol)` rw modda yol yoksa bos DB dosyasi uretir).
 
 ---
 

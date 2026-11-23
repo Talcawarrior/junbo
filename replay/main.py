@@ -35,7 +35,7 @@ from datetime import datetime, timedelta
 from replay.archive import Archive
 from replay.clock import ReplayClock
 from replay.price_index import PriceIndex
-from replay.scheduler import ReplayScheduler, RunResult
+from replay.scheduler import METAR_MODES, SETTLE_SOURCES, ReplayScheduler, RunResult
 from replay.seeding import temp_db
 
 #: Fixed stake modunda kullanilan canli degerler.
@@ -71,19 +71,25 @@ def _parse_window(text: str) -> tuple[datetime, datetime]:
 def _apply_stake_mode(mode: str, bankroll: float) -> float:
     """Stake modunu canli config'e uygula; secilen stake degerini dondur.
 
-    * ``fixed``    - canli degerler (spread $2, METAR $3).
+    * ``fixed``    - canli degerler (spread $2, METAR = canli
+      `bot_config.strategy.metar_stake_usd`; okunamazsa $3).
     * ``compound`` - bankroll * 0.03.
 
     NOT: yalnizca `spread_stake_usd` ve `jobs.metar_peak.METAR_STAKE`
     degistirilir. `metar_stake_usd` BILEREK dokunulmaz; caller bunlari geri
     almakla yukumludur (bkz. `_snapshot_stakes` / `_restore_stakes`).
+
+    2026-11-23: fixed METAR stake sabit $3'tu; canli stake .env
+    METAR_STAKE_USD (su an $2) -> replay PnL'i canliyla kiyaslanamiyordu
+    ("canli degerler" sozlesmesine aykiri drift). Artik canli config okunur.
     """
     from config.settings import bot_config
     import jobs.metar_peak as mp
 
     if mode == "fixed":
         stake = SPREAD_FIXED_STAKE
-        mp.METAR_STAKE = METAR_FIXED_STAKE
+        live_metar = getattr(bot_config.strategy, "metar_stake_usd", None)
+        mp.METAR_STAKE = float(live_metar) if live_metar else METAR_FIXED_STAKE
     elif mode == "compound":
         stake = float(bankroll) * COMPOUND_RATE
         mp.METAR_STAKE = stake
@@ -144,6 +150,30 @@ def _fmt_money(value: float) -> str:
     return f"${value:+.2f}" if value < 0 else f"$+{value:.2f}" if value > 0 else "$+0.00"
 
 
+def _breakdown_lines(result: RunResult) -> list[str]:
+    """Tetik / kapanis / giris fiyati kirilimi (2026-11-23, erken-vs-kilit kiyasi)."""
+    if not result.bets:
+        return []
+    groups: dict[str, list] = {}
+    for b in result.bets:
+        band = "giris<=0.50" if b.entry_price <= 0.50 else "giris>0.50"
+        for key in (f"tetik={b.open_trigger}", f"kapanis={b.close_kind}", band):
+            groups.setdefault(key, []).append(b)
+    lines = [
+        "## Kirilim",
+        "",
+        "| Grup | Bet | Kazanan | Isabet | PnL |",
+        "|------|-----|---------|--------|-----|",
+    ]
+    for key in sorted(groups):
+        bets = groups[key]
+        won = sum(1 for b in bets if b.won)
+        pnl = sum(b.realized_pnl for b in bets)
+        lines.append(f"| {key} | {len(bets)} | {won} | {won / len(bets) * 100:.0f}% | {_fmt_money(pnl)} |")
+    lines.append("")
+    return lines
+
+
 def _write_rapor(path: str, start: datetime, end: datetime, result: RunResult, bankroll: float) -> None:
     days = []
     day = start
@@ -183,6 +213,9 @@ def _write_rapor(path: str, start: datetime, end: datetime, result: RunResult, b
         f"- Baslangic bankroll: ${bankroll:.2f}",
         f"- Bitis nakit: ${bankroll + totals:.2f}",
         "",
+    ]
+    lines += _breakdown_lines(result)
+    lines += [
         "## Bet Detaylari (ilk 50)",
         "",
     ]
@@ -223,7 +256,7 @@ def _write_ledger(path: str, result: RunResult) -> None:
                     b.bucket,
                     b.close_kind,
                     b.closed_at.strftime("%Y-%m-%d %H:%M:%S") if b.closed_at else "",
-                    "",
+                    "" if b.close_price is None else b.close_price,
                     "YES" if b.won else "NO",
                     b.realized_pnl,
                     b.entry_fee,
@@ -319,6 +352,36 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--allow-price-after", action="store_true", help="fiyat yoksa SONRAKI ilk fiyati kullan (look-ahead riski)"
     )
+    # 2026-11-23: canli METAR-peak hibrit kurali (erken giris + kilit + aktar)
+    p.add_argument(
+        "--metar-mode",
+        default="lock",
+        choices=METAR_MODES,
+        help="lock: eski tek-kilit girisi; hybrid: canli run_metar_peak_bets kurali (erken+kilit+aktar)",
+    )
+    p.add_argument("--no-early", action="store_true", help="hybrid: ERKEN girisi kapat (yalnizca 1-dusus kilidi)")
+    p.add_argument(
+        "--early-max-price",
+        type=float,
+        default=None,
+        help="hybrid: erken giris fiyat esigi (varsayilan canli EARLY_MAX_PRICE)",
+    )
+    p.add_argument(
+        "--settle",
+        default="actuals",
+        choices=SETTLE_SOURCES,
+        help="actuals: actuals.db tmax; polymarket: GERCEK Polymarket sonucu (raw_data > canli bet > arsiv METAR)",
+    )
+    p.add_argument(
+        "--include-non-metar",
+        action="store_true",
+        help="hybrid: cozumu METAR olmayan sehirleri (NON_METAR_RESOLUTION, orn. HK) dahil et",
+    )
+    p.add_argument(
+        "--pre-info-prices",
+        action="store_true",
+        help="hybrid DUYARLILIK: gozlemden ONCE kaydedilmis fiyatla dolum (look-ahead, iyimser)",
+    )
     return p
 
 
@@ -345,6 +408,12 @@ def main(argv=None) -> int:
                     strategy=args.strategy,
                     max_cities=args.spread_max_cities,
                     allow_price_after=args.allow_price_after,
+                    metar_mode=args.metar_mode,
+                    metar_early=not args.no_early,
+                    early_max_price=args.early_max_price,
+                    settle=args.settle,
+                    include_non_metar=args.include_non_metar,
+                    info_prices=not args.pre_info_prices,
                 )
                 result = scheduler.run()
                 _write_outputs(args.out_dir, mode, start, end, result, args)

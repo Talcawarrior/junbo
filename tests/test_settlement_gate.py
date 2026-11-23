@@ -14,18 +14,24 @@ import sqlite3
 from collections import defaultdict
 from pathlib import Path
 
-from utils.db_paths import get_data_dir, get_db_path  # noqa: E402
+from utils.db_paths import get_data_dir  # noqa: E402
 
 ROOT = Path(__file__).parent.parent
-BOT_DB = Path(get_db_path())  # 2026-11-18: D: sabit varsayilani kaldirildi
+# 2026-11-23: canli bot.db yolu `live_bot_db` fixture'indan gelir (conftest):
+# uretim verisi yoksa test acik nedenle atlanir; tum baglantilar salt-okunur
+# (eski rw `sqlite3.connect(yol)` yol yoksa BOS DB dosyasi uretiyordu).
 
 
-def _overlap_pairs():
+def _ro(path) -> sqlite3.Connection:
+    return sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=30)
+
+
+def _overlap_pairs(bot_db: str):
     """HEAT yerlesimi vs bizim topladigimiz deger (gercek capraz okuma)."""
-    con = sqlite3.connect(BOT_DB)
+    con = _ro(bot_db)
     cur = con.cursor()
     cur.execute("SELECT DISTINCT city, city_code FROM weather_markets WHERE city_code != ''")
-    c2c = {}
+    c2c: dict[str, str] = {}
     for c, ic in cur.fetchall():
         c2c.setdefault(ic, c)
     cur.execute(
@@ -33,7 +39,7 @@ def _overlap_pairs():
         "LEFT JOIN weather_markets m ON b.market_id = m.id "
         "WHERE b.status IN ('won','lost') AND b.outcome IS NOT NULL"
     )
-    ours = defaultdict(list)
+    ours: defaultdict[tuple[str, str], list[float]] = defaultdict(list)
     for city, tgt, outcome in cur.fetchall():
         try:
             t = json.loads(outcome).get("settlement_temp_c")
@@ -54,15 +60,15 @@ def _overlap_pairs():
         heat_db_path(),
     ]
     main_db = next((p for p in candidates if p and os.path.exists(p)), heat_db_path())
-    h = sqlite3.connect(main_db)
+    h = _ro(main_db)
     hc = h.cursor()
     hc.execute("SELECT id, icao FROM stations")
-    st2city = {}
+    st2city: dict[str, str] = {}
     for sid, icao in hc.fetchall():
         if sid and icao:
             st2city[str(sid).lower()] = c2c.get(str(icao).upper(), str(icao).upper())
     hc.execute("SELECT station_id, target_date, high_c FROM settlements WHERE high_c IS NOT NULL")
-    pairs = []
+    pairs: list[tuple[str | None, float, float]] = []
     for sid, day, hv in hc.fetchall():
         city = st2city.get(str(sid).lower())
         for o in ours.get((city, str(day)[:10]), []):
@@ -75,24 +81,26 @@ def _load():
     return json.loads((ROOT / "config" / "source_offsets.json").read_text(encoding="utf-8"))
 
 
-def test_offsets_file_covers_traded_cities():
+def test_offsets_file_covers_traded_cities(live_bot_db):
     data = _load()
     assert "cities" in data and len(data["cities"]) >= 40
-    con = sqlite3.connect(BOT_DB)
-    cur = con.cursor()
-    cur.execute("SELECT DISTINCT city FROM bets WHERE city IS NOT NULL")
-    traded = [r[0] for r in cur.fetchall()]
-    con.close()
+    con = _ro(live_bot_db)
+    try:
+        cur = con.cursor()
+        cur.execute("SELECT DISTINCT city FROM bets WHERE city IS NOT NULL")
+        traded = [r[0] for r in cur.fetchall()]
+    finally:
+        con.close()
     missing = [c for c in traded if c not in data["cities"]]
     # 2026-09-18: GERCEK kapsama sarti (onceki isinstance kontrolu bostu)
     assert not missing, f"offset tablosunda olmayan islem sehri: {missing}"
 
 
-def test_calibrated_agreement_above_floor():
+def test_calibrated_agreement_above_floor(live_bot_db):
     import statistics
 
     data = _load()
-    pairs = _overlap_pairs()
+    pairs = _overlap_pairs(live_bot_db)
     assert len(pairs) >= 20, f"olum icin yetersiz eslesme: {len(pairs)}"
     # GERCEK yeniden olcum: sehir medyan offsetleri dosyadakiyle tutarli mi?
     by_city = {}

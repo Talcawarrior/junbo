@@ -180,10 +180,11 @@ class TestEsikHalfUp:
         import jobs.metar_peak as mp
 
         src = inspect.getsource(mp.run_metar_peak_bets)
-        assert "int(float(m.threshold) + 0.5)" in src, "esik eslemesi half-up olmali"
-        assert "int(float(m.threshold))" not in src.replace("int(float(m.threshold) + 0.5)", ""), (
-            "truncate esleme kalmamali"
-        )
+        # 2026-11-22: tek kaynak scrapers.metar.polymarket_round (floor(x+0.5));
+        # int(x+0.5) negatif esiklerde yanlisti (-2 -> -1).
+        assert "polymarket_round(float(m.threshold))" in src, "esik eslemesi half-up olmali"
+        assert "int(float(m.threshold))" not in src, "truncate esleme kalmamali"
+        assert "int(float(m.threshold) + 0.5)" not in src, "eski int(x+0.5) kalmamali"
 
 
 class TestPaperMode:

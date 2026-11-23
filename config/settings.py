@@ -458,7 +458,9 @@ _CITY_ICAO_MAP = {
     "wuhan": "ZHHH",
     "lucknow": "VILK",
     "qingdao": "ZSQD",
-    "panama city": "MPTO",
+    # 2026-11-22: Polymarket Panama marketleri MPMG (Marcos A. Gelabert / Albrook)
+    # ile cozulur (market description); MPTO (Tocumen) YANLIS istasyondu.
+    "panama city": "MPMG",
 }
 
 

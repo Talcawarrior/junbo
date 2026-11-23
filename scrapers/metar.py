@@ -16,6 +16,8 @@ METAR gozlemleri 30 dk'da bir yayinlanir (obsTime epoch, temp Celsius).
 from __future__ import annotations
 
 import logging
+import math
+import re
 import ssl
 import threading
 import time
@@ -57,6 +59,54 @@ _SESSION.mount("https://", _SystemStoreAdapter())
 _CACHE: dict[tuple[str, str], list[tuple[int, float]]] = {}
 _CACHE_LOCK = threading.Lock()
 _CACHE_TTL = 25 * 60  # 25 dk (METAR 30dk guncellenir)
+
+
+# 2026-11-22: Polymarket cozum kurali (23 Eki 2026'dan itibaren tum METAR
+# sehirleri, Panama 10 Kas'tan itibaren; market description'indan):
+#   - Kaynak: aviationweather.gov ROUTINE gozlemleri; satiri SPECI ile baslayan
+#     ozel gozlem SAYILMAZ.
+#   - Deger: RMK icindeki T grubu (T01390133 -> 13.9C, onda bir hassasiyet);
+#     T grubu yoksa govdedeki tam sayi (18/12 -> 18C, M11/M17 -> -11C).
+#   - Yuvarlama: en yakin tam dereceye, TAM YARIM YUKARI (16.5 -> 17,
+#     -8.5 -> -8, -1.7 -> -2) yani floor(x + 0.5).
+_T_GROUP_RE = re.compile(r"\sT([01])(\d{3})([01])(\d{3})\b")
+_BODY_TEMP_RE = re.compile(r"\s(M?\d{2})/(M?\d{2})?(?=\s)")
+
+
+def polymarket_round(value: float) -> int:
+    """Polymarket bucket yuvarlamasi: tam yarim yukari (floor(x + 0.5)).
+
+    int(x + 0.5) negatiflerde YANLIS (-1.0 -> 0); simetrik int(x - 0.5) ise
+    -8.5'i -9 yapar (Polymarket: -8). Tek dogru formul floor(x + 0.5).
+    """
+    return int(math.floor(float(value) + 0.5))
+
+
+def _parse_metar_temp(raw_ob: str) -> Optional[float]:
+    """Ham METAR satirindan Polymarket kuralina gore sicaklik (C).
+
+    Once RMK T grubu (onda bir derece), yoksa govdedeki tam sayi.
+    Hicbiri yoksa None.
+    """
+    if not raw_ob:
+        return None
+    text = f" {raw_ob} "
+    m = _T_GROUP_RE.search(text)
+    if m:
+        sign = -1.0 if m.group(1) == "1" else 1.0
+        return sign * int(m.group(2)) / 10.0
+    b = _BODY_TEMP_RE.search(text)
+    if b:
+        tok = b.group(1)
+        return -float(tok[1:]) if tok.startswith("M") else float(tok)
+    return None
+
+
+def _is_speci(obs: dict) -> bool:
+    """SPECI (ozel) gozlem mi? Polymarket bunlari saymaz."""
+    if str(obs.get("metarType") or "").upper() == "SPECI":
+        return True
+    return str(obs.get("rawOb") or "").lstrip().upper().startswith("SPECI")
 
 
 def _cache_get(key):
@@ -116,9 +166,19 @@ def _fetch_metar(icao: str, hours: int = HISTORY_HOURS) -> list[tuple[int, float
         return None
     rows = []
     for m in data:
+        # 2026-11-22: Polymarket SPECI'yi saymaz (gun ici max/min yalnizca
+        # rutin gozlemlerden). SPECI dahil edilirse kilit/aktar yanlis
+        # bucket'a kayabilir (15 gunluk olcum: KHOU/KLGA max, FACT/KLAX/
+        # RPLL/SBGR min SPECI yuzunden cozumden farkli cikti).
+        if _is_speci(m):
+            continue
         obs = m.get("obsTime")
-        temp = m.get("temp")
-        if obs is None or temp is None:
+        if obs is None:
+            continue
+        temp = _parse_metar_temp(str(m.get("rawOb") or ""))
+        if temp is None:
+            temp = m.get("temp")
+        if temp is None:
             continue
         try:
             rows.append((int(obs), float(temp)))
@@ -247,8 +307,10 @@ def city_utc_offset(city_code: str, day: str, fallback_lon: Optional[float] = No
 
 
 def detect_peak(
-    day_rows: list[tuple[int, float]], min_local_hour: int = 13, utc_offset_hours: float = 0.0,
-    confirmation_minutes: int = 30
+    day_rows: list[tuple[int, float]],
+    min_local_hour: int = 13,
+    utc_offset_hours: float = 0.0,
+    confirmation_minutes: int = 30,
 ) -> tuple[Optional[float], bool]:
     """Gun icinde kumulatif max'i takip eder, zirve KILITLI mi doner.
 

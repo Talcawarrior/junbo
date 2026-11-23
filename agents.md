@@ -118,6 +118,8 @@ Bulunan her bug düzeltilip test edilmeli, sonra commit atılmalı.
 - Aktar: zirve asilirsa (cur_max > kilitli peak) eski bet kapatilir + yenisine acilir (zincir 22->23->24)
 - `MIN_ENTRY=0.05`, stake $3, SADECE `temperature_max` + `RANGE` (tam bucket)
 - **KARA LISTE KALDIRILDI (2026-08-21):** `METAR_PEAK_BLACKLIST` bos — TUM sehirlerde METAR-peak bet acilir (eski liste VHHH, ZGSZ, KBKF, KATL, KSEA, KSFO, NZWN %20-57 tutma oraniyla kullanici riski kabul etti; veri toplama + spread zaten devam ediyordu). Ileride tekrar kisitlamak icin set doldurulur
+- **POLYMARKET METAR KURALI (2026-11-23):** HK disi tum sehirler RUTIN METAR (SPECI sayilmaz) + RMK T grubu (onda bir) + `floor(x+0.5)` ile cozulur; tek yuvarlama `scrapers.metar.polymarket_round`. Hong Kong HKO ile cozuldugu icin `NON_METAR_RESOLUTION={"VHHH"}` -> HK'de METAR-peak YOK (bu kara liste DEGIL). Panama = MPMG
+- **ERKEN GIRIS KIYASI (2026-11-23, KARAR KULLANICIDA):** replay (gercek Polymarket sonucu, 17 Kas kirli gun haric) erken ACIK -$132.24 / KAPALI +$14.67; canli giris <=0.50 -$44.66, >0.50 +$11.84. Kod DEGISMEDI; `EARLY_MAX_PRICE=0.50` duruyor
 - Bayat METAR (>45 dk): DERHAL yeniden cekim denenir; taze gelirse devam, gelmezse atla (aktif duzeltme)
 
 **3) Korumalar:** stale fiyat guard (CLOB, %15 sapma), orderbook.db stale guard yedegi, 45dk bayat METAR, PAPER MODE kalici (`_live_allowed=False`).
@@ -324,10 +326,12 @@ Degisiklik oldugunda bu bolumu de guncelle.
   4b. **`spread_max_entry=0.30`.** Backtest en iyi config (kayan pencere + 0.30
      -> +$53,284). 0.30 ustu fiyatli esiklere girilmez. (Onceden 0.99 denenmis,
      kullanici "fiyat onemsiz" demisti; sonra veri 0.30'u gosterdi.)
-- **Son suite durumu:** 797 passed, 8 skipped, 2 failed (2026-11-18 aksam, 892 sn). 2 hata
-  `TestPolymarketProxyLive` (o anda WARP SOCKS kopuktu; `warp_health.log` FAIL tick'leri); WARP
-  toparlaninca sinif tekrar kosuldu: 3/3 passed. Kod kaynakli hata yok. (Onceki: 784/6/0.)
+- **Son suite durumu:** 837 passed, 7 skipped, 0 failed (2026-11-23, 569 sn; Cowork METAR kurali +
+  hibrit replay + uretim-makinesi kapisi). (Onceki: 797/8/2 — 2026-11-18 aksam, 2 hata WARP kopuklugu.)
   (Ignore: test_betting_idempotency, test_comprehensive).
+- **Uretim makinesi kapisi (2026-11-23):** canli `bot.db`/WARP'i dogrulayan testler `live_bot_db` /
+  `production_host` fixture'larini kullanir (conftest): uretimde HER ZAMAN kosar (ariza = FAIL),
+  canli veri olmayan ortamda (Cowork/CI) acik nedenle atlanir. Canli DB'yi okuyan test `mode=ro` acar.
 - **Test DB izole:** `tests/conftest.py` temp DB'ye yonlendirir — suite bot
   CALISIYORKEN de production DB'ye dokunmaz. Yine de guvenli tarafta kalmak icin
   degisiklik sonrasi ilgili testler + full suite calistirilir.

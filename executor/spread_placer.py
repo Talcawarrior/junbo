@@ -267,7 +267,10 @@ def _place_spread_bets_inner(session, target_day) -> dict:
         # 2026-08-18 audit fix (C2): Python round() banker's (half-even) -> 26.5
         # bucket 26 verir, ama botun olasilik modeli 26.5'i bucket 27 (half-up)
         # sayar. Tutarli olmak icin half-up kullanilir.
-        center = int(fmean + 0.5) if fmean >= 0 else int(fmean - 0.5)
+        # 2026-11-22: Polymarket kurali floor(x + 0.5) (-8.5 -> -8).
+        from scrapers.metar import polymarket_round
+
+        center = polymarket_round(fmean)
         targets = set(range(center - radius, center + radius + 1))
 
         # KAYDIRMA KAPALI (2026-08-12 kullanici karari): merkez kayarsa bile
