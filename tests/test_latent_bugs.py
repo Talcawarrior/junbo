@@ -612,6 +612,14 @@ ALLOWED_DEAD = {
     "sqlite_connect",
     "sqlite_table_info",
     "utc_now",
+    # 2026-11-25: research/bl_maliyet_backtest.py (yerel, git'te izlenmiyor) —
+    # tek basina calisan Black-Litterman + maliyet arastirma betigi (CLI: build/run).
+    # Ic yardimcilari baska dosyadan cagrilmaz; census calisma agacini taradigi
+    # icin pre-commit coverage hook'unu kiriyordu.
+    "bucket_bounds",
+    "logit",
+    "ncdf",
+    "parse_outcome",
 }
 
 

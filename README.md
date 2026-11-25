@@ -1,6 +1,6 @@
 # Junbo - Self-Evolving Weather Prediction Bot
 
-**Port: 8091** | **Framework: FastAPI + Next.js** | **Dry-Run Mode: KALICI (DRY_RUN=true)**
+**Port: 8093** | **Framework: FastAPI + Next.js** | **Dry-Run Mode: KALICI (DRY_RUN=true)**
 
 **Son guncelleme:** 2026-10-04 | **Konum:** `C:\Users\fdemir\Documents\New project\junbo`
 
@@ -127,7 +127,7 @@ Copy-Item -Path "out\*" -Destination "dashboard\out\" -Recurse -Force
 
 # 4) Bot
 python main.py bot
-# Dashboard: http://127.0.0.1:8091 | API: http://127.0.0.1:8091/api/status
+# Dashboard: http://127.0.0.1:8093 | API: http://127.0.0.1:8093/api/status
 ```
 
 ### .env Onemli Degiskenler
@@ -145,7 +145,7 @@ python main.py bot
 | `CITY_CAP` | `4` | Sehir basina acik bet |
 | `FLAT_BET_USD` | `10.0` | Sabit bet tutari (Kelly override) |
 | `MAX_ENTRY_PRICE` | `0.99` | 0.99+ fiyata bet acilmaz |
-| `HOST` / `PORT` | `127.0.0.1` / `8091` | Sunucu |
+| `HOST` / `PORT` | `127.0.0.1` / `8093` | Sunucu |
 | `DB_PATH` | `D:\JUNBO data\bot.db` (.env) | Ana DB; repo `data/bot.db` ticaret icin KULLANILMAZ (eski kopya) |
 | `METAR_EARLY_ENTRY` | `false` | METAR-peak ERKEN giris (2026-11-23 kullanici karari: KAPALI). `false` = yalnizca 1-dusus kilidi + aktar; `true` = eski hibrit (ortalama peak saati + <=0.50 fiyatta dusussuz giris). Degisiklik restart ister |
 | `POLY_PROXY` | `socks5h://127.0.0.1:40000` | Polymarket SOCKS5 proxy — sistem PAC'i (`polymarket.pac`) WARP'a yonlendirir; **zorunlu** (2026-08-16: proxy yoksa bot `10054` alir, market cekemez) |
@@ -495,7 +495,7 @@ python main.py reset     # SIFIRLA (backup alir)
 - **Push kurallari:** `restore/05-clean-state` ana is akisi; ornegin dogrudan itmek yok.
 - **Codegraph sync:** Kod degisikliginden sonra `codegraph sync` (veya MCP `codegraph-plugin-sync`) — index guncel kalsin.
 - **Bot Restart (Full suite 0 failed ise ZORUNLU):**
-  1. Mevcut bot'u durdur: `GET /api/stop` veya `python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/stop')"`
+  1. Mevcut bot'u durdur: `GET /api/stop` veya `python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8093/stop')"`
   2. Bekle: `timeout /t 3 /nobreak >nul`
   3. Baslat: `start /B python main.py bot`
   4. Dogrula: `GET /api/status` → `is_running=true`
@@ -546,7 +546,7 @@ python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=test
 
 | Sorun | Cozum |
 |---|---|
-| Bot baslamiyor | `netstat -ano | findstr :8091`; python processleri temizle; `main.py bot` |
+| Bot baslamiyor | `netstat -ano | findstr :8093`; python processleri temizle; `main.py bot` |
 | Snapshot kaydi yok | `data/logs/data_watchdog.log` kontrol; `Start-ScheduledTask JunboSnapshot` |
 | Task Disabled | `data_watchdog` otomatik enable eder; elle: `Enable-ScheduledTask -TaskName ...` |
 | Orderbook veri yok | `python scripts/collect_orderbook.py` elle; sonra task'a don |
@@ -603,7 +603,7 @@ python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=test
 - **2026-10-12:** **Ekran rakamlari DB gercegine baglandi.** Rotation-kapanis `Bet.pnl` yazmiyordu (kapali toplam -409.10 vs -536.09 ayrismasi) -> kod + 414 satir backfill ile tek kaynak (`realized_pnl`); API status cift hesabi temizlendi; "Toplam sermaye" tooltip/formulu gercek hesaba cekildi (nakit + acik stake + acik PnL). Dogrulama: API 97.22 / 0.61 / 97.83 / fee 87.53 / nakit 1282.05 / acik 68 uyumlu; 18 test passed; bot restart.
 - **2026-08-18:** **GERCEKCI BACKTEST (look-ahead kapandi + fill dogrulandi).** Kullanici: "hani butun veriler elinde vardi, kazaniyor muyuz kayip mi ediyoruz, gercekci backtest yazamiyor musun, kac gunluk veriye ihtiyacin var." **CANLI GERCEK: KAYIP -$483.66** (1,452 bet; won +$743 / lost -$692 / closed -$220 / closed_early -$315). Kaybin ~%61'i longshot (<$0.10, 545 bet -$162) + 10-11 Agu eski-config gunleri -$286. **Backtest arizasi:** `gunluk` bot.db weather_forecasts okuyordu (ROTATED: 05-13 Agu hedefleri 14-Agu'da backfill) -> 06-13 Agu'yu botun goremedigi forecast'lerle oynuyordu (LOOK-AHEAD; eski +$415.97 yaniltici). **COZUM:** forecast `backtest.db` gercek gunluk batch'lerinden (02-18 Agu) + `fetched_at <= kapanis` kapisi; yeni `--real-entry` bayragi sim entry'sini ayni marketteki gercek bot fill'iyle degistirir (config sinirlari uygulanir). Duzeltilmis sonuc 05-17 Agu: **+$353.08** (173 bet, %71 winrate; ideal fill) ~ **+$354.41** (gercek-fill capraz) -> fill modeli optimistik DEGIL. Sim sadece fiyat verisi olan marketleri simule eder (173 vs canli 1,452 bet) — survivorship siniri. Veri: 02-18 Agu gercek batch (17 gun), kullanilabilir pencere 05-17 Agu; 30-60 gun istatistiksel guven icin ideal, Open-Meteo gecmis servis etmediginden sert limit. Rapor: `reports/backtest_gercekci_2026-08-18.md`; prob: `scripts/_probe_fill.py`.
 - **2026-08-18:** **1 DUSUS KILIT + AKTAR (kullanici stratejisi).** Kullanici: "20 21 22 22 21 diyorsa ikinci 21 ve altini bekleme 22 ye bet ac; 23 e cikarsa 22 yi kapa 23 e ac; 23 e ciktiginda 1 adet dusmesini beklemeyecek hemen acacak." Degisiklikler: (1) `detect_peak`/`peak_lock` 2 dusus -> **1 dusus** kilit (erken giris, fiyat 0.99'a oturmadan); (2) kilit bozulunca (cur_max > kilitli peak) eski betler kapatilir VE **yeni zirvenin bucket'ina dusus beklenmeden bet acilir** (aktar zinciri; canli `jobs/metar_peak.py` her dongude, backtest `metar_peak_live`/`gunluk` 2 adim). Backtest 05-17 Agu: `metar_peak_live` **202 bet %88.6 +$593.62 ROI +%98** (onceki 159 bet +$375.81); `gunluk` BIRLESIK **311 bet +$955.31 ROI +%120.5** (onceki +$471.54). Test: `test_metar_peak.py` 1-dusus kurali + kullanici ornegi (22 kilit), `TestMetarPeakBrokenLock` aktar dogrulamasi.
-- **2026-08-18:** **ONAYSIZ RESTART: `/api/restart` endpoint'i.** Kullanici: "onaysiz yap". Non-admin shell LocalSystem servisini durduramaz; `/api/stop` sureci cikarmaz. Cozum: `api.py`'de `/api/restart` — `os._exit(1)` ile kasitli cikis; SCM failure-recovery (JunboBot: RESTART 5s/10s/30s) sureci otomatik yeniden baslatir, guncel kod yuklenir. Kullanim: `curl -X POST http://127.0.0.1:8091/api/restart`. Endpoint'in canliya yuklenmesi icin bir kez admin restart gerekir; sonrasinda tum restart'lar onaysiz.
+- **2026-08-18:** **ONAYSIZ RESTART: `/api/restart` endpoint'i.** Kullanici: "onaysiz yap". Non-admin shell LocalSystem servisini durduramaz; `/api/stop` sureci cikarmaz. Cozum: `api.py`'de `/api/restart` — `os._exit(1)` ile kasitli cikis; SCM failure-recovery (JunboBot: RESTART 5s/10s/30s) sureci otomatik yeniden baslatir, guncel kod yuklenir. Kullanim: `curl -X POST http://127.0.0.1:8093/api/restart`. Endpoint'in canliya yuklenmesi icin bir kez admin restart gerekir; sonrasinda tum restart'lar onaysiz.
 - **2026-08-18:** **YENI CONFIG BACKTEST SONUCLARI (bias'siz peak + kilit-bozulma kapatmasi).** `gunluk` backtest yeni canli config'e cekildi: peak TUM sehirler (bias-top 40 kaldirildi) + kilitli peak ASILINCA asilma aninda kapatma (hem spread hem peak legi). 05-17 Agu: **SPREAD 96 bet +$126.64 | PEAK 116 bet %95.7 +$344.90 | BIRLESIK 212 bet %76.9 NET +$471.54** (eski bias-40'li +$353.08'den +$118 iyilesme). `metar_peak_live` da ayni kurala cekildi: 168 bet %83.3 **+$358.15** (onceki +$304.83; kilit-bozulma kapatmasi +$53 ekledi, winrate %79.2->%83.3). Bot 19:38 UTC'de restart edildi, yeni kod canlida.
 - **2026-08-18:** **MILAN ERKEN KILIT DUZELTMESI + METAR-PEAK BIAS FILTRESI KALDIRILDI.** Kullanici: "kapatma mekanizmasi yok ya koy; Metar betleri acilirken bias a gerek yok, nasil olsa peak tespit edilmis oluyor." Canli olay: Milan'da 31C kilitlendi, bet acildi, sonra 32C geldi — kapatma yeni zirvenin 2 dususle kilitlenmesini beklerken 31C fiyati 0.0005'e coktu (~-$3). Cozum: (1) kilitli peak ASILIRSA derhal kapat (2 dusus beklemeden, yeni cummax kazanan sayilir), kapatma kazanan-bucket marketi olmasa da cagrilir (sehir-gun basina bir kez); (2) **METAR-peak bias-top 40 sehir filtresi KALDIRILDI** — peak tespit edildigine gore bias gereksiz, TUM sehirlerin acik RANGE+max marketlerine bakilir. Not: koddaki "yerel saat 13" zaten YEREL saattir (Milan UTC+2: kilit 11:50 UTC = yerel 13:50; bet 12:26 UTC = yerel 14:26 — kural dogru calisti, sorun erken kilit teyidindeydi). Test: `TestMetarPeakBrokenLock` eklendi, bias testleri kaldirildi.
 - **2026-08-18:** **METAR 24 SAAT TOPLAMA + BACKFILL.** Kullanici: "24 saat veri topla bundan sonra ve backfill ile eksik gunleri tamamla." Sorun: METAR toplama yalnizca acik marketi olan (kapanisa >2h kalan) sehirlere bagliydi -> aksam ~22:00'den sonra duruyordu; 14 Agu arsivi sadece 1 sehir, 15-17 Agu akşam kesik. Cozum: `jobs/metar_peak.py::collect_metar_archive()` — metar_loop (30dk) icinden bet mantigindan bagimsiz, TUM sehirlerin bugunku METAR'ini idempotent arsivler (bot restart gerektirir — admin). Backfill: `scripts/backfill_metar_history.py` ile 14-17 Agu dolduruldu (14 Agu 1->49 sehir; tum gunler 23:58'e kadar tam). `metar_peak_live` backtest etkisi: 153->168 bet, NET **+$275.75 -> +$304.83**.

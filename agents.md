@@ -327,8 +327,9 @@ Degisiklik oldugunda bu bolumu de guncelle.
   4b. **`spread_max_entry=0.30`.** Backtest en iyi config (kayan pencere + 0.30
      -> +$53,284). 0.30 ustu fiyatli esiklere girilmez. (Onceden 0.99 denenmis,
      kullanici "fiyat onemsiz" demisti; sonra veri 0.30'u gosterdi.)
-- **Son suite durumu:** 842 passed, 7 skipped, 0 failed (2026-11-23, 705 sn; METAR erken giris kapali +
-  TestEarlyEntryDisabled). (Onceki: 837/7/0 ayni gun; 797/8/2 — 2026-11-18 aksam, 2 hata WARP kopuklugu.)
+- **Son suite durumu:** 843 passed, 6 skipped, 0 failed (2026-11-25; README port 8093 + ALLOWED_DEAD'e yerel
+  research betigi). (Onceki: 842/7/0 — 2026-11-23, 705 sn, METAR erken giris kapali + TestEarlyEntryDisabled;
+  837/7/0 ayni gun; 797/8/2 — 2026-11-18 aksam, 2 hata WARP kopuklugu.)
   (Ignore: test_betting_idempotency, test_comprehensive).
 - **Uretim makinesi kapisi (2026-11-23):** canli `bot.db`/WARP'i dogrulayan testler `live_bot_db` /
   `production_host` fixture'larini kullanir (conftest): uretimde HER ZAMAN kosar (ariza = FAIL),
