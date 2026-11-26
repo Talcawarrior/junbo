@@ -238,6 +238,7 @@ python -m pytest tests/test_accounting.py tests/test_settler_polymarket.py tests
 
 # 6) FULL suite (push oncesi)
 python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q
+# 2026-11-26 gercek: 849 passed, 6 skipped, 0 failed (615 sn; +6 warp_health testi: gamma-api/CloudFront yoklamasi).
 # 2026-11-25 gercek: 843 passed, 6 skipped, 0 failed (pre-commit hook secimi 840/6/0 [test_replay_engine haric]
 #   + test_replay_engine 3 passed; README port 8093, ALLOWED_DEAD'e yerel research betigi +4 isim).
 # 2026-11-23 (erken giris kapali) gercek: 842 passed, 7 skipped, 0 failed (705 sn; +TestEarlyEntryDisabled 4,
@@ -359,6 +360,7 @@ Hangi dosya hangi kurali korur:
 
 | Hata | Cozum |
 |---|---|
+| **WARP saglik betigi kismi arizayi goremiyordu (2026-11-26)** | 2026-11-25 aksam WARP Cloudflare disi hedeflere ulasamadi (CloudFront/Google/Quad9: SOCKS "Host unreachable"); `scripts/warp_health.ps1` yalnizca `cdn-cgi/trace` (Cloudflare) yokladigi icin 22:34'ten sonra "OK" dedi, bot gamma-api'ye ulasamadi, `TestPolymarketProxyLive` 2 test kirildi, reconnect elle yapildi. COZUM: ikinci yoklama `Test-GammaProxy` -- adres Cloudflare DoH (1.1.1.1, proxy uzerinden; `utils/poly_dns.py` ile ayni), `curl --resolve` + socks5://. `socks5h://` KULLANILMAZ: WARP adi makine hosts sabitlemesinden cozer -> Cloudflare 421, arizada da gecerdi (2026-11-26 olcumu). Herhangi bir HTTP durumu = ulasilabilir (Polymarket hatasi reconnect ile cozulmez); en fazla 2 adres (gorev siniri PT5M, en kotu ~2 dk). `Get-ProbeFailure` iki yoklamayi birlestirir; ilk yoklama, 5 sn tekrar ve reconnect sonrasi kontrol bunu kullanir; log satiri nedeni yazar. TEST: `tests/test_warp_health_script.py` 9 passed (+6: sahte "Host unreachable" SOCKS5 proxy ile iki ariza yolu, yalniz-gamma ariza = tick basarisiz, uretimde canli gecis); kopya betik simulasyonu FAIL #1 -> FAIL #2 + RECONNECT; gercek gorev `LastTaskResult=0`; tam suite 849 passed, 6 skipped, 0 failed. |
 | **Izlenmeyen research betigi dead-code census'unu kirdi, commit durdu (2026-11-25)** | `test_no_dead_public_functions` calisma agacindaki TUM `.py` dosyalarini tarar (git'te izlenmeyenler dahil). Yerel arastirma betigi `research/bl_maliyet_backtest.py` (2026-11-24, izlenmiyor) 4 ic yardimcisi (`bucket_bounds`, `logit`, `ncdf`, `parse_outcome`) baska dosyada referans gormedigi icin pre-commit `coverage-threshold` hook'u 1 failed verdi; README port duzeltmesi (8091 -> 8093; kod, `.env`, `watchdog.py`, `service.ps1` zaten 8093) commit'lenemedi. COZUM: 4 isim `ALLOWED_DEAD`'e eklendi (`research/ou_model.py` ile ayni kural: tek basina calisan betik yardimcilari). TEST: `tests/test_latent_bugs.py` + `tests/test_replay_engine.py` 8 passed; tam suite 843 passed, 6 skipped, 0 failed. |
 | **METAR-peak ERKEN giris zarar ettiriyordu -> KAPATILDI (2026-11-23, kullanici karari "Evet, kapat")** | Ucuz (<=0.50) erken betler zirveden 0-3.4 saat ONCE aciliyor, sicaklik 1-3 derece daha yukselince aktar zinciri onlari ~0.01 bid'den kapatiyordu; ayrica gunluk 15'lik cap'i erken doldurup sonraki kilit betlerini engelliyordu. Kanit: replay (gercek Polymarket sonucu, bilgi-sonrasi fiyat, 17 Kas haric) erken ACIK 197 bet -$132.24 / KAPALI 37 bet +$14.67; iyimser fiyat varsayiminda da ayni yon (+$225.88 vs +$391.85); canli giris <=0.50 155 bet -$44.66, >0.50 40 bet +$11.84. Cozum: `StrategyConfig.metar_early_entry=False` (env `METAR_EARLY_ENTRY`, `1/true/yes/on`); `run_metar_peak_bets` bayrak kapaliyken `_avg_peak_hour`'u HIC cagirmaz -> mevcut "gecmis yok" dali = 1-dusus kilidi (30 dk onay) + aktar. `EARLY_MAX_PRICE` kodda durur. Replay hibrit modu varsayilan olarak canli bayragi izler (`--early`/`--no-early`). Test: `TestEarlyEntryDisabled` (4) — varsayilan kapali, env ile acilir, kilitsiz bet yok + `_avg_peak_hour` cagrilmaz, kilitle bet var; erken yolu kullanan 7 eski test bayragi acikca acar; `test_replay_default_follows_live_early_setting`. |
 | **Polymarket METAR cozum kurali degisti, bot eski kuralla okuyordu (2026-11-22/23, Cowork yamasi)** | Polymarket 2026-10-23'ten itibaren (Panama 10 Kas) HK disindaki tum sehirleri **aviationweather.gov RUTIN METAR** ile cozer: SPECI sayilmaz; deger RMK **T grubu** (onda bir, `T01390133` -> 13.9C), yoksa govdedeki tam sayi (`M11/M17` -> -11); yuvarlama **tam yarim yukari** `floor(x+0.5)` (-8.5 -> -8). Bot SPECI'yi sayiyordu (15 gunde KHOU/KLGA max, FACT/KLAX/RPLL/SBGR min farkli cikti) ve `int(x+0.5)` / simetrik `int(x-0.5)` negatif yarimlarda yanlis bucket veriyordu. Cozum: `scrapers/metar.py` `polymarket_round`, `_parse_metar_temp`, `_is_speci` (fetch'te SPECI atilir); METAR-peak, spread ve replay ayni `polymarket_round`'u kullanir; Panama `MPTO` -> `MPMG` (market metni); Hong Kong HKO ile cozuldugu icin `jobs/metar_peak.py` `NON_METAR_RESOLUTION={"VHHH": ...}` — HK'de METAR-peak bet ACILMAZ (canli HK 30 bet / 6 kazanc / -$23.89). Bu kara liste DEGILDIR; `METAR_PEAK_BLACKLIST` bos kalir. Test: `tests/test_polymarket_metar_rule.py` + `test_metar_peak_*` (+23). Not: gecis gunu arsivde restart oncesi SPECI satirlari kalabilir (`_merged_day_rows`), ertesi gun temizdir. |
@@ -782,7 +784,7 @@ Bir ariza ile karsilasildiginda once buraya bak, sonra gerekirse kod kanitlarini
   | Junbo-ActualsCollect | Ready, 6sa | gerceklesen hava |
   | Junbo-OrderbookCollect | Ready, 30dk | orderbook derinligi |
   | Junbo-SyncBacktest | Ready, 6sa | backtest.db senkron |
-  | JunboWARP | Ready, 5dk (2026-11-18) | `scripts\warp_health.ps1`: WARP proxy saglik + reconnect (mod degismez) |
+  | JunboWARP | Ready, 5dk (2026-11-18) | `scripts\warp_health.ps1`: WARP proxy saglik + reconnect (mod degismez); 2026-11-26: + gamma-api/CloudFront yoklamasi |
   | JunboBot / JunboBotBackup | Disabled (bilincli) | eski yontemler (bot = Windows servisi + JunboBotWatchdog) |
 - **Aksiyon:** Ready olmasi gereken bir gorev Disabled ise `schtasks /change /tn
   "\Gorev" /enable` ile ac, sonra log/Last Result dogrula.
@@ -988,6 +990,22 @@ Bir ariza ile karsilasildiginda once buraya bak, sonra gerekirse kod kanitlarini
   "uretim verisi yok" nedeniyle ATLANIR; uretim makinesinde her zaman kosar ve ariza FAIL verir.
 - **Kural:** canli DB'yi okuyan yeni testler bu fixture'i kullanir ve DB'yi `mode=ro` acar
   (`sqlite3.connect(yol)` rw modda yol yoksa bos DB dosyasi uretir).
+
+### S25. WARP kismi ariza: Cloudflare acik, Cloudflare disi kapali (2026-11-25)
+
+- **Belirti:** bot gamma-api'ye ulasamaz (SOCKS "Host unreachable"), yeni market gelmez;
+  `TestPolymarketProxyLive` FAIL. Buna ragmen `warp-cli status` "Connected, healthy" ve
+  `cdn-cgi/trace` `warp=on` doner.
+- **Neden:** WARP tuneli Cloudflare hedeflerine acik, Cloudflare disi cikis (CloudFront, Google,
+  Quad9) kopuk.
+- **Otomatik (2026-11-26+):** `scripts/warp_health.ps1` gamma-api yoklamasi tick'i basarisiz sayar;
+  2 tick sonra `warp-cli disconnect` + `connect` (15 dk cooldown, mod degismez). Log:
+  `FAIL #n gamma-api (CloudFront) unreachable through proxy`.
+- **Elle:** ayni iki komut; sonra DoH adresiyle `curl.exe --proxy socks5://127.0.0.1:40000
+  --resolve gamma-api.polymarket.com:443:<IP> https://gamma-api.polymarket.com/markets?limit=1`
+  200 dondurmeli. `warp-cli mode ...` ASLA calistirilmaz.
+- **Tuzak:** gamma-api'yi `socks5h://` veya sistem cozumleyicisiyle yoklamak hosts sabitlemesiyle
+  Cloudflare'a gider, 421 doner ve arizada da "ulasilir" gorunur.
 
 ---
 
