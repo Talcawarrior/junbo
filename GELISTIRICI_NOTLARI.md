@@ -238,6 +238,7 @@ python -m pytest tests/test_accounting.py tests/test_settler_polymarket.py tests
 
 # 6) FULL suite (push oncesi)
 python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q
+# 2026-11-26 aksam (odul kaydi turu) gercek: 866 passed, 6 skipped, 0 failed (648 sn; +6 test_poly_rewards_recorder).
 # 2026-11-26 (odul arastirmasi) gercek: 860 passed, 6 skipped, 0 failed (561 sn; +11 test_poly_rewards_formula).
 # 2026-11-26 gercek: 849 passed, 6 skipped, 0 failed (615 sn; +6 warp_health testi: gamma-api/CloudFront yoklamasi).
 # 2026-11-25 gercek: 843 passed, 6 skipped, 0 failed (pre-commit hook secimi 840/6/0 [test_replay_engine haric]
@@ -341,6 +342,7 @@ Hangi dosya hangi kurali korur:
 | `tests/test_bot_flow.py` | Gercek akis: forecast -> spread bet ac -> bet acik kalir (erken kapanis yok) |
 | `tests/test_real_flow.py` | Loop'lar gercek fonksiyonlarla: scan/settle/poller; update_prices -> settle zinciri |
 | `tests/test_poly_rewards_formula.py` | Polymarket odul formulu (arastirma, 2026-11-26): belge ornegi (Q_one), max spread / min size disi emir puansiz, Q_min tek taraf kurali [0.10,0.90], rakip Q_min ust siniri (2.000 rastgele maker bolunusu), duzeltilmis mid, tick yuvarlama + sermaye; kayit raporu olcekli tamsayi cozumu; backtest kova kenarlari (tam derece yuvarlamasi, F araliklari -> C) |
+| `tests/test_poly_rewards_recorder.py` | Odul kaydi dakikalik turu (2026-11-26 aksam): basarisiz `POST /books` tur butcesini (50 sn) asmaz; son tarih yokken tum denemeler yapilir ve son denemeden sonra beklenmez; once ornek sonra yenileme, ornek turun basladigi dakikaya yazilir (yenileme 45 sn surse de); yenileme hatasi ornegi dusurmez, sonraki tur yeniden dener; bos DB'de once yenileme (110 sn butce); ornek hatasi raporlanir, son tarih temizlenir |
 
 > **Erken kapanis mekanizmalari KALDIRILDI (2026-08-12):** `RiskConfig`, `run_risk_management`, `check_stop_loss`, `check_take_profit`, `check_trailing_stop`, `check_time_decay`, `check_early_exit`, `check_rebalance`, `check_model_reversal`, `_reopen_after_stop_loss`, `partial_tp_done` silindi. Betler yalnizca settlement'ta kapanir. Silinen testler: `test_active_risk_management.py`, `test_take_profit_comprehensive.py`, `test_risk_behavior.py`, `edge/test_sl_reopen_chain.py`, `scripts/replay_test.py`. Suite: **633 passed, 7 skipped**.
 
@@ -362,6 +364,7 @@ Hangi dosya hangi kurali korur:
 
 | Hata | Cozum |
 |---|---|
+| **Odul kaydi her hedef yenilemesinde 1 dakika, WARP kopuklugunda fazladan 1 dakika kaybediyordu (2026-11-26 aksam)** | Canli kayit (`Junbo-RewardsRecorder`) 03:48-17:30 kapsama %96.2; kayip 31 dakikanin 27'si hedef yenileme dakikasi: eski `_sample` yenilemeyi (~15-55 sn) ornekten ONCE yapiyor, `ts` yenilemeden sonra alindigi icin ornek sonraki dakikanin etiketini aliyor, sonraki tur `INSERT OR REPLACE` ile ustune yaziyordu. 17:19'dan sonra WARP aralikli koptu (kapsama %63.8): basarisiz tur `_post_books` 6 deneme + son denemeden sonra bosuna bekleme ile ~95 sn suruyor, gorev IgnoreNew oldugu icin sonraki dakikanin tetigi de atlaniyordu (HATA satirlari tam 2 dk arayla). COZUM: `_tick` -- once ornek (etiket = turun basladigi dakika, `_BUDGET_S`=50 sn), sonra gerekiyorsa yenileme (`_REFRESH_BUDGET_S`=110 sn; 50 sn ile sinirlanan ilk elle denemede bos DB yenilemesi sigmadi -> yavas yenileme ertelenmesin, en fazla sonraki dakika atlansin); yenileme hatasi ornegi dusurmez, eski hedeflerle devam edilir. `poly_rewards_scan._retrying`: istek zaman asimi + beklemeler `_DEADLINE`'i asmaz, son denemeden sonra beklenmez (tarama betigi son tarihsiz calisir). WARP kapaliyken kaybolan dakikalar geri gelmez (S26). TEST: `tests/test_poly_rewards_recorder.py` 6 test (ag + saat sahte); elle (scratch DB, gercek API) dolu DB + yenileme 30.8 sn, bos DB 39 sn; canli 23:00 yenileme turunda dakika korundu (22:40-23:01 eksik yok); tam suite 866 passed, 6 skipped, 0 failed. |
 | **WARP saglik betigi kismi arizayi goremiyordu (2026-11-26)** | 2026-11-25 aksam WARP Cloudflare disi hedeflere ulasamadi (CloudFront/Google/Quad9: SOCKS "Host unreachable"); `scripts/warp_health.ps1` yalnizca `cdn-cgi/trace` (Cloudflare) yokladigi icin 22:34'ten sonra "OK" dedi, bot gamma-api'ye ulasamadi, `TestPolymarketProxyLive` 2 test kirildi, reconnect elle yapildi. COZUM: ikinci yoklama `Test-GammaProxy` -- adres Cloudflare DoH (1.1.1.1, proxy uzerinden; `utils/poly_dns.py` ile ayni), `curl --resolve` + socks5://. `socks5h://` KULLANILMAZ: WARP adi makine hosts sabitlemesinden cozer -> Cloudflare 421, arizada da gecerdi (2026-11-26 olcumu). Herhangi bir HTTP durumu = ulasilabilir (Polymarket hatasi reconnect ile cozulmez); en fazla 2 adres (gorev siniri PT5M, en kotu ~2 dk). `Get-ProbeFailure` iki yoklamayi birlestirir; ilk yoklama, 5 sn tekrar ve reconnect sonrasi kontrol bunu kullanir; log satiri nedeni yazar. TEST: `tests/test_warp_health_script.py` 9 passed (+6: sahte "Host unreachable" SOCKS5 proxy ile iki ariza yolu, yalniz-gamma ariza = tick basarisiz, uretimde canli gecis); kopya betik simulasyonu FAIL #1 -> FAIL #2 + RECONNECT; gercek gorev `LastTaskResult=0`; tam suite 849 passed, 6 skipped, 0 failed. |
 | **Izlenmeyen research betigi dead-code census'unu kirdi, commit durdu (2026-11-25)** | `test_no_dead_public_functions` calisma agacindaki TUM `.py` dosyalarini tarar (git'te izlenmeyenler dahil). Yerel arastirma betigi `research/bl_maliyet_backtest.py` (2026-11-24, izlenmiyor) 4 ic yardimcisi (`bucket_bounds`, `logit`, `ncdf`, `parse_outcome`) baska dosyada referans gormedigi icin pre-commit `coverage-threshold` hook'u 1 failed verdi; README port duzeltmesi (8091 -> 8093; kod, `.env`, `watchdog.py`, `service.ps1` zaten 8093) commit'lenemedi. COZUM: 4 isim `ALLOWED_DEAD`'e eklendi (`research/ou_model.py` ile ayni kural: tek basina calisan betik yardimcilari). TEST: `tests/test_latent_bugs.py` + `tests/test_replay_engine.py` 8 passed; tam suite 843 passed, 6 skipped, 0 failed. |
 | **METAR-peak ERKEN giris zarar ettiriyordu -> KAPATILDI (2026-11-23, kullanici karari "Evet, kapat")** | Ucuz (<=0.50) erken betler zirveden 0-3.4 saat ONCE aciliyor, sicaklik 1-3 derece daha yukselince aktar zinciri onlari ~0.01 bid'den kapatiyordu; ayrica gunluk 15'lik cap'i erken doldurup sonraki kilit betlerini engelliyordu. Kanit: replay (gercek Polymarket sonucu, bilgi-sonrasi fiyat, 17 Kas haric) erken ACIK 197 bet -$132.24 / KAPALI 37 bet +$14.67; iyimser fiyat varsayiminda da ayni yon (+$225.88 vs +$391.85); canli giris <=0.50 155 bet -$44.66, >0.50 40 bet +$11.84. Cozum: `StrategyConfig.metar_early_entry=False` (env `METAR_EARLY_ENTRY`, `1/true/yes/on`); `run_metar_peak_bets` bayrak kapaliyken `_avg_peak_hour`'u HIC cagirmaz -> mevcut "gecmis yok" dali = 1-dusus kilidi (30 dk onay) + aktar. `EARLY_MAX_PRICE` kodda durur. Replay hibrit modu varsayilan olarak canli bayragi izler (`--early`/`--no-early`). Test: `TestEarlyEntryDisabled` (4) — varsayilan kapali, env ile acilir, kilitsiz bet yok + `_avg_peak_hour` cagrilmaz, kilitle bet var; erken yolu kullanan 7 eski test bayragi acikca acar; `test_replay_default_follows_live_early_setting`. |
@@ -721,7 +724,9 @@ walk-forward gercek-status yoludur).
   rekabet; rapor `reports/poly_rewards_scan_YYYYMMDD.md`), `research/poly_mm_reward_backtest.py` (hava dolum +
   ters secim; islem onbellegi `C:\JUNBO data\research\mm_trades_cache`, data-api v2 taker kayitlari),
   `research/poly_rewards_recorder.py` (dakikalik Q ozeti; `--report`). Formul yaklasimlari (duzeltilmis mid,
-  rakip Q_min ust siniri) betik basliklarinda.
+  rakip Q_min ust siniri) betik basliklarinda. Kayit turu (2026-11-26 aksam): ONCE ornek (etiket = turun
+  basladigi dakika, 50 sn butce), SONRA 30 dk'da bir hedef yenileme (110 sn butce; hata olursa eski hedeflerle
+  devam). Son tarih `poly_rewards_scan._DEADLINE` ile; tarama betiginde yok (sinirsiz).
 
 ### 12.10 Polymarket METAR Cozum Kurali (2026-10-23+, dogrulandi 2026-11-23)
 
@@ -1014,6 +1019,20 @@ Bir ariza ile karsilasildiginda once buraya bak, sonra gerekirse kod kanitlarini
   200 dondurmeli. `warp-cli mode ...` ASLA calistirilmaz.
 - **Tuzak:** gamma-api'yi `socks5h://` veya sistem cozumleyicisiyle yoklamak hosts sabitlemesiyle
   Cloudflare'a gider, 421 doner ve arizada da "ulasilir" gorunur.
+
+### S26. Odul kaydinda dakika bosluklari (2026-11-26)
+
+- **Belirti:** `C:\JUNBO data\poly_rewards_recorder.db` `samples` tablosunda eksik dakikalar; log'da
+  `HATA ornek RuntimeError: POST /books (... token) basarisiz (k/6 deneme, tur suresi doldu)`.
+- **Neden:** WARP aralikli kopuklugu; Polymarket'e yalniz WARP uzerinden erisilir. Ayni zaman diliminde
+  `logs\warp_health.log` `FAIL #n` gosterir (2026-11-26 17:19 sonrasi kapsama %64; son 9 gunde gunde 15-49 FAIL).
+- **Davranis (2026-11-26 aksam+):** ornek 50 sn icinde biter, sonraki dakika calisir; yenileme basarisizsa eski
+  hedeflerle devam edilir, sonraki tur yeniden dener. Kopukluk suresince kaybolan dakikalar geri gelmez;
+  `--report` eksik dakikalari ortalamaya katmaz.
+- **Elle:** kayit icin bir sey gerekmez; uzun kopuklukta S25 adimlari. Gorev durumu:
+  `Get-ScheduledTaskInfo Junbo-RewardsRecorder` (LastTaskResult 0 = son tur temiz, 1 = hata satiri log'da).
+- **Eski hata (duzeltildi, bolum 5):** yenileme ornekten once calisinca her yenilemede 1 dakika bos kaliyordu;
+  basarisiz tur ~95 sn surup sonraki dakikanin tetigini de yakiyordu.
 
 ---
 

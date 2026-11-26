@@ -11,6 +11,8 @@ Formul ve yaklasimlar: research/poly_rewards_scan.py basligi (resmi belge 2026-1
 
 Hedef kume (her 30 dk yenilenir): odullu TUM hava marketleri + diger kategorilerde gunluk orani en yuksek
 --top market (varsayilan 300). Tum 8.5 bin marketi dakikada bir cekmek ~46 MB/dk indirme eder; bu yuzden secim.
+Tur sirasi (2026-11-26 aksam duzeltmesi): ONCE ornek (etiket = turun basladigi dakika; istekler _BUDGET_S = 50 sn
+icinde biter, cunku gorev 1 dk'da bir tetiklenir ve IgnoreNew), SONRA gerekiyorsa hedef yenileme (_REFRESH_BUDGET_S).
 
 Kullanim:
   python research/poly_rewards_recorder.py --once              # tek ornek (zamanlanmis gorev icin)
@@ -40,6 +42,14 @@ import poly_rewards_scan as _scan  # noqa: E402  (ayni klasor; proxy + DNS ayari
 from utils.db_paths import get_data_dir  # noqa: E402
 
 _REFRESH_S = 1800
+# Tur butceleri (sn, t0'dan itibaren). Gorev 60 sn'de bir tetiklenir ve IgnoreNew: tur (import ~2.3 sn dahil)
+# 60 sn'yi asarsa sonraki tetik atlanir ve o dakika da kaybolur.
+#   ornek: _BUDGET_S icinde biter -> WARP kopuklugunda bile sonraki dakika calisir.
+#   yenileme (30 dk'da bir, ornekten SONRA): ~15-55 sn surer; 50 sn ile sinirlanirsa yavas anlarda surekli
+#   ertelenip gunluk yeni hava marketleri hedefe hic girmeyebilirdi -> _REFRESH_BUDGET_S'e kadar surebilir
+#   (uzun surerse yalnizca sonraki dakika atlanir).
+_BUDGET_S = 50.0
+_REFRESH_BUDGET_S = 110.0
 # Olcekler: fiyat x10000, Q x10, oran x100, v x10, tick x10000
 _PX, _QS, _RS, _VS = 10000, 10, 100, 10
 _SCHEMA = """
@@ -118,14 +128,16 @@ def _refresh_targets(con: sqlite3.Connection, top: int) -> int:
     return len(chosen)
 
 
-def _sample(con: sqlite3.Connection, top: int) -> tuple[int, int]:
+def _refresh_due(con: sqlite3.Connection) -> bool:
     row = con.execute("SELECT v FROM meta WHERE k='targets_refreshed_at'").fetchone()
-    if not row or time.time() - int(row[0]) > _REFRESH_S:
-        _refresh_targets(con, top)
+    return not row or time.time() - int(row[0]) > _REFRESH_S
+
+
+def _sample_minute(con: sqlite3.Connection, ts: int) -> tuple[int, int]:
+    """Hedef marketlerin defterini tek seferde ceker ve `ts` dakikasina yazar. Donus: (hedef, kayit)."""
     targets = con.execute(
         "SELECT t.id, m.yes_token, t.rate, t.v, t.min_size FROM targets t JOIN markets m ON m.id = t.id"
     ).fetchall()
-    ts = int(time.time() // 60 * 60)
     books = _scan._fetch_books(sorted({t[1] for t in targets}))
     out = []
     for mk, tok, rate, v, min_size in targets:
@@ -158,6 +170,44 @@ def _sample(con: sqlite3.Connection, top: int) -> tuple[int, int]:
     with con:
         con.executemany("INSERT OR REPLACE INTO samples VALUES (?,?,?,?,?,?,?,?,?,?,?)", out)
     return len(targets), len(out)
+
+
+def _tick(con: sqlite3.Connection, top: int, t0: float) -> tuple[int, int, list[str]]:
+    """Bir dakikalik tur: ONCE ornek (etiket = turun basladigi dakika), SONRA gerekiyorsa hedef yenileme.
+
+    2026-11-26 aksam duzeltmesi: yenileme (~15-55 sn) ornekten once calisinca ornek sonraki dakikanin etiketini
+    aliyor, sonraki tur da ayni etiketin ustune yaziyordu -> her yenilemede 1 dakika bos kaliyordu.
+    Yenileme basarisiz olursa eski hedeflerle devam edilir; zamani gecmis kaldigi icin sonraki tur (orneginden
+    sonra) yeniden dener. Ag istekleri ornekte t0 + _BUDGET_S'e, yenilemede t0 + _REFRESH_BUDGET_S'e kadar
+    (poly_rewards_scan._DEADLINE). Donus: (hedef, kayit, hata satirlari).
+    """
+    errors: list[str] = []
+
+    def note(step: str, exc: Exception) -> None:
+        errors.append(f"{step} {type(exc).__name__}: {str(exc)[:300]}")
+
+    def refresh() -> None:
+        _scan._DEADLINE = t0 + _REFRESH_BUDGET_S
+        try:
+            _refresh_targets(con, top)
+        except Exception as exc:  # noqa: BLE001 - eski hedeflerle devam; log + LastTaskResult ile gorunur
+            note("yenileme", exc)
+
+    n_t = n_s = 0
+    _scan._DEADLINE = t0 + _BUDGET_S
+    try:
+        first = con.execute("SELECT 1 FROM targets LIMIT 1").fetchone() is None
+        if first:
+            refresh()  # bos DB: hedef listesi olmadan ornek alinamaz (bu turun dakikasi zaten gecikti)
+        try:
+            n_t, n_s = _sample_minute(con, int(t0 // 60 * 60))
+        except Exception as exc:  # noqa: BLE001 - kayip dakika log + LastTaskResult ile gorunur
+            note("ornek", exc)
+        if not first and _refresh_due(con):
+            refresh()
+    finally:
+        _scan._DEADLINE = None
+    return n_t, n_s, errors
 
 
 def _report(con: sqlite3.Connection, capital: float, out_path: Path) -> None:
@@ -224,14 +274,14 @@ def main() -> None:
     failed = 0
     for i in range(runs):
         t0 = time.time()
-        try:
-            n_t, n_s = _sample(con, args.top)
-        except Exception as exc:  # noqa: BLE001 - gorev sonucu (LastTaskResult) + log ile gorunur
+        n_t, n_s, errors = _tick(con, args.top, t0)
+        for err in errors:
+            _log(f"HATA {err}")  # gorev sonucu (LastTaskResult=1) + log ile gorunur
+        if errors:
             failed += 1
-            _log(f"HATA {type(exc).__name__}: {str(exc)[:300]}")
-            n_t = n_s = 0
         print(
-            f"{dt.datetime.now():%H:%M:%S} ornek {i + 1}/{runs}: hedef {n_t}, kayit {n_s}, {time.time() - t0:.1f} sn",
+            f"{dt.datetime.now():%H:%M:%S} ornek {i + 1}/{runs}: hedef {n_t}, kayit {n_s}, {time.time() - t0:.1f} sn"
+            + (f", hata {len(errors)}" if errors else ""),
             flush=True,
         )
         if i + 1 < runs:

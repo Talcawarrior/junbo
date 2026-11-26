@@ -36,6 +36,7 @@ import math
 import statistics
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -73,34 +74,55 @@ _TAGS = [
 ]
 
 
-def _get(path: str, params: dict | None = None, tries: int = 6):
+# Mutlak son tarih (time.time()); None = sinirsiz (tarama betigi boyle calisir). poly_rewards_recorder her
+# dakikalik turda kurar: gorev 60 sn'de bir tetiklenir ve IgnoreNew; 60 sn'yi asan tur sonraki dakikayi da
+# kaybettirir (2026-11-26: WARP kopuklugunda 6 deneme + son denemeden sonra bosuna bekleme ~95 sn suruyordu).
+_DEADLINE: float | None = None
+_MIN_LEFT = 3.0  # son tarihe bundan az kaldiysa yeni deneme baslatilmaz
+
+
+def _left() -> float:
+    """Son tarihe kalan saniye (sinir yoksa sonsuz)."""
+    return math.inf if _DEADLINE is None else _DEADLINE - time.time()
+
+
+def _retrying(send: Callable[[float], requests.Response], what: str, tries: int, timeout: float) -> Any:
+    """Gecici hatada (WARP anlik kopuklugu, 429, 5xx, bozuk JSON) artan beklemeyle yeniden dener.
+
+    Istek zaman asimi ve beklemeler _DEADLINE'i asmaz; son denemeden sonra beklenmez.
+    """
+    done = 0
     for attempt in range(tries):
+        if _left() < _MIN_LEFT:
+            break
+        done += 1
         try:
-            r = requests.get(CLOB + path, params=params, proxies=_PX, headers=_UA, timeout=60)
-            if r.status_code == 429 or r.status_code >= 500:
-                time.sleep(3 * (attempt + 1))
-                continue
-            r.raise_for_status()
-            return r.json()
+            r = send(min(timeout, _left()))
+            if r.status_code != 429 and r.status_code < 500:
+                r.raise_for_status()
+                return r.json()
         except (requests.RequestException, ValueError):
-            time.sleep(3 * (attempt + 1))  # WARP anlik kopuklugu / gecici hata
-    raise RuntimeError(f"GET {path} {tries} denemede basarisiz")
+            pass
+        if attempt + 1 < tries:
+            time.sleep(max(0.0, min(3.0 * (attempt + 1), _left() - _MIN_LEFT)))
+    late = ", tur suresi doldu" if done < tries else ""
+    raise RuntimeError(f"{what} basarisiz ({done}/{tries} deneme{late})")
+
+
+def _get(path: str, params: dict | None = None, tries: int = 6) -> Any:
+    def send(t: float) -> requests.Response:
+        return requests.get(CLOB + path, params=params, proxies=_PX, headers=_UA, timeout=t)
+
+    return _retrying(send, f"GET {path}", tries, 60.0)
 
 
 def _post_books(token_ids: list[str], tries: int = 6) -> list[dict]:
-    for attempt in range(tries):
-        try:
-            r = requests.post(
-                CLOB + "/books", json=[{"token_id": t} for t in token_ids], proxies=_PX, headers=_UA, timeout=90
-            )
-            if r.status_code == 429 or r.status_code >= 500:
-                time.sleep(3 * (attempt + 1))
-                continue
-            r.raise_for_status()
-            return r.json()
-        except (requests.RequestException, ValueError):
-            time.sleep(3 * (attempt + 1))
-    raise RuntimeError(f"POST /books ({len(token_ids)} token) basarisiz")
+    body = [{"token_id": t} for t in token_ids]
+
+    def send(t: float) -> requests.Response:
+        return requests.post(CLOB + "/books", json=body, proxies=_PX, headers=_UA, timeout=t)
+
+    return _retrying(send, f"POST /books ({len(token_ids)} token)", tries, 90.0)
 
 
 def _pages(path: str, params: dict, stop=None):
