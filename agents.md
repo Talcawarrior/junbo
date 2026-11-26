@@ -280,6 +280,11 @@ Degisiklik oldugunda bu bolumu de guncelle.
   Cloudflare trace + gamma-api/CloudFront [DoH adresi + `curl --resolve`, socks5://], biri basarisizsa
   tick basarisiz). (f) `gamma-api` HTTP 421
   makine hosts sabitlemesinden gelir; bot `utils/poly_dns.py` (DoH) ile asar -- WARP arizasi sanma.
+- **ARASTIRMA GOREVI (2026-11-26, kullanici "Evet, kur"):** `Junbo-RewardsRecorder` dakikada bir (14 gun,
+  2026-12-10'a kadar; kullanici oturumu, `pythonw`) `research/poly_rewards_recorder.py --once` ile Polymarket
+  likidite odulu rekabetini kaydeder -- EMIR YOK, paper kurali degismez. DB `C:\JUNBO data\poly_rewards_recorder.db`
+  (~46 MB/gun, yedege girmez), log `logs\poly_rewards_recorder.log`; sonuc
+  `python research/poly_rewards_recorder.py --report`. Bot kodu/servisiyle ilgisi yok (bot restart gerekmez).
 - **DOGRULANMIS BULGULAR (2026-08-11, kullanici tespiti):**
   1. **Yeni-market fast mode GUN BAZLI olmalidir, sayi bazli DEGIL.** Gun dongusu:
      bugunun marketleri kapanir, 2-gun-sonrasi acilir -> toplam market sayisi
@@ -329,8 +334,9 @@ Degisiklik oldugunda bu bolumu de guncelle.
   4b. **`spread_max_entry=0.30`.** Backtest en iyi config (kayan pencere + 0.30
      -> +$53,284). 0.30 ustu fiyatli esiklere girilmez. (Onceden 0.99 denenmis,
      kullanici "fiyat onemsiz" demisti; sonra veri 0.30'u gosterdi.)
-- **Son suite durumu:** 849 passed, 6 skipped, 0 failed (2026-11-26, 615 sn; WARP saglik betigine gamma-api
-  yoklamasi +6 test). (Onceki: 843/6/0 -- 2026-11-25, README port 8093 + ALLOWED_DEAD'e yerel research betigi;
+- **Son suite durumu:** 860 passed, 6 skipped, 0 failed (2026-11-26, 561 sn; Polymarket odul arastirmasi
+  +11 test). (Onceki: 849/6/0 -- 2026-11-26, 615 sn, WARP saglik betigine gamma-api yoklamasi +6 test;
+  843/6/0 -- 2026-11-25, README port 8093 + ALLOWED_DEAD'e yerel research betigi;
   842/7/0 — 2026-11-23, 705 sn, METAR erken giris kapali + TestEarlyEntryDisabled;
   837/7/0 ayni gun; 797/8/2 — 2026-11-18 aksam, 2 hata WARP kopuklugu.)
   (Ignore: test_betting_idempotency, test_comprehensive).

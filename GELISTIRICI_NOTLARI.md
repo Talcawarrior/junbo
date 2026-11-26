@@ -238,6 +238,7 @@ python -m pytest tests/test_accounting.py tests/test_settler_polymarket.py tests
 
 # 6) FULL suite (push oncesi)
 python -m pytest tests/ --ignore=tests/test_betting_idempotency.py --ignore=tests/test_comprehensive.py --tb=short -q
+# 2026-11-26 (odul arastirmasi) gercek: 860 passed, 6 skipped, 0 failed (561 sn; +11 test_poly_rewards_formula).
 # 2026-11-26 gercek: 849 passed, 6 skipped, 0 failed (615 sn; +6 warp_health testi: gamma-api/CloudFront yoklamasi).
 # 2026-11-25 gercek: 843 passed, 6 skipped, 0 failed (pre-commit hook secimi 840/6/0 [test_replay_engine haric]
 #   + test_replay_engine 3 passed; README port 8093, ALLOWED_DEAD'e yerel research betigi +4 isim).
@@ -339,6 +340,7 @@ Hangi dosya hangi kurali korur:
 | `tests/test_bet_behavior.py` | Acilis: oglen sonrasi bugunku market acilabilir (kapanis 24:00); kapanis gectiyse kapali; 20h+ kala kapali; fiyat gate [0.10,0.95); duplicate yok; nakit siniri; grup basina tek bet; rotation threshold |
 | `tests/test_bot_flow.py` | Gercek akis: forecast -> spread bet ac -> bet acik kalir (erken kapanis yok) |
 | `tests/test_real_flow.py` | Loop'lar gercek fonksiyonlarla: scan/settle/poller; update_prices -> settle zinciri |
+| `tests/test_poly_rewards_formula.py` | Polymarket odul formulu (arastirma, 2026-11-26): belge ornegi (Q_one), max spread / min size disi emir puansiz, Q_min tek taraf kurali [0.10,0.90], rakip Q_min ust siniri (2.000 rastgele maker bolunusu), duzeltilmis mid, tick yuvarlama + sermaye; kayit raporu olcekli tamsayi cozumu; backtest kova kenarlari (tam derece yuvarlamasi, F araliklari -> C) |
 
 > **Erken kapanis mekanizmalari KALDIRILDI (2026-08-12):** `RiskConfig`, `run_risk_management`, `check_stop_loss`, `check_take_profit`, `check_trailing_stop`, `check_time_decay`, `check_early_exit`, `check_rebalance`, `check_model_reversal`, `_reopen_after_stop_loss`, `partial_tp_done` silindi. Betler yalnizca settlement'ta kapanir. Silinen testler: `test_active_risk_management.py`, `test_take_profit_comprehensive.py`, `test_risk_behavior.py`, `edge/test_sl_reopen_chain.py`, `scripts/replay_test.py`. Suite: **633 passed, 7 skipped**.
 
@@ -715,6 +717,11 @@ walk-forward gercek-status yoludur).
   backtest.db gercek batch'lerinden + fetched_at<=kapanis kapisi) ve `--real-entry`
   bayragi eklendi (gercek bot fill'iyle capraz dogrulama). Detay ve sayilar:
   `reports/backtest_gercekci_2026-08-18.md`.
+- Polymarket likidite odulu (2026-11-26): `research/poly_rewards_scan.py` (tum odullu marketler + anlik
+  rekabet; rapor `reports/poly_rewards_scan_YYYYMMDD.md`), `research/poly_mm_reward_backtest.py` (hava dolum +
+  ters secim; islem onbellegi `C:\JUNBO data\research\mm_trades_cache`, data-api v2 taker kayitlari),
+  `research/poly_rewards_recorder.py` (dakikalik Q ozeti; `--report`). Formul yaklasimlari (duzeltilmis mid,
+  rakip Q_min ust siniri) betik basliklarinda.
 
 ### 12.10 Polymarket METAR Cozum Kurali (2026-10-23+, dogrulandi 2026-11-23)
 
@@ -785,6 +792,7 @@ Bir ariza ile karsilasildiginda once buraya bak, sonra gerekirse kod kanitlarini
   | Junbo-OrderbookCollect | Ready, 30dk | orderbook derinligi |
   | Junbo-SyncBacktest | Ready, 6sa | backtest.db senkron |
   | JunboWARP | Ready, 5dk (2026-11-18) | `scripts\warp_health.ps1`: WARP proxy saglik + reconnect (mod degismez); 2026-11-26: + gamma-api/CloudFront yoklamasi |
+  | Junbo-RewardsRecorder | Ready, 1dk, 14 gun (2026-11-26 -> 2026-12-10) | `research\poly_rewards_recorder.py --once`: Polymarket odul rekabeti kaydi (arastirma, emir YOK); kullanici oturumu + pythonw; hata -> `logs\poly_rewards_recorder.log` + LastTaskResult=1 |
   | JunboBot / JunboBotBackup | Disabled (bilincli) | eski yontemler (bot = Windows servisi + JunboBotWatchdog) |
 - **Aksiyon:** Ready olmasi gereken bir gorev Disabled ise `schtasks /change /tn
   "\Gorev" /enable` ile ac, sonra log/Last Result dogrula.
